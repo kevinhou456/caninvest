@@ -54,7 +54,7 @@ def check_and_initialize_database(app):
                     print("✅ 演示数据创建完成")
                 
                 print("🎉 数据库初始化完成！系统已准备就绪")
-                print("🌐 访问地址: http://localhost:5000")
+                print("🌐 访问地址: http://localhost:5050")
                 
             else:
                 print("✅ 数据库已存在，跳过初始化")
@@ -107,7 +107,7 @@ if __name__ == '__main__':
     # 启动前自动检查并初始化数据库
     if check_and_initialize_database(app):
         print("🚀 启动应用服务器...")
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        app.run(host='0.0.0.0', port=5050, debug=True)
     else:
         print("❌ 应用启动失败")
         sys.exit(1)
