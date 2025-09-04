@@ -355,77 +355,9 @@ class InitializationService:
                 db.session.flush()
             created_stocks[stock_data['symbol']] = stock
         
-        # 创建一些演示交易
-        demo_transactions = [
-            # John's TFSA
-            {
-                'account_id': tfsa_john.id,
-                'stock_id': created_stocks['SHOP.TO'].id,
-                'member_id': john.id,
-                'transaction_type': 'BUY',
-                'quantity': 50,
-                'price_per_share': 120.50,
-                'transaction_fee': 9.99,
-                'transaction_date': date(2024, 1, 15),
-                'notes': 'Initial investment in Canadian tech stock'
-            },
-            {
-                'account_id': tfsa_john.id,
-                'stock_id': created_stocks['TD.TO'].id,
-                'member_id': john.id,
-                'transaction_type': 'BUY',
-                'quantity': 100,
-                'price_per_share': 85.25,
-                'transaction_fee': 9.99,
-                'transaction_date': date(2024, 2, 10),
-                'notes': 'Diversifying into Canadian banking'
-            },
-            # Joint RRSP
-            {
-                'account_id': rrsp_joint.id,
-                'stock_id': created_stocks['VGRO.TO'].id,
-                'member_id': john.id,
-                'transaction_type': 'BUY',
-                'quantity': 200,
-                'price_per_share': 28.75,
-                'transaction_fee': 9.99,
-                'transaction_date': date(2024, 1, 20),
-                'notes': 'Long-term retirement savings in diversified ETF'
-            },
-            # Regular account (USD)
-            {
-                'account_id': regular_account.id,
-                'stock_id': created_stocks['AAPL'].id,
-                'member_id': jane.id,
-                'transaction_type': 'BUY',
-                'quantity': 25,
-                'price_per_share': 175.80,
-                'transaction_fee': 5.00,
-                'transaction_date': date(2024, 1, 25),
-                'exchange_rate': 1.3456,
-                'notes': 'Investment in US tech giant'
-            },
-            {
-                'account_id': regular_account.id,
-                'stock_id': created_stocks['VTI'].id,
-                'member_id': jane.id,
-                'transaction_type': 'BUY',
-                'quantity': 100,
-                'price_per_share': 245.30,
-                'transaction_fee': 5.00,
-                'transaction_date': date(2024, 2, 15),
-                'exchange_rate': 1.3421,
-                'notes': 'Broad market US exposure'
-            }
-        ]
-        
-        for txn_data in demo_transactions:
-            transaction = Transaction(**txn_data)
-            db.session.add(transaction)
-            db.session.flush()
-            
-            # 更新持仓
-            transaction.update_holdings()
+        # 不创建演示交易记录，保持系统初始化时的干净状态
+        # 用户可以根据需要手动添加交易记录
+        print("  跳过演示交易创建，保持记录为空")
         
         db.session.commit()
         print("  演示家庭数据创建完成！")

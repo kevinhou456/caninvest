@@ -18,7 +18,10 @@
                 <th>{{ _('Stock') }}</th>
                 <th>{{ _('Quantity') }}</th>
                 <th>{{ _('Price') }}</th>
+                <th>{{ _('Currency') }}</th>
+                <th>{{ _('Fee') }}</th>
                 <th>{{ _('Account') }}</th>
+                <th>{{ _('Notes') }}</th>
                 <th>{{ _('Actions') }}</th>
             </tr>
         </thead>
@@ -27,16 +30,21 @@
             <tr>
                 <td>{{ transaction.transaction_date.strftime('%Y-%m-%d') }}</td>
                 <td>
-                    {% if transaction.transaction_type == 'buy' %}
+                    {% if transaction.transaction_type == 'BUY' %}
                         <span class="badge bg-success">{{ _('Buy') }}</span>
                     {% else %}
                         <span class="badge bg-danger">{{ _('Sell') }}</span>
                     {% endif %}
                 </td>
                 <td>{{ transaction.stock.symbol if transaction.stock else '-' }}</td>
-                <td>{{ transaction.quantity }}</td>
-                <td>${{ "%.2f"|format(transaction.price_per_share) }}</td>
+                <td>{{ "%.4f"|format(transaction.quantity) }}</td>
+                <td>{{ "%.2f"|format(transaction.price_per_share) }}</td>
+                <td>{{ transaction.account.currency if transaction.account else '-' }}</td>
+                <td>{{ "%.2f"|format(transaction.transaction_fee) if transaction.transaction_fee else '0.00' }}</td>
                 <td>{{ transaction.account.name if transaction.account else '-' }}</td>
+                <td>
+                    <span class="text-truncate d-inline-block" style="max-width: 150px;" title="{{ transaction.notes or '' }}">{{ transaction.notes or '-' }}</span>
+                </td>
                 <td>
                     <div class="btn-group btn-group-sm">
                         <a href="{{ url_for('main.transaction_detail', transaction_id=transaction.id) }}" 
