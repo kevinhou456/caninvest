@@ -328,7 +328,8 @@ def transactions():
     return render_template('transactions/list.html',
                          title=_('Transactions'),
                          transactions=transactions,
-                         accounts=accounts)
+                         accounts=accounts,
+                         current_view='transactions')
 
 
 @bp.route('/transactions/create')
