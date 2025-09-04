@@ -1,0 +1,47 @@
+{% extends "base/base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <h2 class="mb-4">{{ _('Preferences') }}</h2>
+        
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">{{ _('Language Settings') }}</h5>
+                <p class="card-text text-muted">{{ _('Choose your preferred language for the interface') }}</p>
+                
+                <div class="d-flex gap-3">
+                    <a href="?lang=en" class="btn {% if get_current_language() == 'en' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                        <i class="fas fa-globe me-2"></i>English
+                    </a>
+                    <a href="?lang=zh_CN" class="btn {% if get_current_language() == 'zh_CN' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                        <i class="fas fa-globe me-2"></i>简体中文
+                    </a>
+                </div>
+                
+                <hr class="my-4">
+                
+                <h5 class="card-title">{{ _('System Information') }}</h5>
+                <dl class="row">
+                    <dt class="col-sm-4">{{ _('Current Language') }}</dt>
+                    <dd class="col-sm-8">
+                        {% if get_current_language() == 'zh_CN' %}
+                            简体中文 (zh_CN)
+                        {% else %}
+                            English (en)
+                        {% endif %}
+                    </dd>
+                    
+                    <dt class="col-sm-4">{{ _('Version') }}</dt>
+                    <dd class="col-sm-8">1.0.0</dd>
+                    
+                    <dt class="col-sm-4">{{ _('System Status') }}</dt>
+                    <dd class="col-sm-8">
+                        <span class="badge bg-success">{{ _('Running') }}</span>
+                    </dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

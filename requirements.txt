@@ -1,0 +1,16 @@
+# Flask核心
+Flask==2.3.3
+Flask-SQLAlchemy==3.0.5
+Flask-Migrate==4.0.4
+Flask-CORS==4.0.0
+Flask-Babel==2.0.0
+
+# 数据库
+SQLAlchemy==1.4.53
+
+# 数据处理
+requests==2.31.0
+
+# 基本工具库
+python-dotenv==1.0.0
+click==8.1.7

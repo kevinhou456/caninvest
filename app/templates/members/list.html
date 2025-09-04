@@ -1,0 +1,186 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="d-flex align-items-center">
+            {{ family.name }} - {{ _('Family Members') }}
+            <button class="btn btn-outline-secondary btn-sm ms-2" onclick="editFamilyName()" title="{{ _('Edit Family Name') }}">
+                <i class="fas fa-edit"></i>
+            </button>
+        </h2>
+        <p class="text-muted">{{ _('Manage your family members') }}</p>
+    </div>
+    <button type="button" class="btn btn-primary" onclick="showAddMemberModal()">
+        <i class="fas fa-user-plus me-2"></i>{{ _('Add Member') }}
+    </button>
+</div>
+
+{% if members %}
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>{{ _('ID') }}</th>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Created') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for member in members|sort(attribute='id') %}
+                    <tr>
+                        <td>{{ member.id }}</td>
+                        <td>
+                            <i class="fas fa-user-circle text-primary me-2"></i>{{ member.name }}
+                        </td>
+                        <td>{{ member.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" 
+                                        onclick="showEditMemberModal({{ member.id }}, '{{ member.name }}')">
+                                    {{ _('Edit') }}
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" 
+                                        onclick="confirmDeleteMember({{ member.id }}, '{{ member.name }}')">
+                                    {{ _('Delete') }}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="text-center py-5">
+    <i class="fas fa-users fa-3x text-muted mb-3"></i>
+    <h4>{{ _('No family members added yet') }}</h4>
+    <p class="text-muted">{{ _('Add your first family member to get started with tracking investments') }}</p>
+    <a href="{{ url_for('main.create_member') }}" class="btn btn-primary">
+        <i class="fas fa-user-plus me-2"></i>{{ _('Add First Member') }}
+    </a>
+</div>
+{% endif %}
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-info-circle me-2"></i>{{ _('About Family Members') }}
+                </h5>
+                <p class="card-text text-muted">
+                    {{ _('Family members can have individual investment accounts while being part of the same family unit. This allows you to track separate TFSA, RRSP, and other account limits while maintaining a consolidated family view of your investments.') }}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Family Name Edit Modal -->
+<div class="modal fade" id="editFamilyNameModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('main.edit_family', family_id=family.id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">{{ _('Edit Family Name') }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="familyName" class="form-label">{{ _('Family Name') }}</label>
+                        <input type="text" class="form-control" name="name" id="familyName" value="{{ family.name }}" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-primary">{{ _('Save') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Add Member Modal -->
+<div class="modal fade" id="addMemberModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('main.create_member') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">{{ _('Add Family Member') }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="memberName" class="form-label">{{ _('Member Name') }}</label>
+                        <input type="text" class="form-control" name="name" id="memberName" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-primary">{{ _('Add Member') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Member Modal -->
+<div class="modal fade" id="editMemberModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" id="editMemberForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">{{ _('Edit Family Member') }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="editMemberName" class="form-label">{{ _('Member Name') }}</label>
+                        <input type="text" class="form-control" name="name" id="editMemberName" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-primary">{{ _('Save Changes') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function editFamilyName() {
+    const modal = new bootstrap.Modal(document.getElementById('editFamilyNameModal'));
+    modal.show();
+}
+
+function showAddMemberModal() {
+    const modal = new bootstrap.Modal(document.getElementById('addMemberModal'));
+    modal.show();
+}
+
+function showEditMemberModal(memberId, memberName) {
+    document.getElementById('editMemberName').value = memberName;
+    document.getElementById('editMemberForm').action = `{{ url_for('main.edit_member', member_id=0) }}`.replace('0', memberId);
+    const modal = new bootstrap.Modal(document.getElementById('editMemberModal'));
+    modal.show();
+}
+
+function confirmDeleteMember(memberId, memberName) {
+    if (confirm(`{{ _('Are you sure you want to delete member') }} "${memberName}"? {{ _('This action cannot be undone.') }}`)) {
+        // Create a form to submit the delete request
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = `{{ url_for('main.delete_member', member_id=0) }}`.replace('0', memberId);
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+</script>
+{% endblock %}

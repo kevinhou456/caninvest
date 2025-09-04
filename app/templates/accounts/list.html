@@ -1,0 +1,328 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>{{ _('Account Management') }}</h2>
+    <button type="button" class="btn btn-primary" onclick="showAddAccountModal()">
+        <i class="fas fa-plus me-2"></i>{{ _('Add Account') }}
+    </button>
+</div>
+
+{% if accounts %}
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>{{ _('ID') }}</th>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Type') }}</th>
+                        <th>{{ _('Members') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for account in accounts|sort(attribute='id') %}
+                    <tr>
+                        <td>{{ account.id }}</td>
+                        <td>
+                            {% if account.is_joint %}
+                                <i class="fas fa-users text-warning me-2"></i>{{ account.name }}
+                            {% else %}
+                                <i class="fas fa-university me-2"></i>{{ account.name }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ 'success' if account.account_type.name == 'TFSA' else 'primary' if account.account_type.name == 'RRSP' else 'secondary' }}">
+                                {{ account.account_type.name if account.account_type else '-' }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if account.account_members %}
+                                {% for am in account.account_members %}
+                                    {{ am.member.name }} ({{ am.ownership_percentage }}%)
+                                    {% if not loop.last %}<br>{% endif %}
+                                {% endfor %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" 
+                                        onclick="showEditAccountModal({{ account.id }})">
+                                    {{ _('Edit') }}
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" 
+                                        onclick="confirmDeleteAccount({{ account.id }}, '{{ account.name }}')">
+                                    {{ _('Delete') }}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="text-center py-5">
+    <i class="fas fa-university fa-3x text-muted mb-3"></i>
+    <h4>{{ _('No accounts created yet') }}</h4>
+    <p class="text-muted">{{ _('Create your first account to get started') }}</p>
+    <button type="button" class="btn btn-primary" onclick="showAddAccountModal()">
+        <i class="fas fa-plus me-2"></i>{{ _('Create First Account') }}
+    </button>
+</div>
+{% endif %}
+
+<!-- Add Account Modal -->
+<div class="modal fade" id="addAccountModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('main.create_account') }}" id="addAccountForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">{{ _('Add Account') }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="accountName" class="form-label">{{ _('Account Name') }}</label>
+                                <input type="text" class="form-control" name="name" id="accountName" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="accountType" class="form-label">{{ _('Account Type') }}</label>
+                                <select class="form-select" name="account_type_id" id="accountType" required onchange="toggleJointAccountOption()">
+                                    <option value="">{{ _('Select Type') }}</option>
+                                    {% for type in account_types %}
+                                    <option value="{{ type.id }}" data-type-name="{{ type.name }}">{{ type.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Single Owner Selection (for non-joint accounts) -->
+                    <div id="singleOwnerSection" class="mb-3">
+                        <label for="singleOwner" class="form-label">{{ _('Account Owner') }}</label>
+                        <select class="form-select" name="single_owner" id="singleOwner" required>
+                            <option value="">{{ _('Select Owner') }}</option>
+                            {% for member in members %}
+                            <option value="{{ member.id }}">{{ member.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3" id="jointAccountSection" style="display: none;">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_joint" id="isJoint" onchange="toggleMemberSelection()">
+                            <label class="form-check-label" for="isJoint">
+                                {{ _('Joint Account') }}
+                            </label>
+                        </div>
+                    </div>
+                    <div id="memberSelection" style="display: none;">
+                        <label class="form-label">{{ _('Select Members and Ownership Percentages') }}</label>
+                        {% for member in members %}
+                        <div class="row mb-2">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input member-checkbox" type="checkbox" 
+                                           name="members" value="{{ member.id }}" id="member{{ member.id }}" 
+                                           onchange="updatePercentageFields()">
+                                    <label class="form-check-label" for="member{{ member.id }}">
+                                        {{ member.name }}
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <input type="number" class="form-control percentage-input" 
+                                       name="percentage_{{ member.id }}" id="percentage{{ member.id }}" 
+                                       min="0" max="100" step="0.01" placeholder="%" disabled>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        <div class="alert alert-info mt-2">
+                            <small>{{ _('Total percentage must equal 100%%') }}</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-primary">{{ _('Create Account') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Account Modal -->
+<div class="modal fade" id="editAccountModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" id="editAccountForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">{{ _('Edit Account') }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editAccountName" class="form-label">{{ _('Account Name') }}</label>
+                                <input type="text" class="form-control" name="name" id="editAccountName" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editAccountType" class="form-label">{{ _('Account Type') }}</label>
+                                <select class="form-select" name="account_type_id" id="editAccountType" required>
+                                    {% for type in account_types %}
+                                    <option value="{{ type.id }}">{{ type.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="editMemberSelection">
+                        <label class="form-label">{{ _('Member Ownership') }}</label>
+                        <div id="editMemberList">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-primary">{{ _('Save Changes') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function showAddAccountModal() {
+    const modal = new bootstrap.Modal(document.getElementById('addAccountModal'));
+    modal.show();
+}
+
+function toggleJointAccountOption() {
+    const accountTypeSelect = document.getElementById('accountType');
+    const jointAccountSection = document.getElementById('jointAccountSection');
+    const singleOwnerSection = document.getElementById('singleOwnerSection');
+    const selectedOption = accountTypeSelect.options[accountTypeSelect.selectedIndex];
+    const accountTypeName = selectedOption ? selectedOption.getAttribute('data-type-name') : '';
+    
+    if (accountTypeName === 'Taxable') {
+        jointAccountSection.style.display = 'block';
+        singleOwnerSection.style.display = 'block';
+    } else {
+        jointAccountSection.style.display = 'none';
+        singleOwnerSection.style.display = 'block';
+        // Clear joint account checkbox and member selection if not Taxable
+        document.getElementById('isJoint').checked = false;
+        toggleMemberSelection();
+    }
+}
+
+function toggleMemberSelection() {
+    const isJoint = document.getElementById('isJoint').checked;
+    const memberSelection = document.getElementById('memberSelection');
+    const singleOwnerSection = document.getElementById('singleOwnerSection');
+    const singleOwnerSelect = document.getElementById('singleOwner');
+    
+    if (isJoint) {
+        memberSelection.style.display = 'block';
+        singleOwnerSection.style.display = 'none';
+        singleOwnerSelect.required = false;
+        singleOwnerSelect.value = '';
+    } else {
+        memberSelection.style.display = 'none';
+        singleOwnerSection.style.display = 'block';
+        singleOwnerSelect.required = true;
+        
+        // Clear all member selections and percentages
+        document.querySelectorAll('.member-checkbox').forEach(checkbox => {
+            checkbox.checked = false;
+            const percentageInput = document.getElementById('percentage' + checkbox.value);
+            percentageInput.value = '';
+            percentageInput.disabled = true;
+        });
+    }
+}
+
+function updatePercentageFields() {
+    document.querySelectorAll('.member-checkbox').forEach(checkbox => {
+        const percentageInput = document.getElementById('percentage' + checkbox.value);
+        if (checkbox.checked) {
+            percentageInput.disabled = false;
+            if (!percentageInput.value) {
+                percentageInput.value = ''; // 让用户自己输入
+            }
+        } else {
+            percentageInput.disabled = true;
+            percentageInput.value = '';
+        }
+    });
+}
+
+function showEditAccountModal(accountId) {
+    // Fetch account data and populate the edit modal
+    fetch(`/api/v1/accounts/${accountId}/edit`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const account = data.account;
+                document.getElementById('editAccountName').value = account.name;
+                document.getElementById('editAccountType').value = account.account_type_id;
+                
+                // Populate member ownership
+                const editMemberList = document.getElementById('editMemberList');
+                editMemberList.innerHTML = '';
+                
+                account.account_members.forEach(am => {
+                    const memberDiv = document.createElement('div');
+                    memberDiv.className = 'row mb-2';
+                    memberDiv.innerHTML = `
+                        <div class="col-md-6">
+                            <label class="form-label">${am.member_name}</label>
+                        </div>
+                        <div class="col-md-6">
+                            <input type="hidden" name="member_${am.member_id}" value="1">
+                            <input type="number" class="form-control" name="percentage_${am.member_id}" 
+                                   value="${am.ownership_percentage}" min="0" max="100" step="0.01" required>
+                        </div>
+                    `;
+                    editMemberList.appendChild(memberDiv);
+                });
+                
+                document.getElementById('editAccountForm').action = `/accounts/${accountId}/edit`;
+                const modal = new bootstrap.Modal(document.getElementById('editAccountModal'));
+                modal.show();
+            } else {
+                alert('{{ _("Error loading account data") }}');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('{{ _("Error loading account data") }}');
+        });
+}
+
+function confirmDeleteAccount(accountId, accountName) {
+    if (confirm(`{{ _('Are you sure you want to delete account') }} "${accountName}"? {{ _('This action cannot be undone.') }}`)) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = `/accounts/${accountId}/delete`;
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base/base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>{{ _('All Families') }}</h2>
+    <a href="{{ url_for('main.create_family') }}" class="btn btn-primary">
+        <i class="fas fa-plus me-2"></i>{{ _('Add Family') }}
+    </a>
+</div>
+
+{% if families.items %}
+<div class="row">
+    {% for family in families.items %}
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">{{ family.name }}</h5>
+                <p class="card-text text-muted">
+                    <small>{{ _('Created') }}: {{ family.created_at.strftime('%Y-%m-%d') }}</small>
+                </p>
+                <div class="btn-group w-100">
+                    <a href="{{ url_for('main.family_detail', family_id=family.id) }}" 
+                       class="btn btn-outline-primary btn-sm">{{ _('View') }}</a>
+                    <a href="{{ url_for('main.edit_family', family_id=family.id) }}" 
+                       class="btn btn-outline-secondary btn-sm">{{ _('Edit') }}</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if families.pages > 1 %}
+<nav class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if families.has_prev %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.families', page=families.prev_num) }}">{{ _('Previous') }}</a>
+            </li>
+        {% endif %}
+        
+        {% for page_num in families.iter_pages() %}
+            {% if page_num %}
+                {% if page_num != families.page %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('main.families', page=page_num) }}">{{ page_num }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ page_num }}</span>
+                    </li>
+                {% endif %}
+            {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+            {% endif %}
+        {% endfor %}
+        
+        {% if families.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.families', page=families.next_num) }}">{{ _('Next') }}</a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% else %}
+<div class="text-center py-5">
+    <i class="fas fa-users fa-3x text-muted mb-3"></i>
+    <h4>{{ _('No families created yet') }}</h4>
+    <p class="text-muted">{{ _('Create your first family to get started') }}</p>
+    <a href="{{ url_for('main.create_family') }}" class="btn btn-primary">
+        <i class="fas fa-plus me-2"></i>{{ _('Create First Family') }}
+    </a>
+</div>
+{% endif %}
+{% endblock %}

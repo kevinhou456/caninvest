@@ -1,0 +1,306 @@
+{% extends "base/base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1>{{ _('Investment Dashboard') }}</h1>
+        <p class="text-muted">{{ _('Overview of your family investment portfolio') }}</p>
+    </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ stats.members_count }}</div>
+                    <div class="stat-label">{{ _('Family Members') }}</div>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-users fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card success">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ stats.accounts_count }}</div>
+                    <div class="stat-label">{{ _('Accounts') }}</div>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-university fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card warning">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ "{:,}".format(stats.transactions_count) }}</div>
+                    <div class="stat-label">{{ _('Transactions') }}</div>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-exchange-alt fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card info">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ stats.stocks_count }}</div>
+                    <div class="stat-label">{{ _('Stocks Tracked') }}</div>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-chart-line fa-2x opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pending Tasks Alert -->
+{% if stats.pending_imports > 0 or stats.pending_ocr > 0 %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-warning d-flex align-items-center" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <div>
+                <strong>{{ _('Pending Tasks') }}:</strong>
+                {% if stats.pending_imports > 0 %}
+                    {{ stats.pending_imports }} {{ _('CSV import tasks pending') }}.
+                {% endif %}
+                {% if stats.pending_ocr > 0 %}
+                    {{ stats.pending_ocr }} {{ _('OCR tasks awaiting review') }}.
+                {% endif %}
+                <a href="{{ url_for('main.import_transactions') }}" class="alert-link">{{ _('Review now') }}</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row">
+    <!-- Family Overview -->
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-home me-2"></i>{{ family.name }}
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-4">
+                        <div class="stat-mini">
+                            <h4 class="text-primary">{{ stats.members_count }}</h4>
+                            <small class="text-muted">{{ _('Members') }}</small>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="stat-mini">
+                            <h4 class="text-success">{{ stats.accounts_count }}</h4>
+                            <small class="text-muted">{{ _('Accounts') }}</small>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="stat-mini">
+                            <h4 class="text-warning">{{ "{:,}".format(stats.transactions_count) }}</h4>
+                            <small class="text-muted">{{ _('Transactions') }}</small>
+                        </div>
+                    </div>
+                </div>
+                
+                {% if family.members %}
+                <hr>
+                <h6>{{ _('Family Members') }}:</h6>
+                <div class="list-group list-group-flush">
+                    {% for member in family.members %}
+                    <div class="list-group-item px-0 py-2">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-user-circle text-secondary me-2"></i>
+                            <span>{{ member.name }}</span>
+                            {% if member.email %}
+                                <small class="text-muted ms-2">({{ member.email }})</small>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-footer">
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('main.family_members') }}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-users me-1"></i>{{ _('Manage Members') }}
+                    </a>
+                    <a href="{{ url_for('main.accounts') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-university me-1"></i>{{ _('View Accounts') }}
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Transactions -->
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-exchange-alt me-2"></i>{{ _('Recent Transactions') }}
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if recent_transactions %}
+                    <div class="list-group list-group-flush">
+                        {% for transaction in recent_transactions %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <h6 class="mb-1">
+                                            {{ transaction.stock.symbol }}
+                                            <span class="badge badge-{{ 'success' if transaction.transaction_type == 'BUY' else 'danger' if transaction.transaction_type == 'SELL' else 'info' }}">
+                                                {{ transaction.transaction_type }}
+                                            </span>
+                                        </h6>
+                                        <small class="text-muted">
+                                            {{ transaction.account.name }} • 
+                                            {{ transaction.transaction_date.strftime('%Y-%m-%d') }}
+                                        </small>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="fw-bold">
+                                            {% if transaction.currency == 'USD' %}
+                                                ${{ "{:,.2f}".format(transaction.total_amount|float) }} USD
+                                            {% else %}
+                                                ${{ "{:,.2f}".format(transaction.total_amount|float) }}
+                                            {% endif %}
+                                        </div>
+                                        <small class="text-muted">
+                                            {{ "{:,.0f}".format(transaction.quantity|float) }} {{ _('shares') }}
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="fas fa-exchange-alt fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">{{ _('No transactions recorded yet') }}</p>
+                        <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
+                            {{ _('Record First Transaction') }}
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+            {% if recent_transactions %}
+            <div class="card-footer">
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('main.transactions') }}" class="btn btn-sm btn-outline-secondary">
+                        {{ _('View All Transactions') }}
+                    </a>
+                    <a href="{{ url_for('main.create_transaction') }}" class="btn btn-sm btn-primary">
+                        {{ _('Add Transaction') }}
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-bolt me-2"></i>{{ _('Quick Actions') }}
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-2 col-sm-4 col-6 mb-3">
+                        <a href="{{ url_for('main.create_family') }}" class="btn btn-outline-primary w-100 h-100 d-flex flex-column align-items-center justify-content-center p-3">
+                            <i class="fas fa-users fa-2x mb-2"></i>
+                            <span>{{ _('Add Family') }}</span>
+                        </a>
+                    </div>
+                    
+                    <div class="col-md-2 col-sm-4 col-6 mb-3">
+                        <a href="{{ url_for('main.create_account') }}" class="btn btn-outline-success w-100 h-100 d-flex flex-column align-items-center justify-content-center p-3">
+                            <i class="fas fa-university fa-2x mb-2"></i>
+                            <span>{{ _('Add Account') }}</span>
+                        </a>
+                    </div>
+                    
+                    <div class="col-md-2 col-sm-4 col-6 mb-3">
+                        <a href="{{ url_for('main.create_transaction') }}" class="btn btn-outline-warning w-100 h-100 d-flex flex-column align-items-center justify-content-center p-3">
+                            <i class="fas fa-plus-circle fa-2x mb-2"></i>
+                            <span>{{ _('Record Transaction') }}</span>
+                        </a>
+                    </div>
+                    
+                    <div class="col-md-2 col-sm-4 col-6 mb-3">
+                        <a href="{{ url_for('main.import_transactions') }}" class="btn btn-outline-info w-100 h-100 d-flex flex-column align-items-center justify-content-center p-3">
+                            <i class="fas fa-file-import fa-2x mb-2"></i>
+                            <span>{{ _('Import Data') }}</span>
+                        </a>
+                    </div>
+                    
+                    <div class="col-md-2 col-sm-4 col-6 mb-3">
+                        <a href="{{ url_for('main.portfolio_reports') }}" class="btn btn-outline-secondary w-100 h-100 d-flex flex-column align-items-center justify-content-center p-3">
+                            <i class="fas fa-chart-pie fa-2x mb-2"></i>
+                            <span>{{ _('Portfolio Reports') }}</span>
+                        </a>
+                    </div>
+                    
+                    <div class="col-md-2 col-sm-4 col-6 mb-3">
+                        <a href="{{ url_for('main.stocks') }}" class="btn btn-outline-dark w-100 h-100 d-flex flex-column align-items-center justify-content-center p-3">
+                            <i class="fas fa-tags fa-2x mb-2"></i>
+                            <span>{{ _('Manage Stocks') }}</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Dashboard-specific JavaScript
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-refresh statistics every 5 minutes
+    setInterval(function() {
+        // This could be implemented to refresh stats via AJAX
+        // For now, just show a subtle indication that data might be stale
+        const cards = document.querySelectorAll('.stat-card');
+        cards.forEach(card => {
+            card.style.opacity = '0.9';
+            setTimeout(() => {
+                card.style.opacity = '1';
+            }, 100);
+        });
+    }, 300000);
+    
+    // Initialize tooltips for action buttons
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    const tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
+{% endblock %}

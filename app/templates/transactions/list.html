@@ -1,0 +1,99 @@
+{% extends "base/base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>{{ _('All Transactions') }}</h2>
+    <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
+        <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
+    </a>
+</div>
+
+{% if transactions.items %}
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>{{ _('Date') }}</th>
+                <th>{{ _('Type') }}</th>
+                <th>{{ _('Stock') }}</th>
+                <th>{{ _('Quantity') }}</th>
+                <th>{{ _('Price') }}</th>
+                <th>{{ _('Account') }}</th>
+                <th>{{ _('Actions') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for transaction in transactions.items %}
+            <tr>
+                <td>{{ transaction.transaction_date.strftime('%Y-%m-%d') }}</td>
+                <td>
+                    {% if transaction.transaction_type == 'buy' %}
+                        <span class="badge bg-success">{{ _('Buy') }}</span>
+                    {% else %}
+                        <span class="badge bg-danger">{{ _('Sell') }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ transaction.stock.symbol if transaction.stock else '-' }}</td>
+                <td>{{ transaction.quantity }}</td>
+                <td>${{ "%.2f"|format(transaction.price_per_share) }}</td>
+                <td>{{ transaction.account.name if transaction.account else '-' }}</td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <a href="{{ url_for('main.transaction_detail', transaction_id=transaction.id) }}" 
+                           class="btn btn-outline-primary btn-sm">{{ _('View') }}</a>
+                        <a href="{{ url_for('main.edit_transaction', transaction_id=transaction.id) }}" 
+                           class="btn btn-outline-secondary btn-sm">{{ _('Edit') }}</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if transactions.pages > 1 %}
+<nav class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if transactions.has_prev %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.prev_num) }}">{{ _('Previous') }}</a>
+            </li>
+        {% endif %}
+        
+        {% for page_num in transactions.iter_pages() %}
+            {% if page_num %}
+                {% if page_num != transactions.page %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('main.transactions', page=page_num) }}">{{ page_num }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ page_num }}</span>
+                    </li>
+                {% endif %}
+            {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+            {% endif %}
+        {% endfor %}
+        
+        {% if transactions.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.next_num) }}">{{ _('Next') }}</a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% else %}
+<div class="text-center py-5">
+    <i class="fas fa-exchange-alt fa-3x text-muted mb-3"></i>
+    <h4>{{ _('No transactions recorded yet') }}</h4>
+    <p class="text-muted">{{ _('Record your first transaction to get started') }}</p>
+    <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
+        <i class="fas fa-plus me-2"></i>{{ _('Record First Transaction') }}
+    </a>
+</div>
+{% endif %}
+{% endblock %}

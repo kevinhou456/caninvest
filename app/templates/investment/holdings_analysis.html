@@ -1,0 +1,404 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-chart-pie me-2"></i>{{ _('Holdings Analysis') }}
+        </h2>
+        <p class="text-muted">{{ _('Detailed analysis of current holdings and portfolio allocation') }}</p>
+    </div>
+</div>
+
+<!-- Holdings Summary Cards -->
+<div class="row mb-4">
+    {% set total_positions = holdings_by_stock | length %}
+    {% set total_value = holdings_by_stock.values() | sum(attribute='total_cost') %}
+    {% set total_categories = holdings_by_category | length %}
+    {% set total_accounts = holdings_by_account | length %}
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            {{ _('Total Positions') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ total_positions }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-layer-group fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            {{ _('Total Value') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(total_value) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Categories') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ total_categories }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-tags fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            {{ _('Accounts') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ total_accounts }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-university fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row">
+    <!-- Holdings by Stock Chart -->
+    <div class="col-xl-6 col-lg-6">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Holdings by Stock') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="holdingsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Holdings by Category Chart -->
+    <div class="col-xl-6 col-lg-6">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Holdings by Category') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Holdings by Stock Detail -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Stock Holdings Detail') }}</h6>
+    </div>
+    <div class="card-body">
+        {% if holdings_by_stock %}
+        <div class="table-responsive">
+            <table class="table table-bordered" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Symbol') }}</th>
+                        <th>{{ _('Company') }}</th>
+                        <th>{{ _('Quantity') }}</th>
+                        <th>{{ _('Total Cost') }}</th>
+                        <th>{{ _('Avg Cost') }}</th>
+                        <th>{{ _('Accounts') }}</th>
+                        <th>{{ _('Category') }}</th>
+                        <th>{{ _('Weight') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for symbol, holding in holdings_by_stock.items() %}
+                    <tr>
+                        <td class="font-weight-bold">{{ symbol }}</td>
+                        <td>{{ holding.stock.name if holding.stock else '-' }}</td>
+                        <td>{{ "{:,.2f}".format(holding.quantity) }}</td>
+                        <td class="text-success">${{ "{:,.2f}".format(holding.total_cost) }}</td>
+                        <td>${{ "{:.2f}".format(holding.total_cost / holding.quantity if holding.quantity > 0 else 0) }}</td>
+                        <td>
+                            {% for account in holding.accounts[:3] %}
+                                <span class="badge badge-info">{{ account }}</span>
+                            {% endfor %}
+                            {% if holding.accounts | length > 3 %}
+                                <span class="badge badge-secondary">+{{ holding.accounts | length - 3 }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if holding.stock and holding.stock.category %}
+                                <span class="badge badge-primary">{{ holding.stock.category.name }}</span>
+                            {% else %}
+                                <span class="badge badge-secondary">{{ _('Uncategorized') }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="progress">
+                                {% set weight = (holding.total_cost / total_value * 100) if total_value > 0 else 0 %}
+                                <div class="progress-bar" role="progressbar" style="width: {{ weight }}%">
+                                    {{ "{:.1f}%".format(weight) }}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <i class="fas fa-chart-pie fa-3x text-gray-300 mb-3"></i>
+            <p class="text-muted">{{ _('No holdings data available') }}</p>
+            <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
+                {{ _('Record First Transaction') }}
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Holdings by Category Detail -->
+<div class="row">
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Category Breakdown') }}</h6>
+            </div>
+            <div class="card-body">
+                {% if holdings_by_category %}
+                <div class="table-responsive">
+                    <table class="table table-bordered" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>{{ _('Category') }}</th>
+                                <th>{{ _('Total Value') }}</th>
+                                <th>{{ _('Stocks') }}</th>
+                                <th>{{ _('Weight') }}</th>
+                                <th>{{ _('Allocation') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for category, data in holdings_by_category.items() %}
+                            <tr>
+                                <td class="font-weight-bold">{{ category }}</td>
+                                <td class="text-success">${{ "{:,.2f}".format(data.total_cost) }}</td>
+                                <td>
+                                    {% for stock in data.stocks[:5] %}
+                                        <span class="badge badge-outline-primary">{{ stock }}</span>
+                                    {% endfor %}
+                                    {% if data.stocks | length > 5 %}
+                                        <span class="badge badge-secondary">+{{ data.stocks | length - 5 }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% set weight = (data.total_cost / total_value * 100) if total_value > 0 else 0 %}
+                                    {{ "{:.1f}%".format(weight) }}
+                                </td>
+                                <td>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-{% cycle 'primary', 'success', 'info', 'warning', 'danger' %}" 
+                                             role="progressbar" style="width: {{ weight }}%">
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4">
+                    <i class="fas fa-tags fa-2x text-gray-300 mb-3"></i>
+                    <p class="text-muted">{{ _('No category data available') }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Holdings by Account -->
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Holdings by Account') }}</h6>
+            </div>
+            <div class="card-body">
+                {% if holdings_by_account %}
+                    {% for account_data in holdings_by_account %}
+                    {% if account_data.holdings %}
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="font-weight-bold text-primary">{{ account_data.account.name }}</h6>
+                            <small class="text-muted">
+                                {% set account_value = account_data.holdings.values() | sum(attribute='total_cost') %}
+                                ${{ "{:,.0f}".format(account_value) }}
+                            </small>
+                        </div>
+                        
+                        {% for symbol, holding in account_data.holdings.items() %}
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <div>
+                                <span class="font-weight-bold">{{ symbol }}</span>
+                                <small class="text-muted">({{ "{:,.0f}".format(holding.quantity) }})</small>
+                            </div>
+                            <div class="text-right">
+                                <div>${{ "{:,.0f}".format(holding.total_cost) }}</div>
+                                <small class="text-muted">
+                                    {% set weight = (holding.total_cost / account_value * 100) if account_value > 0 else 0 %}
+                                    {{ "{:.1f}%".format(weight) }}
+                                </small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                {% else %}
+                <div class="text-center py-3">
+                    <i class="fas fa-university fa-2x text-gray-300 mb-2"></i>
+                    <p class="text-muted">{{ _('No account holdings data') }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Holdings by Stock Chart
+if (document.getElementById('holdingsChart')) {
+    const ctx = document.getElementById('holdingsChart').getContext('2d');
+    
+    const holdingsData = {
+        {% set holdings_items = holdings_by_stock.items() | list %}
+        labels: {{ holdings_items | map(attribute='0') | list | tojson }},
+        datasets: [{
+            data: {{ holdings_items | map(attribute='1.total_cost') | list | tojson }},
+            backgroundColor: [
+                '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', 
+                '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
+            ],
+            hoverBorderColor: "rgba(234, 236, 244, 1)",
+        }]
+    };
+    
+    const holdingsChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: holdingsData,
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    backgroundColor: "rgb(255,255,255)",
+                    bodyColor: "#858796",
+                    borderColor: '#dddfeb',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'bottom'
+                }
+            },
+            cutout: '60%'
+        }
+    });
+}
+
+// Holdings by Category Chart
+if (document.getElementById('categoryChart')) {
+    const ctx = document.getElementById('categoryChart').getContext('2d');
+    
+    const categoryData = {
+        {% set category_items = holdings_by_category.items() | list %}
+        labels: {{ category_items | map(attribute='0') | list | tojson }},
+        datasets: [{
+            data: {{ category_items | map(attribute='1.total_cost') | list | tojson }},
+            backgroundColor: [
+                '#1cc88a', '#4e73df', '#36b9cc', '#f6c23e', '#e74a3b', 
+                '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
+            ],
+            hoverBorderColor: "rgba(234, 236, 244, 1)",
+        }]
+    };
+    
+    const categoryChart = new Chart(ctx, {
+        type: 'pie',
+        data: categoryData,
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    backgroundColor: "rgb(255,255,255)",
+                    bodyColor: "#858796",
+                    borderColor: '#dddfeb',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

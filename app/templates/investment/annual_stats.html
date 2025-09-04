@@ -1,0 +1,244 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-calendar-alt me-2"></i>{{ _('Annual Statistics') }}
+        </h2>
+        <p class="text-muted">{{ _('Investment activity by year') }}</p>
+    </div>
+</div>
+
+<!-- Annual Summary Cards -->
+<div class="row mb-4">
+    {% set total_investment = annual_data | sum(attribute='net_investment') %}
+    {% set total_transactions = annual_data | sum(attribute='transaction_count') %}
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            {{ _('Total Net Investment') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(total_investment) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Total Transactions') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ total_transactions }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            {{ _('Active Years') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ annual_data | selectattr('transaction_count', 'greaterthan', 0) | list | length }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calendar fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            {{ _('Average per Year') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {% set active_years = annual_data | selectattr('transaction_count', 'greaterthan', 0) | list | length %}
+                            ${{ "{:,.2f}".format(total_investment / active_years if active_years > 0 else 0) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calculator fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Annual Data Chart and Table -->
+<div class="row">
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Annual Investment Trend') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="annualChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Year Summary') }}</h6>
+            </div>
+            <div class="card-body">
+                {% for year_data in annual_data %}
+                {% if year_data.transaction_count > 0 %}
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="font-weight-bold">{{ year_data.year }}</span>
+                        <span class="text-xs text-gray-500">{{ year_data.transaction_count }} {{ _('transactions') }}</span>
+                    </div>
+                    <div class="text-sm">
+                        <span class="text-success">+${{ "{:,.0f}".format(year_data.buy_amount) }}</span>
+                        <span class="text-muted mx-1">|</span>
+                        <span class="text-danger">-${{ "{:,.0f}".format(year_data.sell_amount) }}</span>
+                        <span class="text-muted mx-1">=</span>
+                        <span class="{{ 'text-success' if year_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.0f}".format(year_data.net_investment) }}
+                        </span>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Annual Table -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Annual Details') }}</h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Year') }}</th>
+                        <th>{{ _('Buy Amount') }}</th>
+                        <th>{{ _('Sell Amount') }}</th>
+                        <th>{{ _('Net Investment') }}</th>
+                        <th>{{ _('Transactions') }}</th>
+                        <th>{{ _('Activity') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for year_data in annual_data %}
+                    <tr>
+                        <td class="font-weight-bold">{{ year_data.year }}</td>
+                        <td class="text-success">${{ "{:,.2f}".format(year_data.buy_amount) }}</td>
+                        <td class="text-danger">${{ "{:,.2f}".format(year_data.sell_amount) }}</td>
+                        <td class="{{ 'text-success' if year_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.2f}".format(year_data.net_investment) }}
+                        </td>
+                        <td>{{ year_data.transaction_count }}</td>
+                        <td>
+                            {% if year_data.transaction_count > 0 %}
+                                <span class="badge badge-success">{{ _('Active') }}</span>
+                            {% else %}
+                                <span class="badge badge-secondary">{{ _('Inactive') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Annual Chart
+if (document.getElementById('annualChart')) {
+    const ctx = document.getElementById('annualChart').getContext('2d');
+    const annualChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: {{ annual_data | map(attribute='year') | list | tojson }},
+            datasets: [{
+                label: '{{ _('Net Investment') }}',
+                data: {{ annual_data | map(attribute='net_investment') | list | tojson }},
+                backgroundColor: 'rgba(78, 115, 223, 0.8)',
+                borderColor: 'rgba(78, 115, 223, 1)',
+                borderWidth: 1
+            }, {
+                label: '{{ _('Buy Amount') }}',
+                data: {{ annual_data | map(attribute='buy_amount') | list | tojson }},
+                backgroundColor: 'rgba(28, 200, 138, 0.8)',
+                borderColor: 'rgba(28, 200, 138, 1)',
+                borderWidth: 1
+            }, {
+                label: '{{ _('Sell Amount') }}',
+                data: {{ annual_data | map(attribute='sell_amount') | list | tojson }},
+                backgroundColor: 'rgba(231, 74, 59, 0.8)',
+                borderColor: 'rgba(231, 74, 59, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,102 @@
+{% extends "base/base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>{{ _('Stocks & Categories') }}</h2>
+    <div class="btn-group">
+        <a href="{{ url_for('main.create_stock') }}" class="btn btn-primary">
+            <i class="fas fa-plus me-2"></i>{{ _('Add Stock') }}
+        </a>
+        <a href="{{ url_for('main.stock_categories') }}" class="btn btn-outline-secondary">
+            <i class="fas fa-tags me-2"></i>{{ _('Manage Categories') }}
+        </a>
+    </div>
+</div>
+
+{% if stocks.items %}
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>{{ _('Symbol') }}</th>
+                <th>{{ _('Name') }}</th>
+                <th>{{ _('Exchange') }}</th>
+                <th>{{ _('Currency') }}</th>
+                <th>{{ _('Category') }}</th>
+                <th>{{ _('Actions') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for stock in stocks.items %}
+            <tr>
+                <td><strong>{{ stock.symbol }}</strong></td>
+                <td>{{ stock.name }}</td>
+                <td>{{ stock.exchange }}</td>
+                <td>{{ stock.currency }}</td>
+                <td>
+                    {% if stock.category %}
+                        <span class="badge bg-secondary">{{ stock.category.name }}</span>
+                    {% else %}
+                        <span class="text-muted">{{ _('Uncategorized') }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <a href="{{ url_for('main.stock_detail_id', stock_id=stock.id) }}" 
+                           class="btn btn-outline-primary btn-sm">{{ _('View') }}</a>
+                        <a href="{{ url_for('main.edit_stock', stock_id=stock.id) }}" 
+                           class="btn btn-outline-secondary btn-sm">{{ _('Edit') }}</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if stocks.pages > 1 %}
+<nav class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if stocks.has_prev %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.stocks', page=stocks.prev_num) }}">{{ _('Previous') }}</a>
+            </li>
+        {% endif %}
+        
+        {% for page_num in stocks.iter_pages() %}
+            {% if page_num %}
+                {% if page_num != stocks.page %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('main.stocks', page=page_num) }}">{{ page_num }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ page_num }}</span>
+                    </li>
+                {% endif %}
+            {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+            {% endif %}
+        {% endfor %}
+        
+        {% if stocks.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="{{ url_for('main.stocks', page=stocks.next_num) }}">{{ _('Next') }}</a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% else %}
+<div class="text-center py-5">
+    <i class="fas fa-chart-line fa-3x text-muted mb-3"></i>
+    <h4>{{ _('No stocks added yet') }}</h4>
+    <p class="text-muted">{{ _('Add your first stock to get started') }}</p>
+    <a href="{{ url_for('main.create_stock') }}" class="btn btn-primary">
+        <i class="fas fa-plus me-2"></i>{{ _('Add First Stock') }}
+    </a>
+</div>
+{% endif %}
+{% endblock %}

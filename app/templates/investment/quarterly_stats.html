@@ -1,0 +1,287 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-calendar-week me-2"></i>{{ _('Quarterly Statistics') }}
+        </h2>
+        <p class="text-muted">{{ _('Investment activity by quarter') }}</p>
+    </div>
+</div>
+
+<!-- Quarterly Summary Cards -->
+<div class="row mb-4">
+    {% set total_investment = quarterly_data | sum(attribute='net_investment') %}
+    {% set total_transactions = quarterly_data | sum(attribute='transaction_count') %}
+    {% set active_quarters = quarterly_data | selectattr('transaction_count', 'greaterthan', 0) | list | length %}
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            {{ _('Total Net Investment') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(total_investment) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Total Transactions') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ total_transactions }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            {{ _('Active Quarters') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ active_quarters }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calendar-check fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            {{ _('Quarterly Average') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(total_investment / active_quarters if active_quarters > 0 else 0) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calculator fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quarterly Chart and Recent Quarters -->
+<div class="row">
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Quarterly Investment Trend') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="quarterlyChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent Quarters') }}</h6>
+            </div>
+            <div class="card-body">
+                {% for quarter_data in quarterly_data[-4:] %}
+                {% if quarter_data.transaction_count > 0 %}
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="font-weight-bold">{{ quarter_data.quarter_name }}</span>
+                        <span class="text-xs text-gray-500">{{ quarter_data.transaction_count }} {{ _('transactions') }}</span>
+                    </div>
+                    <div class="text-sm">
+                        <span class="text-success">+${{ "{:,.0f}".format(quarter_data.buy_amount) }}</span>
+                        <span class="text-muted mx-1">|</span>
+                        <span class="text-danger">-${{ "{:,.0f}".format(quarter_data.sell_amount) }}</span>
+                        <span class="text-muted mx-1">=</span>
+                        <span class="{{ 'text-success' if quarter_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.0f}".format(quarter_data.net_investment) }}
+                        </span>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quarterly Performance by Season -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Seasonal Performance') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% set quarters_by_season = {'Q1': [], 'Q2': [], 'Q3': [], 'Q4': []} %}
+                    {% for quarter_data in quarterly_data %}
+                        {% set quarter_key = 'Q' + quarter_data.quarter|string %}
+                        {% if quarters_by_season.update({quarter_key: quarters_by_season[quarter_key] + [quarter_data]}) %}{% endif %}
+                    {% endfor %}
+                    
+                    {% for season, quarters in quarters_by_season.items() %}
+                    <div class="col-md-3 mb-3">
+                        <div class="card border-left-{% if season == 'Q1' %}info{% elif season == 'Q2' %}success{% elif season == 'Q3' %}warning{% else %}primary{% endif %}">
+                            <div class="card-body">
+                                <h6 class="card-title">{{ season }} - {% if season == 'Q1' %}{{ _('Winter') }}{% elif season == 'Q2' %}{{ _('Spring') }}{% elif season == 'Q3' %}{{ _('Summer') }}{% else %}{{ _('Fall') }}{% endif %}</h6>
+                                {% set season_investment = quarters | sum(attribute='net_investment') %}
+                                {% set season_transactions = quarters | sum(attribute='transaction_count') %}
+                                <p class="card-text">
+                                    <strong class="{{ 'text-success' if season_investment >= 0 else 'text-danger' }}">
+                                        ${{ "{:+,.0f}".format(season_investment) }}
+                                    </strong><br>
+                                    <small class="text-muted">{{ season_transactions }} {{ _('transactions') }}</small>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Quarterly Table -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Quarterly Details') }}</h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Quarter') }}</th>
+                        <th>{{ _('Buy Amount') }}</th>
+                        <th>{{ _('Sell Amount') }}</th>
+                        <th>{{ _('Net Investment') }}</th>
+                        <th>{{ _('Transactions') }}</th>
+                        <th>{{ _('Activity') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for quarter_data in quarterly_data %}
+                    <tr>
+                        <td class="font-weight-bold">{{ quarter_data.quarter_name }}</td>
+                        <td class="text-success">${{ "{:,.2f}".format(quarter_data.buy_amount) }}</td>
+                        <td class="text-danger">${{ "{:,.2f}".format(quarter_data.sell_amount) }}</td>
+                        <td class="{{ 'text-success' if quarter_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.2f}".format(quarter_data.net_investment) }}
+                        </td>
+                        <td>{{ quarter_data.transaction_count }}</td>
+                        <td>
+                            {% if quarter_data.transaction_count > 0 %}
+                                <span class="badge badge-success">{{ _('Active') }}</span>
+                            {% else %}
+                                <span class="badge badge-secondary">{{ _('Quiet') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Quarterly Chart
+if (document.getElementById('quarterlyChart')) {
+    const ctx = document.getElementById('quarterlyChart').getContext('2d');
+    const quarterlyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: {{ quarterly_data | map(attribute='quarter_name') | list | tojson }},
+            datasets: [{
+                label: '{{ _('Net Investment') }}',
+                data: {{ quarterly_data | map(attribute='net_investment') | list | tojson }},
+                backgroundColor: 'rgba(78, 115, 223, 0.8)',
+                borderColor: 'rgba(78, 115, 223, 1)',
+                borderWidth: 1
+            }, {
+                label: '{{ _('Buy Amount') }}',
+                data: {{ quarterly_data | map(attribute='buy_amount') | list | tojson }},
+                backgroundColor: 'rgba(28, 200, 138, 0.8)',
+                borderColor: 'rgba(28, 200, 138, 1)',
+                borderWidth: 1
+            }, {
+                label: '{{ _('Sell Amount') }}',
+                data: {{ quarterly_data | map(attribute='sell_amount') | list | tojson }},
+                backgroundColor: 'rgba(231, 74, 59, 0.8)',
+                borderColor: 'rgba(231, 74, 59, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            scales: {
+                x: {
+                    ticks: {
+                        maxRotation: 45
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

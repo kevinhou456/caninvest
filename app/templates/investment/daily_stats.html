@@ -1,0 +1,363 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-calendar-day me-2"></i>{{ _('Daily Statistics') }}
+        </h2>
+        <p class="text-muted">{{ _('Investment activity over the last 30 days') }}</p>
+    </div>
+</div>
+
+<!-- Daily Summary Cards -->
+<div class="row mb-4">
+    {% set total_investment = daily_data | sum(attribute='net_investment') %}
+    {% set total_transactions = daily_data | sum(attribute='transaction_count') %}
+    {% set active_days = daily_data | selectattr('transaction_count', 'greaterthan', 0) | list | length %}
+    {% set recent_activity = daily_data[-7:] | sum(attribute='transaction_count') %}
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            {{ _('30-Day Net Investment') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(total_investment) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Total Transactions') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ total_transactions }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            {{ _('Active Days') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ active_days }} / 30
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calendar-check fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            {{ _('Last 7 Days Activity') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ recent_activity }} {{ _('transactions') }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-fire fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Daily Chart and Recent Days -->
+<div class="row">
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Daily Investment Trend') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="dailyChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent Days') }}</h6>
+            </div>
+            <div class="card-body">
+                {% for day_data in daily_data[-10:] %}
+                {% if day_data.transaction_count > 0 %}
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="font-weight-bold">{{ day_data.date_str }}</span>
+                        <span class="text-xs text-gray-500">{{ day_data.weekday[:3] }}</span>
+                    </div>
+                    <div class="text-sm">
+                        <span class="text-primary">{{ day_data.transaction_count }} {{ _('transactions') }}</span>
+                        <span class="text-muted mx-1">|</span>
+                        <span class="{{ 'text-success' if day_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.0f}".format(day_data.net_investment) }}
+                        </span>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+                
+                {% if daily_data[-10:] | selectattr('transaction_count', 'greaterthan', 0) | list | length == 0 %}
+                <div class="text-center py-3">
+                    <i class="fas fa-bed fa-2x text-gray-300 mb-2"></i>
+                    <p class="text-muted">{{ _('No recent activity') }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Weekly Summary -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Weekly Summary') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% set weeks_data = [] %}
+                    {% for i in range(0, 29, 7) %}
+                        {% set week_start = daily_data[i:i+7] %}
+                        {% set week_investment = week_start | sum(attribute='net_investment') %}
+                        {% set week_transactions = week_start | sum(attribute='transaction_count') %}
+                        {% set week_num = (29-i)//7 + 1 %}
+                        {% if weeks_data.append({'week': week_num, 'investment': week_investment, 'transactions': week_transactions}) %}{% endif %}
+                    {% endfor %}
+                    
+                    {% for week in weeks_data %}
+                    <div class="col-md-3 mb-3">
+                        <div class="card border-left-{% cycle 'primary', 'info', 'success', 'warning' %}">
+                            <div class="card-body">
+                                <h6 class="card-title">{{ _('Week') }} {{ week.week }}</h6>
+                                <p class="card-text">
+                                    <strong class="{{ 'text-success' if week.investment >= 0 else 'text-danger' }}">
+                                        ${{ "{:+,.0f}".format(week.investment) }}
+                                    </strong><br>
+                                    <small class="text-muted">{{ week.transactions }} {{ _('transactions') }}</small>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Daily Table (Recent 30 days) -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3 d-flex justify-content-between align-items-center">
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Daily Details') }}</h6>
+        <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-outline-primary" id="showAll">{{ _('Show All') }}</button>
+            <button type="button" class="btn btn-primary" id="showActive">{{ _('Active Only') }}</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" width="100%" cellspacing="0" id="dailyTable">
+                <thead>
+                    <tr>
+                        <th>{{ _('Date') }}</th>
+                        <th>{{ _('Day') }}</th>
+                        <th>{{ _('Buy Amount') }}</th>
+                        <th>{{ _('Sell Amount') }}</th>
+                        <th>{{ _('Net Investment') }}</th>
+                        <th>{{ _('Transactions') }}</th>
+                        <th>{{ _('Activity') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for day_data in daily_data | reverse %}
+                    <tr class="{% if day_data.transaction_count == 0 %}inactive-day{% endif %}">
+                        <td class="font-weight-bold">{{ day_data.date_str }}</td>
+                        <td class="text-muted">{{ day_data.weekday[:3] }}</td>
+                        <td class="text-success">${{ "{:,.2f}".format(day_data.buy_amount) }}</td>
+                        <td class="text-danger">${{ "{:,.2f}".format(day_data.sell_amount) }}</td>
+                        <td class="{{ 'text-success' if day_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.2f}".format(day_data.net_investment) }}
+                        </td>
+                        <td>{{ day_data.transaction_count }}</td>
+                        <td>
+                            {% if day_data.transaction_count > 0 %}
+                                <span class="badge badge-success">{{ _('Active') }}</span>
+                            {% else %}
+                                <span class="badge badge-secondary">{{ _('Quiet') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Daily Chart
+if (document.getElementById('dailyChart')) {
+    const ctx = document.getElementById('dailyChart').getContext('2d');
+    const dailyChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ daily_data | map(attribute='date_str') | list | tojson }},
+            datasets: [{
+                label: '{{ _('Net Investment') }}',
+                data: {{ daily_data | map(attribute='net_investment') | list | tojson }},
+                borderColor: 'rgba(78, 115, 223, 1)',
+                backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.1,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }, {
+                label: '{{ _('Transaction Count') }}',
+                data: {{ daily_data | map(attribute='transaction_count') | list | tojson }},
+                borderColor: 'rgba(28, 200, 138, 1)',
+                backgroundColor: 'rgba(28, 200, 138, 0.1)',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                yAxisID: 'y1'
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        maxRotation: 45,
+                        callback: function(value, index) {
+                            const date = new Date(this.getLabelForValue(value));
+                            return date.getMonth() + 1 + '/' + date.getDate();
+                        }
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    grid: {
+                        drawOnChartArea: false,
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return value + ' txns';
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            if (context.dataset.label === '{{ _('Net Investment') }}') {
+                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                            } else {
+                                return context.dataset.label + ': ' + context.parsed.y + ' transactions';
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Table filtering
+document.getElementById('showActive').addEventListener('click', function() {
+    const table = document.getElementById('dailyTable');
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        if (row.classList.contains('inactive-day')) {
+            row.style.display = 'none';
+        } else {
+            row.style.display = '';
+        }
+    });
+    
+    this.classList.add('btn-primary');
+    this.classList.remove('btn-outline-primary');
+    document.getElementById('showAll').classList.add('btn-outline-primary');
+    document.getElementById('showAll').classList.remove('btn-primary');
+});
+
+document.getElementById('showAll').addEventListener('click', function() {
+    const table = document.getElementById('dailyTable');
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        row.style.display = '';
+    });
+    
+    this.classList.add('btn-primary');
+    this.classList.remove('btn-outline-primary');
+    document.getElementById('showActive').classList.add('btn-outline-primary');
+    document.getElementById('showActive').classList.remove('btn-primary');
+});
+</script>
+{% endblock %}

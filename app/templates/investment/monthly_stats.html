@@ -1,0 +1,255 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-calendar me-2"></i>{{ _('Monthly Statistics') }}
+        </h2>
+        <p class="text-muted">{{ _('Investment activity by month over the last 12 months') }}</p>
+    </div>
+</div>
+
+<!-- Monthly Summary Cards -->
+<div class="row mb-4">
+    {% set total_investment = monthly_data | sum(attribute='net_investment') %}
+    {% set total_transactions = monthly_data | sum(attribute='transaction_count') %}
+    {% set active_months = monthly_data | selectattr('transaction_count', 'greaterthan', 0) | list | length %}
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            {{ _('12-Month Net Investment') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(total_investment) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Total Transactions') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ total_transactions }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            {{ _('Active Months') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ active_months }} / 12
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calendar-check fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            {{ _('Monthly Average') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(total_investment / active_months if active_months > 0 else 0) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-calculator fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Monthly Chart and Recent Months -->
+<div class="row">
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Investment Trend') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="monthlyChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent Months') }}</h6>
+            </div>
+            <div class="card-body">
+                {% for month_data in monthly_data[-6:] %}
+                {% if month_data.transaction_count > 0 %}
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="font-weight-bold">{{ month_data.month_name }}</span>
+                        <span class="text-xs text-gray-500">{{ month_data.transaction_count }} {{ _('transactions') }}</span>
+                    </div>
+                    <div class="text-sm">
+                        <span class="text-success">+${{ "{:,.0f}".format(month_data.buy_amount) }}</span>
+                        <span class="text-muted mx-1">|</span>
+                        <span class="text-danger">-${{ "{:,.0f}".format(month_data.sell_amount) }}</span>
+                        <span class="text-muted mx-1">=</span>
+                        <span class="{{ 'text-success' if month_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.0f}".format(month_data.net_investment) }}
+                        </span>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Monthly Table -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Details') }}</h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Month') }}</th>
+                        <th>{{ _('Buy Amount') }}</th>
+                        <th>{{ _('Sell Amount') }}</th>
+                        <th>{{ _('Net Investment') }}</th>
+                        <th>{{ _('Transactions') }}</th>
+                        <th>{{ _('Activity') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for month_data in monthly_data %}
+                    <tr>
+                        <td class="font-weight-bold">{{ month_data.month_name }}</td>
+                        <td class="text-success">${{ "{:,.2f}".format(month_data.buy_amount) }}</td>
+                        <td class="text-danger">${{ "{:,.2f}".format(month_data.sell_amount) }}</td>
+                        <td class="{{ 'text-success' if month_data.net_investment >= 0 else 'text-danger' }}">
+                            ${{ "{:+,.2f}".format(month_data.net_investment) }}
+                        </td>
+                        <td>{{ month_data.transaction_count }}</td>
+                        <td>
+                            {% if month_data.transaction_count > 0 %}
+                                <span class="badge badge-success">{{ _('Active') }}</span>
+                            {% else %}
+                                <span class="badge badge-secondary">{{ _('Quiet') }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Monthly Chart
+if (document.getElementById('monthlyChart')) {
+    const ctx = document.getElementById('monthlyChart').getContext('2d');
+    const monthlyChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ monthly_data | map(attribute='month_name') | list | tojson }},
+            datasets: [{
+                label: '{{ _('Net Investment') }}',
+                data: {{ monthly_data | map(attribute='net_investment') | list | tojson }},
+                borderColor: 'rgba(78, 115, 223, 1)',
+                backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.1
+            }, {
+                label: '{{ _('Buy Amount') }}',
+                data: {{ monthly_data | map(attribute='buy_amount') | list | tojson }},
+                borderColor: 'rgba(28, 200, 138, 1)',
+                backgroundColor: 'rgba(28, 200, 138, 0.1)',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1
+            }, {
+                label: '{{ _('Sell Amount') }}',
+                data: {{ monthly_data | map(attribute='sell_amount') | list | tojson }},
+                borderColor: 'rgba(231, 74, 59, 1)',
+                backgroundColor: 'rgba(231, 74, 59, 0.1)',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            scales: {
+                x: {
+                    ticks: {
+                        maxRotation: 45
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

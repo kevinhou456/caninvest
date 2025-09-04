@@ -1,0 +1,279 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<!-- Filter Status Bar -->
+{% if filter_description != '全部成员' %}
+<div class="alert alert-info mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <div>
+            <i class="fas fa-filter me-2"></i>
+            {{ _('Current Filter') }}: <strong>{{ filter_description }}</strong>
+            <span class="text-muted ms-2">({{ filtered_accounts_count }} {{ _('accounts') }})</span>
+        </div>
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-times me-1"></i>{{ _('Clear Filter') }}
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<!-- Portfolio Summary Cards -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            {{ _('Total Portfolio Value') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            ${{ "{:,.2f}".format(portfolio_stats.total_value) }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            {{ _('Total Gain/Loss') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            <span class="{{ 'text-success' if portfolio_stats.total_gain >= 0 else 'text-danger' }}">
+                                ${{ "{:,.2f}".format(portfolio_stats.total_gain) }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Active Accounts') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ stats.accounts_count }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-university fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            {{ _('Recent Transactions') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            {{ stats.transactions_count }}
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row">
+    <!-- Portfolio Allocation Chart -->
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Portfolio Allocation') }}</h6>
+                <div class="dropdown no-arrow">
+                    <a class="dropdown-toggle" href="#" role="button" data-toggle="dropdown">
+                        <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="portfolioChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Account Balances -->
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Account Balances') }}</h6>
+            </div>
+            <div class="card-body">
+                {% if account_balances %}
+                    {% for account in account_balances %}
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <div>
+                            <div class="small font-weight-bold">{{ account.name }}</div>
+                            <div class="text-xs text-gray-500">{{ account.account_type.name if account.account_type else 'Taxable' }}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="font-weight-bold">${{ "{:,.2f}".format(account.current_value) }}</div>
+                            <div class="text-xs {{ 'text-success' if account.gain_loss >= 0 else 'text-danger' }}">
+                                {{ "{:+.1f}%".format(account.gain_loss_percent) }}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-3">
+                        <i class="fas fa-chart-bar fa-2x text-gray-300 mb-2"></i>
+                        <p class="text-muted">{{ _('No account data available') }}</p>
+                        <a href="{{ url_for('main.create_account') }}" class="btn btn-primary btn-sm">
+                            {{ _('Add Account') }}
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Transactions Table -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent Transactions') }}</h6>
+    </div>
+    <div class="card-body">
+        {% if recent_transactions %}
+        <div class="table-responsive">
+            <table class="table table-bordered" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Date') }}</th>
+                        <th>{{ _('Account') }}</th>
+                        <th>{{ _('Type') }}</th>
+                        <th>{{ _('Symbol') }}</th>
+                        <th>{{ _('Quantity') }}</th>
+                        <th>{{ _('Price') }}</th>
+                        <th>{{ _('Total') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for transaction in recent_transactions %}
+                    <tr>
+                        <td>{{ transaction.transaction_date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ transaction.account.name if transaction.account else '-' }}</td>
+                        <td>
+                            <span class="badge badge-{{ 'success' if transaction.transaction_type == 'buy' else 'danger' }}">
+                                {{ transaction.transaction_type|title }}
+                            </span>
+                        </td>
+                        <td>{{ transaction.stock.symbol if transaction.stock else '-' }}</td>
+                        <td>{{ transaction.quantity }}</td>
+                        <td>${{ "{:.2f}".format(transaction.price_per_share) }}</td>
+                        <td>${{ "{:.2f}".format(transaction.quantity * transaction.price_per_share) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="text-center mt-3">
+            <a href="{{ url_for('main.transactions') }}" class="btn btn-outline-primary">
+                {{ _('View All Transactions') }}
+            </a>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <i class="fas fa-exchange-alt fa-3x text-gray-300 mb-3"></i>
+            <p class="text-muted">{{ _('No transactions recorded yet') }}</p>
+            <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
+                {{ _('Record First Transaction') }}
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Custom CSS for dashboard -->
+<style>
+    .border-left-primary { border-left: 0.25rem solid #4e73df!important; }
+    .border-left-success { border-left: 0.25rem solid #1cc88a!important; }
+    .border-left-info { border-left: 0.25rem solid #36b9cc!important; }
+    .border-left-warning { border-left: 0.25rem solid #f6c23e!important; }
+    
+    .text-xs { font-size: 0.7rem; }
+    .font-weight-bold { font-weight: 700!important; }
+    .text-uppercase { text-transform: uppercase!important; }
+    .text-gray-800 { color: #5a5c69!important; }
+    .text-gray-300 { color: #dddfeb!important; }
+    .text-gray-500 { color: #858796!important; }
+    
+    .chart-area { position: relative; height: 20rem; width: 100%; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Portfolio Chart
+if (document.getElementById('portfolioChart')) {
+    const ctx = document.getElementById('portfolioChart').getContext('2d');
+    const portfolioChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: {{ portfolio_allocation.labels | tojson if portfolio_allocation else '[]' }},
+            datasets: [{
+                data: {{ portfolio_allocation.data | tojson if portfolio_allocation else '[]' }},
+                backgroundColor: [
+                    '#4e73df',
+                    '#1cc88a', 
+                    '#36b9cc',
+                    '#f6c23e',
+                    '#e74a3b',
+                    '#858796'
+                ],
+                hoverBorderColor: "rgba(234, 236, 244, 1)",
+            }],
+        },
+        options: {
+            maintainAspectRatio: false,
+            tooltips: {
+                backgroundColor: "rgb(255,255,255)",
+                bodyFontColor: "#858796",
+                borderColor: '#dddfeb',
+                borderWidth: 1,
+                xPadding: 15,
+                yPadding: 15,
+                displayColors: false,
+                caretPadding: 10,
+            },
+            legend: {
+                display: true,
+                position: 'bottom'
+            },
+            cutoutPercentage: 60,
+        },
+    });
+}
+</script>
+{% endblock %}

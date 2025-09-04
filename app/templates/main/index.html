@@ -1,0 +1,95 @@
+{% extends "base/base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="text-center mb-5">
+            <h1 class="display-4 mb-3">{{ _('Canadian Family Investment Management') }}</h1>
+            <p class="lead text-muted">{{ _('Comprehensive investment tracking for Canadian families') }}</p>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col-md-4 mb-3">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <i class="fas fa-users fa-3x text-primary mb-3"></i>
+                        <h5 class="card-title">{{ _('Multi-Member Families') }}</h5>
+                        <p class="card-text">{{ _('Track investments for all family members with joint account support') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <i class="fas fa-university fa-3x text-success mb-3"></i>
+                        <h5 class="card-title">{{ _('Canadian Accounts') }}</h5>
+                        <p class="card-text">{{ _('TFSA, RRSP, RESP, FHSA and other tax-advantaged accounts') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <i class="fas fa-chart-pie fa-3x text-info mb-3"></i>
+                        <h5 class="card-title">{{ _('Portfolio Analytics') }}</h5>
+                        <p class="card-text">{{ _('Comprehensive reports and risk analysis for your investments') }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center">
+            <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary btn-lg me-3">
+                <i class="fas fa-tachometer-alt me-2"></i>{{ _('View Dashboard') }}
+            </a>
+            <a href="{{ url_for('main.families') }}" class="btn btn-outline-secondary btn-lg">
+                <i class="fas fa-users me-2"></i>{{ _('Manage Families') }}
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-12">
+        <h3 class="text-center mb-4">{{ _('Key Features') }}</h3>
+        <div class="row">
+            <div class="col-lg-6 mb-3">
+                <div class="d-flex align-items-start">
+                    <i class="fas fa-check-circle text-success me-3 mt-1"></i>
+                    <div>
+                        <h6>{{ _('Multi-Currency Support') }}</h6>
+                        <p class="text-muted mb-0">{{ _('Track CAD and USD investments with automatic currency conversion') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6 mb-3">
+                <div class="d-flex align-items-start">
+                    <i class="fas fa-check-circle text-success me-3 mt-1"></i>
+                    <div>
+                        <h6>{{ _('CSV Import/Export') }}</h6>
+                        <p class="text-muted mb-0">{{ _('Support for major Canadian brokers including Questrade, TD, and more') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6 mb-3">
+                <div class="d-flex align-items-start">
+                    <i class="fas fa-check-circle text-success me-3 mt-1"></i>
+                    <div>
+                        <h6>{{ _('OCR Screenshot Recognition') }}</h6>
+                        <p class="text-muted mb-0">{{ _('Import transaction data from trading app screenshots') }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6 mb-3">
+                <div class="d-flex align-items-start">
+                    <i class="fas fa-check-circle text-success me-3 mt-1"></i>
+                    <div>
+                        <h6>{{ _('Multilingual Interface') }}</h6>
+                        <p class="text-muted mb-0">{{ _('Available in English and Simplified Chinese') }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
