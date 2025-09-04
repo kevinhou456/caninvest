@@ -54,7 +54,7 @@
 
 1. **克隆项目**
 ```bash
-git clone https://github.com/yourusername/canadian-family-investment.git
+git clone https://github.com/kevinhou456/canadian-family-investment.git
 cd canadian-family-investment
 ```
 
@@ -71,30 +71,17 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 ```
 
-4. **环境配置**
-```bash
-cp .env.example .env
-# 编辑.env文件配置数据库等参数
-```
-
-5. **初始化数据库**
-```bash
-flask db init
-flask db migrate -m "Initial migration"
-flask db upgrade
-```
-
-6. **初始化数据**
-```bash
-python init_data.py
-```
-
-7. **启动应用**
+4. **启动应用（自动初始化）**
 ```bash
 python run.py
 ```
 
-访问 http://localhost:5000
+系统将自动检测数据库状态：
+- 🔍 **全新安装**: 自动创建数据库表、初始化基础数据和演示数据
+- ✅ **已有数据库**: 直接启动，跳过初始化步骤
+- 🔧 **缺少基础数据**: 自动补充必要的账户类型和分类数据
+
+首次运行访问 http://localhost:5000
 
 ## 系统架构
 
