@@ -1032,3 +1032,90 @@ def holdings_analysis():
                          holdings_by_stock=holdings_by_stock,
                          holdings_by_category=holdings_by_category,
                          holdings_by_account=holdings_by_account)
+
+
+@bp.route('/transactions/delete-all', methods=['POST'])
+def delete_all_transactions():
+    """删除所有交易记录"""
+    try:
+        from app.models.transaction import Transaction
+        from app.models.holding import CurrentHolding
+        from app import db
+        
+        # 删除所有持仓记录
+        CurrentHolding.query.delete()
+        
+        # 删除所有交易记录
+        deleted_count = Transaction.query.delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Successfully deleted {deleted_count} transactions',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False, 
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/transactions/export')
+def export_transactions():
+    """导出交易记录为CSV文件"""
+    try:
+        from app.models.transaction import Transaction
+        import csv
+        import io
+        from flask import Response
+        from datetime import datetime
+        
+        # 获取所有交易记录
+        transactions = Transaction.query.order_by(Transaction.transaction_date.desc()).all()
+        
+        # 创建CSV内容
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # 写入标题行
+        writer.writerow([
+            'Date', 'Type', 'Stock Symbol', 'Stock Name', 'Quantity', 
+            'Price Per Share', 'Transaction Fee', 'Currency', 'Account', 
+            'Member', 'Exchange Rate', 'Notes'
+        ])
+        
+        # 写入数据行
+        for txn in transactions:
+            writer.writerow([
+                txn.transaction_date.strftime('%Y-%m-%d'),
+                txn.transaction_type,
+                txn.stock.symbol if txn.stock else '',
+                txn.stock.name if txn.stock else '',
+                float(txn.quantity),
+                float(txn.price_per_share),
+                float(txn.transaction_fee) if txn.transaction_fee else 0,
+                txn.account.currency if txn.account else '',
+                txn.account.name if txn.account else '',
+                txn.member.name if txn.member else '',
+                float(txn.exchange_rate) if txn.exchange_rate else '',
+                txn.notes or ''
+            ])
+        
+        # 创建响应
+        output.seek(0)
+        filename = f"transactions_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+        
+    except Exception as e:
+        from flask import flash, redirect, url_for
+        flash(f'导出失败: {str(e)}', 'error')
+        return redirect(url_for('main.transactions'))

@@ -3,9 +3,20 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>{{ _('All Transactions') }}</h2>
-    <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
-        <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
-    </a>
+    <div class="btn-group">
+        <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
+            <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
+        </a>
+        <a href="{{ url_for('main.import_transactions') }}" class="btn btn-success">
+            <i class="fas fa-file-import me-2"></i>{{ _('Import CSV') }}
+        </a>
+        <a href="{{ url_for('main.export_transactions') }}" class="btn btn-info">
+            <i class="fas fa-file-export me-2"></i>{{ _('Export CSV') }}
+        </a>
+        <button type="button" class="btn btn-danger" onclick="deleteAllTransactions()">
+            <i class="fas fa-trash me-2"></i>{{ _('Delete All') }}
+        </button>
+    </div>
 </div>
 
 {% if transactions.items %}
@@ -104,4 +115,30 @@
     </a>
 </div>
 {% endif %}
+
+<script>
+function deleteAllTransactions() {
+    if (confirm('{{ _("Are you sure you want to delete all transactions? This action cannot be undone.") }}')) {
+        fetch('{{ url_for("main.delete_all_transactions") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('{{ _("Error deleting transactions: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('{{ _("Error deleting transactions. Please try again.") }}');
+        });
+    }
+}
+</script>
 {% endblock %}
