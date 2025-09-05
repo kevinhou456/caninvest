@@ -11,47 +11,42 @@ class Transaction(db.Model):
     __tablename__ = 'transactions'
     
     id = db.Column(db.Integer, primary_key=True)
+    trade_date = db.Column(db.Date, nullable=False, comment='交易日期')
+    type = db.Column(db.String(4), nullable=False, comment='交易类型: BUY/SELL')
+    stock = db.Column(db.String(20), nullable=False, comment='股票代码')
+    quantity = db.Column(db.Numeric(15, 4), nullable=False, comment='交易数量')
+    price = db.Column(db.Numeric(15, 4), nullable=False, comment='单股价格')
+    currency = db.Column(db.String(3), nullable=False, comment='货币类型: USD/CAD')
+    fee = db.Column(db.Numeric(10, 2), default=0, comment='交易手续费')
     account_id = db.Column(db.Integer, db.ForeignKey('accounts.id'), nullable=False, comment='账户ID')
-    stock_id = db.Column(db.Integer, db.ForeignKey('stocks.id'), nullable=False, comment='股票ID')
-    member_id = db.Column(db.Integer, db.ForeignKey('members.id'), comment='操作成员ID')
-    transaction_type = db.Column(db.String(10), nullable=False, comment='交易类型: BUY/SELL')
-    quantity = db.Column(db.Numeric(15, 4), nullable=False, comment='数量')
-    price_per_share = db.Column(db.Numeric(15, 4), nullable=False, comment='单价')
-    transaction_fee = db.Column(db.Numeric(10, 2), default=0, comment='手续费')
-    transaction_date = db.Column(db.Date, nullable=False, comment='交易日期')
-    exchange_rate = db.Column(db.Numeric(10, 6), comment='汇率')
     notes = db.Column(db.Text, comment='交易备注')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
     
+    account = db.relationship('Account', back_populates='transactions')
+    
     def __repr__(self):
-        return f'<Transaction {self.transaction_type} {self.quantity} {self.stock.symbol if self.stock else ""}>'
+        return f'<Transaction {self.type} {self.stock} {self.quantity}@{self.price}>'
     
     def to_dict(self):
         return {
             'id': self.id,
+            'trade_date': self.trade_date.isoformat(),
+            'type': self.type,
+            'stock': self.stock,
+            'quantity': float(self.quantity),
+            'price': float(self.price),
+            'currency': self.currency,
+            'fee': float(self.fee),
             'account_id': self.account_id,
             'account': {
                 'id': self.account.id,
                 'name': self.account.name,
                 'currency': self.account.currency
             } if self.account else None,
-            'stock_id': self.stock_id,
-            'stock': self.stock.to_dict() if self.stock else None,
-            'member_id': self.member_id,
-            'member': {
-                'id': self.member.id,
-                'name': self.member.name
-            } if self.member else None,
-            'transaction_type': self.transaction_type,
-            'quantity': float(self.quantity),
-            'price_per_share': float(self.price_per_share),
-            'transaction_fee': float(self.transaction_fee),
-            'total_amount': float(self.total_amount),
-            'net_amount': float(self.net_amount),
-            'transaction_date': self.transaction_date.isoformat(),
-            'exchange_rate': float(self.exchange_rate) if self.exchange_rate else None,
             'notes': self.notes,
+            'total_amount': self.total_amount,
+            'net_amount': self.net_amount,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
@@ -59,148 +54,114 @@ class Transaction(db.Model):
     @property
     def total_amount(self):
         """交易总金额（不含手续费）"""
-        return self.quantity * self.price_per_share
+        return float(self.quantity * self.price)
     
     @property
     def net_amount(self):
-        """净金额"""
-        if self.transaction_type == 'BUY':
-            return self.total_amount + self.transaction_fee
+        """净金额（含手续费）"""
+        if self.type == 'BUY':
+            return self.total_amount + float(self.fee)
         else:  # SELL
-            return self.total_amount - self.transaction_fee
+            return self.total_amount - float(self.fee)
     
-    @property
-    def amount_in_base_currency(self):
-        """转换为基础货币的金额"""
-        amount = self.net_amount
-        if self.exchange_rate and self.exchange_rate != 1:
-            amount = amount * self.exchange_rate
-        return amount
     
-    def update_holdings(self):
-        """更新持仓记录"""
-        from app.models.holding import CurrentHolding
+    @classmethod
+    def get_by_account(cls, account_id, limit=None):
+        """按账户ID获取交易记录"""
+        query = cls.query.filter_by(account_id=account_id).order_by(cls.trade_date.desc())
+        if limit:
+            query = query.limit(limit)
+        return query.all()
+    
+    @classmethod
+    def get_by_stock(cls, stock_symbol, limit=None):
+        """按股票代码获取交易记录"""
+        query = cls.query.filter_by(stock=stock_symbol).order_by(cls.trade_date.desc())
+        if limit:
+            query = query.limit(limit)
+        return query.all()
+    
+    @classmethod
+    def get_by_date_range(cls, start_date=None, end_date=None, limit=None):
+        """按日期范围获取交易记录"""
+        query = cls.query
+        if start_date:
+            query = query.filter(cls.trade_date >= start_date)
+        if end_date:
+            query = query.filter(cls.trade_date <= end_date)
         
-        # 查找或创建持仓记录
-        holding = CurrentHolding.query.filter_by(
-            account_id=self.account_id,
-            stock_id=self.stock_id
+        query = query.order_by(cls.trade_date.desc())
+        if limit:
+            query = query.limit(limit)
+        return query.all()
+    
+    @classmethod
+    def get_portfolio_summary(cls, account_id=None):
+        """获取投资组合摘要"""
+        query = cls.query
+        if account_id:
+            query = query.filter_by(account_id=account_id)
+        
+        transactions = query.all()
+        portfolio = {}
+        
+        for tx in transactions:
+            if tx.stock not in portfolio:
+                portfolio[tx.stock] = {
+                    'symbol': tx.stock,
+                    'currency': tx.currency,
+                    'total_shares': 0,
+                    'total_cost': 0,
+                    'transactions': 0
+                }
+            
+            if tx.type == 'BUY':
+                portfolio[tx.stock]['total_shares'] += float(tx.quantity)
+                portfolio[tx.stock]['total_cost'] += tx.net_amount
+            else:  # SELL
+                portfolio[tx.stock]['total_shares'] -= float(tx.quantity)
+                portfolio[tx.stock]['total_cost'] -= tx.net_amount
+            
+            portfolio[tx.stock]['transactions'] += 1
+        
+        # 计算平均成本
+        for stock_data in portfolio.values():
+            if stock_data['total_shares'] > 0:
+                stock_data['average_cost'] = stock_data['total_cost'] / stock_data['total_shares']
+            else:
+                stock_data['average_cost'] = 0
+        
+        return portfolio
+    
+    @classmethod
+    def get_monthly_summary(cls, year=None, month=None):
+        """获取月度交易摘要"""
+        from sqlalchemy import extract, func
+        
+        query = cls.query
+        if year:
+            query = query.filter(extract('year', cls.trade_date) == year)
+        if month:
+            query = query.filter(extract('month', cls.trade_date) == month)
+        
+        # 按类型统计
+        buy_summary = query.filter_by(type='BUY').with_entities(
+            func.count().label('count'),
+            func.sum(cls.quantity * cls.price + cls.fee).label('total_amount')
         ).first()
         
-        if not holding:
-            holding = CurrentHolding(
-                account_id=self.account_id,
-                stock_id=self.stock_id,
-                total_shares=0,
-                average_cost=0
-            )
-            db.session.add(holding)
+        sell_summary = query.filter_by(type='SELL').with_entities(
+            func.count().label('count'),
+            func.sum(cls.quantity * cls.price - cls.fee).label('total_amount')
+        ).first()
         
-        # 更新持仓
-        if self.transaction_type == 'BUY':
-            # 计算新的平均成本
-            old_total_cost = holding.total_shares * holding.average_cost
-            new_total_cost = old_total_cost + self.net_amount
-            new_total_shares = holding.total_shares + self.quantity
-            
-            holding.total_shares = new_total_shares
-            holding.average_cost = new_total_cost / new_total_shares if new_total_shares > 0 else 0
-            
-        elif self.transaction_type == 'SELL':
-            holding.total_shares = max(0, holding.total_shares - self.quantity)
-            # 平均成本保持不变
-        
-        holding.last_updated = datetime.utcnow()
-        
-        # 如果持仓为0，可以选择删除记录或保留
-        if holding.total_shares == 0:
-            # 保留记录但标记为0持仓
-            pass
-    
-    @staticmethod
-    def get_transactions_by_account(account_id, start_date=None, end_date=None, limit=None):
-        """按账户获取交易记录"""
-        query = Transaction.query.filter_by(account_id=account_id)
-        
-        if start_date:
-            query = query.filter(Transaction.transaction_date >= start_date)
-        if end_date:
-            query = query.filter(Transaction.transaction_date <= end_date)
-        
-        query = query.order_by(Transaction.transaction_date.desc())
-        
-        if limit:
-            query = query.limit(limit)
-        
-        return query.all()
-    
-    @staticmethod
-    def get_transactions_by_member(member_id, start_date=None, end_date=None, limit=None):
-        """按成员获取交易记录"""
-        query = Transaction.query.filter_by(member_id=member_id)
-        
-        if start_date:
-            query = query.filter(Transaction.transaction_date >= start_date)
-        if end_date:
-            query = query.filter(Transaction.transaction_date <= end_date)
-        
-        query = query.order_by(Transaction.transaction_date.desc())
-        
-        if limit:
-            query = query.limit(limit)
-        
-        return query.all()
-    
-    @staticmethod
-    def get_transactions_by_stock(stock_id, start_date=None, end_date=None, limit=None):
-        """按股票获取交易记录"""
-        query = Transaction.query.filter_by(stock_id=stock_id)
-        
-        if start_date:
-            query = query.filter(Transaction.transaction_date >= start_date)
-        if end_date:
-            query = query.filter(Transaction.transaction_date <= end_date)
-        
-        query = query.order_by(Transaction.transaction_date.desc())
-        
-        if limit:
-            query = query.limit(limit)
-        
-        return query.all()
-    
-    @staticmethod
-    def calculate_realized_gain(account_id, stock_id=None):
-        """计算已实现收益"""
-        query = Transaction.query.filter_by(account_id=account_id)
-        if stock_id:
-            query = query.filter_by(stock_id=stock_id)
-        
-        transactions = query.order_by(Transaction.transaction_date).all()
-        
-        # 简化的FIFO计算
-        holdings_queue = []  # [(quantity, price)]
-        realized_gain = 0
-        
-        for transaction in transactions:
-            if transaction.transaction_type == 'BUY':
-                holdings_queue.append((transaction.quantity, transaction.price_per_share))
-            
-            elif transaction.transaction_type == 'SELL':
-                remaining_to_sell = transaction.quantity
-                
-                while remaining_to_sell > 0 and holdings_queue:
-                    held_quantity, held_price = holdings_queue.pop(0)
-                    
-                    if held_quantity <= remaining_to_sell:
-                        # 全部卖出这批持仓
-                        gain = held_quantity * (transaction.price_per_share - held_price)
-                        realized_gain += gain
-                        remaining_to_sell -= held_quantity
-                    else:
-                        # 部分卖出
-                        gain = remaining_to_sell * (transaction.price_per_share - held_price)
-                        realized_gain += gain
-                        holdings_queue.insert(0, (held_quantity - remaining_to_sell, held_price))
-                        remaining_to_sell = 0
-        
-        return realized_gain
+        return {
+            'buy': {
+                'count': buy_summary.count or 0,
+                'amount': float(buy_summary.total_amount or 0)
+            },
+            'sell': {
+                'count': sell_summary.count or 0,
+                'amount': float(sell_summary.total_amount or 0)
+            }
+        }

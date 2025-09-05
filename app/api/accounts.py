@@ -238,8 +238,9 @@ def get_account_holdings(account_id):
     """获取账户持仓"""
     account = Account.query.get_or_404(account_id)
     
-    from app.models.holding import CurrentHolding
-    holdings = CurrentHolding.get_holdings_by_account(account_id)
+    # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
+    # holdings = CurrentHolding.get_holdings_by_account(account_id)  # Temporarily disabled
+    holdings = []  # TODO: Re-implement with new holding system
     
     return jsonify({
         'account': account.to_dict(),

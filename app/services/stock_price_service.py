@@ -8,7 +8,8 @@ from typing import Dict, List, Optional, Tuple
 from decimal import Decimal
 from flask import current_app
 from app import db
-from app.models.stock import Stock
+# from app.models.stock import Stock  # Stock model deleted
+from app.models.stocks_cache import StocksCache
 from app.models.price_cache import StockPriceCache, PriceUpdateLog
 
 
@@ -74,12 +75,21 @@ class StockPriceService:
         return results
     
     def update_stock_prices(self, stock_ids: List[int] = None) -> Dict:
-        """更新股票价格（批量）"""
-        if stock_ids:
-            stocks = Stock.query.filter(Stock.id.in_(stock_ids), Stock.is_active == True).all()
-        else:
-            # 更新所有活跃股票的价格
-            stocks = Stock.query.filter_by(is_active=True).all()
+        """更新股票价格（批量） - 临时禁用"""
+        # Temporarily disabled due to deleted Stock model
+        return {
+            'error': 'Stock price updates temporarily disabled during system redesign',
+            'updated': 0,
+            'skipped': 0,
+            'failed': 0,
+            'errors': ['Stock model has been deleted']
+        }
+        
+        # Original code commented out - needs to be re-implemented with StocksCache
+        # if stock_ids:
+        #     stocks = Stock.query.filter(Stock.id.in_(stock_ids), Stock.is_active == True).all()
+        # else:
+        #     stocks = Stock.query.filter_by(is_active=True).all()
         
         results = {
             'updated': 0,

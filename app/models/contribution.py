@@ -193,8 +193,8 @@ class Contribution(db.Model):
         buy_transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.transaction_type == 'BUY',
-            Transaction.transaction_date >= start_date,
-            Transaction.transaction_date <= end_date
+            Transaction.trade_date >= start_date,
+            Transaction.trade_date <= end_date
         ).all()
         
         contributions_created = []
@@ -205,7 +205,7 @@ class Contribution(db.Model):
                 Contribution.account_id == account_id,
                 Contribution.member_id == transaction.member_id,
                 Contribution.year == year,
-                Contribution.contribution_date == transaction.transaction_date,
+                Contribution.contribution_date == transaction.trade_date,
                 Contribution.contribution_amount == transaction.net_amount
             ).first()
             
@@ -215,7 +215,7 @@ class Contribution(db.Model):
                     member_id=transaction.member_id,
                     year=year,
                     contribution_amount=transaction.net_amount,
-                    contribution_date=transaction.transaction_date,
+                    contribution_date=transaction.trade_date,
                     contribution_type='CASH',
                     notes=f'Auto-created from transaction {transaction.id}'
                 )

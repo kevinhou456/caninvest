@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from app.models.family import Family
 from app.models.member import Member
 from app.models.account import Account
-from app.models.holding import CurrentHolding
+# from app.models.holding import CurrentHolding  # CurrentHolding model deleted
 from app.models.transaction import Transaction
 from app.models.contribution import Contribution
 from . import bp
@@ -44,7 +44,8 @@ def get_family_portfolio_report(family_id):
     members_data = []
     for member in family.members:
         member_summary = member.get_portfolio_summary()
-        member_holdings = CurrentHolding.get_holdings_by_member(member.id)
+        # member_holdings = CurrentHolding.get_holdings_by_member(member.id)  # Temporarily disabled
+        member_holdings = []  # TODO: Re-implement with new holding system
         members_data.append({
             'member': member.to_dict(),
             'portfolio_summary': member_summary,

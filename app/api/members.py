@@ -138,8 +138,9 @@ def get_member_portfolio(member_id):
     member = Member.query.get_or_404(member_id)
     
     # 获取成员持仓
-    from app.models.holding import CurrentHolding
-    holdings = CurrentHolding.get_holdings_by_member(member_id)
+    # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
+    # holdings = CurrentHolding.get_holdings_by_member(member_id)  # Temporarily disabled
+    holdings = []  # TODO: Re-implement with new holding system
     
     # 获取成员交易历史
     from app.models.transaction import Transaction

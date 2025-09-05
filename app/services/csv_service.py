@@ -12,7 +12,8 @@ from typing import Dict, List, Optional, Tuple
 from flask import current_app
 from app import db
 from app.models.transaction import Transaction
-from app.models.stock import Stock, StockCategory
+# from app.models.stock import Stock, StockCategory  # Stock models deleted
+from app.models.stocks_cache import StocksCache
 from app.models.account import Account
 from app.models.import_task import ImportTask, TaskStatus
 
@@ -38,14 +39,23 @@ class CSVTransactionService:
         }
     
     def process_csv_import(self, import_task_id: int):
-        """处理CSV导入任务"""
+        """处理CSV导入任务 - 临时禁用"""
         task = ImportTask.query.get(import_task_id)
         if not task:
             raise ValueError(f"Import task {import_task_id} not found")
         
-        task.status = TaskStatus.PROCESSING
+        # Temporarily disabled due to deleted models
+        task.status = TaskStatus.FAILED
         task.started_at = datetime.now()
+        task.completed_at = datetime.now()
+        task.error_details = "CSV import temporarily disabled during system redesign - Stock model has been deleted"
         db.session.commit()
+        return task
+        
+        # Original code commented out
+        # task.status = TaskStatus.PROCESSING
+        # task.started_at = datetime.now()
+        # db.session.commit()
         
         try:
             # 解析CSV文件
@@ -103,7 +113,7 @@ class CSVTransactionService:
             # Questrade CSV格式示例
             # Settlement Date,Transaction Date,Action,Symbol,Description,Quantity,Price,Gross Amount,Commission,Net Amount,Currency
             try:
-                transaction_date = datetime.strptime(row['Transaction Date'], '%m/%d/%Y').date()
+                trade_date = datetime.strptime(row['Transaction Date'], '%m/%d/%Y').date()
                 settlement_date = datetime.strptime(row['Settlement Date'], '%m/%d/%Y').date()
                 
                 # 处理股票符号
@@ -129,7 +139,7 @@ class CSVTransactionService:
                     'transaction_fee': abs(float(row['Commission'])) if row['Commission'] else 0,
                     'total_amount': abs(float(row['Gross Amount'])) if row['Gross Amount'] else 0,
                     'net_amount': abs(float(row['Net Amount'])) if row['Net Amount'] else 0,
-                    'transaction_date': transaction_date,
+                    'trade_date': trade_date,
                     'settlement_date': settlement_date,
                     'currency': row.get('Currency', 'CAD').upper(),
                     'notes': f'Imported from Questrade CSV - {row.get("Action", "")}',
@@ -149,7 +159,7 @@ class CSVTransactionService:
         for row in reader:
             try:
                 # TD CSV格式可能有所不同，这里是一个示例
-                transaction_date = datetime.strptime(row['Date'], '%Y-%m-%d').date()
+                trade_date = datetime.strptime(row['Date'], '%Y-%m-%d').date()
                 
                 symbol = row['Symbol'].strip().upper()
                 if not symbol:
@@ -171,7 +181,7 @@ class CSVTransactionService:
                     'price_per_share': float(row['Price']) if row['Price'] else 0,
                     'transaction_fee': abs(float(row['Commission'])) if row['Commission'] else 0,
                     'total_amount': abs(float(row['Amount'])) if row['Amount'] else 0,
-                    'transaction_date': transaction_date,
+                    'trade_date': trade_date,
                     'currency': row.get('Currency', 'CAD').upper(),
                     'notes': f'Imported from TD CSV - {row.get("Transaction Type", "")}',
                     'broker_reference': f"TD-{row.get('Date', '')}-{symbol}"
@@ -193,7 +203,7 @@ class CSVTransactionService:
                 if row.get('DataDiscriminator') != 'Order':
                     continue
                 
-                transaction_date = datetime.strptime(row['TradeDate'], '%Y%m%d').date()
+                trade_date = datetime.strptime(row['TradeDate'], '%Y%m%d').date()
                 
                 symbol = row['Symbol'].strip().upper()
                 if not symbol:
@@ -211,7 +221,7 @@ class CSVTransactionService:
                     'price_per_share': float(row['TradePrice']),
                     'transaction_fee': abs(float(row['IBCommission'])),
                     'total_amount': abs(float(row['Proceeds'])),
-                    'transaction_date': transaction_date,
+                    'trade_date': trade_date,
                     'currency': row.get('CurrencyPrimary', 'USD').upper(),
                     'exchange': row.get('ListingExchange', ''),
                     'notes': f'Imported from Interactive Brokers CSV',
@@ -230,7 +240,7 @@ class CSVTransactionService:
         
         for row in reader:
             try:
-                transaction_date = datetime.strptime(row['Settled date'], '%Y-%m-%d').date()
+                trade_date = datetime.strptime(row['Settled date'], '%Y-%m-%d').date()
                 
                 symbol = row['Symbol'].strip().upper()
                 if not symbol:
@@ -255,7 +265,7 @@ class CSVTransactionService:
                     'price_per_share': float(row['Fill price']) if row['Fill price'] else 0,
                     'transaction_fee': 0,  # Wealthsimple通常免佣金
                     'total_amount': abs(float(row['Market value'])) if row['Market value'] else 0,
-                    'transaction_date': transaction_date,
+                    'trade_date': trade_date,
                     'currency': 'CAD',  # Wealthsimple主要是CAD
                     'notes': f'Imported from Wealthsimple CSV - {row.get("Activity type", "")}',
                     'broker_reference': f"WS-{row.get('Settled date', '')}-{symbol}"
@@ -273,7 +283,7 @@ class CSVTransactionService:
         
         # 通用格式的列映射
         column_mapping = {
-            'date': ['date', 'transaction_date', 'trade_date'],
+            'date': ['date', 'trade_date', 'trade_date'],
             'symbol': ['symbol', 'ticker', 'stock_symbol'],
             'type': ['type', 'transaction_type', 'action'],
             'quantity': ['quantity', 'shares', 'qty'],
@@ -300,15 +310,15 @@ class CSVTransactionService:
                     continue
                 
                 # 尝试多种日期格式
-                transaction_date = None
+                trade_date = None
                 for date_format in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y%m%d']:
                     try:
-                        transaction_date = datetime.strptime(date_str, date_format).date()
+                        trade_date = datetime.strptime(date_str, date_format).date()
                         break
                     except ValueError:
                         continue
                 
-                if not transaction_date:
+                if not trade_date:
                     continue
                 
                 symbol = row.get(detected_columns.get('symbol', '')).strip().upper()
@@ -327,7 +337,7 @@ class CSVTransactionService:
                     'price_per_share': float(row.get(detected_columns.get('price', ''), 0)),
                     'transaction_fee': abs(float(row.get(detected_columns.get('fee', ''), 0))),
                     'total_amount': abs(float(row.get(detected_columns.get('total', ''), 0))),
-                    'transaction_date': transaction_date,
+                    'trade_date': trade_date,
                     'currency': row.get('currency', 'CAD').upper(),
                     'notes': f'Imported from Generic CSV',
                     'broker_reference': f"CSV-{date_str}-{symbol}"
@@ -373,7 +383,7 @@ class CSVTransactionService:
                     price_per_share=Decimal(str(txn_data['price_per_share'])),
                     transaction_fee=Decimal(str(txn_data['transaction_fee'])),
                     total_amount=Decimal(str(txn_data['total_amount'])),
-                    transaction_date=txn_data['transaction_date'],
+                    trade_date=txn_data['trade_date'],
                     settlement_date=txn_data.get('settlement_date'),
                     currency=txn_data.get('currency', account.currency),
                     exchange_rate=txn_data.get('exchange_rate'),
@@ -399,12 +409,12 @@ class CSVTransactionService:
         db.session.commit()
         return imported_count, failed_count, errors
     
-    def _find_or_create_stock(self, txn_data: Dict) -> Stock:
+    def _find_or_create_stock(self, txn_data: Dict) -> StocksCache:
         """查找或创建股票记录"""
         symbol = txn_data['symbol']
         
         # 首先查找现有股票
-        stock = Stock.query.filter_by(symbol=symbol).first()
+        stock = StocksCache.query.filter_by(symbol=symbol).first()
         
         if stock:
             return stock
@@ -428,25 +438,24 @@ class CSVTransactionService:
             else:
                 exchange = 'UNKNOWN'
         
-        stock = Stock(
+        stock = StocksCache(
             symbol=symbol,
             name=txn_data.get('name', symbol),
-            exchange=exchange,
-            currency=currency,
-            is_active=True
+            exchange=exchange
         )
         
-        # 尝试自动分类
-        category = self._suggest_stock_category(symbol, txn_data.get('name', ''))
-        if category:
-            stock.category_id = category.id
+        # 跳过自动分类（StockCategory已删除）
+        # TODO: 实现新的分类系统
+        # category = self._suggest_stock_category(symbol, txn_data.get('name', ''))
+        # if category:
+        #     stock.category_id = category.id
         
         db.session.add(stock)
         db.session.flush()
         
         return stock
     
-    def _suggest_stock_category(self, symbol: str, name: str) -> Optional[StockCategory]:
+    def _suggest_stock_category(self, symbol: str, name: str) -> Optional[int]:
         """根据股票符号和名称建议分类"""
         # 简单的关键词匹配
         keywords = {
@@ -460,12 +469,13 @@ class CSVTransactionService:
         
         search_text = f"{symbol} {name}".lower()
         
-        for category_name, category_keywords in keywords.items():
-            for keyword in category_keywords:
-                if keyword in search_text:
-                    category = StockCategory.query.filter_by(name=category_name).first()
-                    if category:
-                        return category
+        # TODO: 实现新的分类系统
+        # for category_name, category_keywords in keywords.items():
+        #     for keyword in category_keywords:
+        #         if keyword in search_text:
+        #             category = StockCategory.query.filter_by(name=category_name).first()
+        #             if category:
+        #                 return category
         
         return None
     
@@ -478,13 +488,13 @@ class CSVTransactionService:
         
         if start_date:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-            query = query.filter(Transaction.transaction_date >= start_date)
+            query = query.filter(Transaction.trade_date >= start_date)
         
         if end_date:
             end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-            query = query.filter(Transaction.transaction_date <= end_date)
+            query = query.filter(Transaction.trade_date <= end_date)
         
-        transactions = query.order_by(Transaction.transaction_date.desc()).all()
+        transactions = query.order_by(Transaction.trade_date.desc()).all()
         
         # 创建临时文件
         export_dir = current_app.config.get('EXPORT_FOLDER', tempfile.gettempdir())
@@ -503,7 +513,7 @@ class CSVTransactionService:
             writer.writeheader()
             for txn in transactions:
                 writer.writerow({
-                    'Date': txn.transaction_date.isoformat(),
+                    'Date': txn.trade_date.isoformat(),
                     'Symbol': txn.stock.symbol,
                     'Name': txn.stock.name,
                     'Type': txn.transaction_type,

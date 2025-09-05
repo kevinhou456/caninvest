@@ -8,9 +8,10 @@ from datetime import datetime
 from app import db
 from app.models.transaction import Transaction
 from app.models.account import Account
-from app.models.stock import Stock
+# from app.models.stock import Stock  # Stock model deleted - using StocksCache instead
+from app.models.stocks_cache import StocksCache
 from app.models.member import Member
-from app.models.holding import CurrentHolding
+# from app.models.holding import CurrentHolding  # CurrentHolding model deleted
 from . import bp
 
 @bp.route('/accounts/<int:account_id>/transactions', methods=['GET'])
@@ -30,16 +31,17 @@ def get_account_transactions(account_id):
     query = Transaction.query.filter_by(account_id=account_id)
     
     if start_date:
-        query = query.filter(Transaction.transaction_date >= datetime.strptime(start_date, '%Y-%m-%d').date())
+        query = query.filter(Transaction.trade_date >= datetime.strptime(start_date, '%Y-%m-%d').date())
     if end_date:
-        query = query.filter(Transaction.transaction_date <= datetime.strptime(end_date, '%Y-%m-%d').date())
+        query = query.filter(Transaction.trade_date <= datetime.strptime(end_date, '%Y-%m-%d').date())
     if transaction_type and transaction_type in ['BUY', 'SELL']:
         query = query.filter_by(transaction_type=transaction_type)
-    if stock_symbol:
-        query = query.join(Stock).filter(Stock.symbol.ilike(f'%{stock_symbol}%'))
+    # TODO: Re-implement stock symbol filtering with new StocksCache model
+    # if stock_symbol:
+    #     query = query.join(Stock).filter(Stock.symbol.ilike(f'%{stock_symbol}%'))
     
     # 分页查询
-    transactions = query.order_by(Transaction.transaction_date.desc()).paginate(
+    transactions = query.order_by(Transaction.trade_date.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
     
@@ -65,7 +67,7 @@ def create_transaction(account_id):
         return jsonify({'error': _('No data provided')}), 400
     
     # 验证必需字段
-    required_fields = ['symbol', 'transaction_type', 'quantity', 'price_per_share', 'transaction_date']
+    required_fields = ['symbol', 'transaction_type', 'quantity', 'price_per_share', 'trade_date']
     for field in required_fields:
         if field not in data or data[field] is None:
             return jsonify({'error': _(f'{field} is required')}), 400
@@ -87,17 +89,20 @@ def create_transaction(account_id):
     
     # 解析日期
     try:
-        transaction_date = datetime.strptime(data['transaction_date'], '%Y-%m-%d').date()
+        trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
     except ValueError:
         return jsonify({'error': _('Invalid date format')}), 400
     
-    # 获取或创建股票
-    stock = Stock.get_or_create(
-        symbol=data['symbol'].upper(),
-        name=data.get('stock_name'),
-        exchange=data.get('exchange'),
-        currency=account.currency
-    )
+    # TODO: Re-implement stock creation with new StocksCache model
+    # For now, we'll create a placeholder stock_id or disable transaction creation
+    # stock = Stock.get_or_create(
+    #     symbol=data['symbol'].upper(),
+    #     name=data.get('stock_name'),
+    #     exchange=data.get('exchange'),
+    #     currency=account.currency
+    # )
+    # Temporarily disabled - need to implement stock lookup with StocksCache
+    return jsonify({'error': _('Transaction creation temporarily disabled during system redesign')}), 503
     
     # 验证成员（如果提供）
     member_id = data.get('member_id')
@@ -106,11 +111,11 @@ def create_transaction(account_id):
         if not member:
             return jsonify({'error': _('Invalid member')}), 400
     
-    # 对于卖出交易，检查是否有足够的持仓
-    if data['transaction_type'] == 'SELL':
-        holding = CurrentHolding.query.filter_by(account_id=account_id, stock_id=stock.id).first()
-        if not holding or holding.total_shares < quantity:
-            return jsonify({'error': _('Insufficient shares to sell')}), 400
+    # TODO: Re-implement holding validation with new system
+    # if data['transaction_type'] == 'SELL':
+    #     holding = CurrentHolding.query.filter_by(account_id=account_id, stock_id=stock.id).first()
+    #     if not holding or holding.total_shares < quantity:
+    #         return jsonify({'error': _('Insufficient shares to sell')}), 400
     
     # 创建交易记录
     transaction = Transaction(
@@ -121,7 +126,7 @@ def create_transaction(account_id):
         quantity=quantity,
         price_per_share=price_per_share,
         transaction_fee=transaction_fee,
-        transaction_date=transaction_date,
+        trade_date=trade_date,
         exchange_rate=data.get('exchange_rate'),
         notes=data.get('notes')
     )
@@ -129,8 +134,8 @@ def create_transaction(account_id):
     db.session.add(transaction)
     db.session.flush()  # 获取交易ID
     
-    # 更新持仓
-    transaction.update_holdings()
+    # TODO: Re-implement holdings update with new system
+    # transaction.update_holdings()
     
     db.session.commit()
     
@@ -187,9 +192,9 @@ def update_transaction(transaction_id):
         except (ValueError, TypeError):
             return jsonify({'error': _('Invalid transaction fee')}), 400
     
-    if 'transaction_date' in data:
+    if 'trade_date' in data:
         try:
-            transaction.transaction_date = datetime.strptime(data['transaction_date'], '%Y-%m-%d').date()
+            transaction.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
         except ValueError:
             return jsonify({'error': _('Invalid date format')}), 400
     
@@ -199,10 +204,9 @@ def update_transaction(transaction_id):
     if 'exchange_rate' in data:
         transaction.exchange_rate = data.get('exchange_rate')
     
-    # 重新计算持仓（如果数量或价格发生变化）
-    if any(key in data for key in ['quantity', 'price_per_share', 'transaction_fee']):
-        # 重新计算整个股票的持仓
-        CurrentHolding.recalculate_holding(transaction.account_id, transaction.stock_id)
+    # TODO: Re-implement holdings recalculation with new system
+    # if any(key in data for key in ['quantity', 'price_per_share', 'transaction_fee']):
+    #     CurrentHolding.recalculate_holding(transaction.account_id, transaction.stock_id)
     
     db.session.commit()
     
@@ -221,8 +225,8 @@ def delete_transaction(transaction_id):
     
     db.session.delete(transaction)
     
-    # 重新计算持仓
-    CurrentHolding.recalculate_holding(account_id, stock_id)
+    # TODO: Re-implement holdings recalculation with new system
+    # CurrentHolding.recalculate_holding(account_id, stock_id)
     
     db.session.commit()
     
@@ -245,12 +249,12 @@ def get_member_transactions(member_id):
     query = Transaction.query.filter_by(member_id=member_id)
     
     if start_date:
-        query = query.filter(Transaction.transaction_date >= datetime.strptime(start_date, '%Y-%m-%d').date())
+        query = query.filter(Transaction.trade_date >= datetime.strptime(start_date, '%Y-%m-%d').date())
     if end_date:
-        query = query.filter(Transaction.transaction_date <= datetime.strptime(end_date, '%Y-%m-%d').date())
+        query = query.filter(Transaction.trade_date <= datetime.strptime(end_date, '%Y-%m-%d').date())
     
     # 分页查询
-    transactions = query.order_by(Transaction.transaction_date.desc()).paginate(
+    transactions = query.order_by(Transaction.trade_date.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
     
@@ -290,9 +294,9 @@ def batch_delete_transactions():
         holdings_to_recalculate.add((transaction.account_id, transaction.stock_id))
         db.session.delete(transaction)
     
-    # 重新计算持仓
-    for account_id, stock_id in holdings_to_recalculate:
-        CurrentHolding.recalculate_holding(account_id, stock_id)
+    # TODO: Re-implement holdings recalculation with new system
+    # for account_id, stock_id in holdings_to_recalculate:
+    #     CurrentHolding.recalculate_holding(account_id, stock_id)
     
     db.session.commit()
     

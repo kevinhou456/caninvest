@@ -10,7 +10,8 @@ from app.models.family import Family
 from app.models.member import Member
 from app.models.account import Account, AccountType, AccountMember
 from app.models.transaction import Transaction
-from app.models.stock import Stock, StockCategory
+# from app.models.stock import Stock, StockCategory  # Stock models deleted
+from app.models.stocks_cache import StocksCache
 from app.models.import_task import ImportTask, OCRTask
 
 
@@ -106,7 +107,7 @@ def dashboard():
         account_ids = [acc.id for acc in accounts]
         recent_transactions = Transaction.query.filter(
             Transaction.account_id.in_(account_ids)
-        ).order_by(Transaction.transaction_date.desc()).limit(10).all()
+        ).order_by(Transaction.trade_date.desc()).limit(10).all()
     else:
         recent_transactions = []
     
@@ -311,15 +312,15 @@ def transactions():
     """交易记录列表页面"""
     page = request.args.get('page', 1, type=int)
     account_id = request.args.get('account_id', type=int)
-    transaction_type = request.args.get('type')
+    type = request.args.get('type')
     
     query = Transaction.query
     if account_id:
         query = query.filter_by(account_id=account_id)
-    if transaction_type:
-        query = query.filter_by(transaction_type=transaction_type)
+    if type:
+        query = query.filter_by(type=type)
     
-    transactions = query.order_by(Transaction.transaction_date.desc()).paginate(
+    transactions = query.order_by(Transaction.trade_date.desc()).paginate(
         page=page, per_page=50, error_out=False
     )
     
@@ -332,48 +333,143 @@ def transactions():
                          current_view='transactions')
 
 
-@bp.route('/transactions/create')
+@bp.route('/transactions/create', methods=['GET', 'POST'])
 def create_transaction():
-    """创建交易记录页面"""
-    accounts = Account.query.all()
-    stocks = Stock.query.filter_by(is_active=True).all()
+    """创建交易记录"""
+    if request.method == 'POST':
+        try:
+            # 获取表单数据
+            account_id = request.form.get('account_id')
+            stock_symbol = request.form.get('stock_symbol', '').strip().upper()
+            stock_name = request.form.get('stock_name', '').strip()
+            currency = request.form.get('currency')
+            exchange = request.form.get('exchange', '').strip()
+            type = request.form.get('type')
+            quantity = request.form.get('quantity')
+            price = request.form.get('price')
+            fee = request.form.get('fee', 0)
+            trade_date = request.form.get('trade_date')
+            notes = request.form.get('notes', '').strip()
+            
+            # Debug logging
+            print(f"DEBUG: Form data - account_id: {account_id}, stock_symbol: {stock_symbol}, currency: {currency}")
+            print(f"DEBUG: stock_name: {stock_name}, exchange: {exchange}")
+            
+            # 验证必填字段
+            if not all([account_id, stock_symbol, currency, type, quantity, price, trade_date]):
+                flash(_('Please fill in all required fields'), 'error')
+                return redirect(url_for('main.transactions', account_id=account_id))
+            
+            # 转换数据类型
+            from datetime import datetime
+            trade_date = datetime.strptime(trade_date, '%Y-%m-%d').date()
+            quantity = float(quantity)
+            price = float(price)
+            fee = float(fee) if fee else 0
+            
+            # 验证账户是否存在
+            account = Account.query.get(account_id)
+            if not account:
+                flash(_('Selected account does not exist'), 'error')
+                return redirect(url_for('main.transactions', account_id=account_id))
+            
+            # 查找或创建股票缓存记录
+            stock_cache = StocksCache.query.filter_by(symbol=stock_symbol).first()
+            if not stock_cache:
+                # 创建新的股票缓存记录
+                stock_cache = StocksCache(
+                    symbol=stock_symbol,
+                    name=stock_name or stock_symbol,
+                    exchange=exchange or 'UNKNOWN'
+                )
+                db.session.add(stock_cache)
+                db.session.flush()  # 获取股票ID
+            
+            # 创建交易记录
+            transaction = Transaction(
+                account_id=account_id,
+                stock=stock_symbol,
+                type=type,
+                quantity=quantity,
+                price=price,
+                fee=fee,
+                trade_date=trade_date,
+                currency=currency,
+                notes=notes
+            )
+            
+            db.session.add(transaction)
+            db.session.commit()
+            
+            # 持仓记录已移除，现在通过交易记录实时计算
+            db.session.commit()
+            
+            flash(_('Transaction created successfully'), 'success')
+            
+            # 如果有指定账户ID，重定向到该账户的交易页面
+            if request.args.get('account_id'):
+                return redirect(url_for('main.transactions', account_id=request.args.get('account_id')))
+            else:
+                return redirect(url_for('main.transactions'))
+                
+        except ValueError as e:
+            flash(_('Invalid data format. Please check your inputs.'), 'error')
+            account_id = request.form.get('account_id')
+            if account_id:
+                return redirect(url_for('main.transactions', account_id=account_id))
+            return redirect(url_for('main.transactions'))
+        except Exception as e:
+            db.session.rollback()
+            flash(_('Error creating transaction: {}').format(str(e)), 'error')
+            account_id = request.form.get('account_id')
+            if account_id:
+                return redirect(url_for('main.transactions', account_id=account_id))
+            return redirect(url_for('main.transactions'))
     
+    # GET request - show form
+    accounts = Account.query.all()
+    # stocks = StocksCache.query.all()  # 暂时不需要预加载股票
+    family_members = Member.query.all()
+    
+    from datetime import date
     return render_template('transactions/create.html',
                          title=_('Create Transaction'),
                          accounts=accounts,
-                         stocks=stocks)
+                         # stocks=stocks,  # 暂时不需要股票列表
+                         family_members=family_members,
+                         today=date.today())
 
 
 @bp.route('/stocks')
 def stocks():
-    """股票和分类管理页面"""
+    """股票缓存管理页面"""
     page = request.args.get('page', 1, type=int)
-    category_id = request.args.get('category_id', type=int)
+    # category_id = request.args.get('category_id', type=int)  # 暂时移除分类功能
     search = request.args.get('search', '')
     
-    query = Stock.query
-    if category_id:
-        query = query.filter_by(category_id=category_id)
+    query = StocksCache.query
+    # if category_id:  # 暂时移除分类功能
+    #     query = query.filter_by(category_id=category_id)
     if search:
-        query = query.filter(Stock.symbol.contains(search) | Stock.name.contains(search))
+        query = query.filter(StocksCache.symbol.contains(search) | StocksCache.name.contains(search))
     
-    stocks = query.order_by(Stock.symbol).paginate(
+    stocks = query.order_by(StocksCache.symbol).paginate(
         page=page, per_page=50, error_out=False
     )
     
-    categories = StockCategory.query.all()
+    # categories = StockCategory.query.all()  # 暂时移除分类功能
     
     return render_template('stocks/list.html',
-                         title=_('Stocks & Categories'),
+                         title=_('Stocks Cache'),
                          stocks=stocks,
-                         categories=categories,
+                         # categories=categories,  # 暂时移除分类功能
                          search=search)
 
 
 @bp.route('/stocks/<symbol>')
 def stock_detail(symbol):
     """股票详情页面"""
-    stock = Stock.query.filter_by(symbol=symbol).first_or_404()
+    stock = StocksCache.query.filter_by(symbol=symbol).first_or_404()
     return render_template('stocks/detail.html',
                          title=f"{stock.symbol} - {stock.name}",
                          stock=stock)
@@ -381,11 +477,12 @@ def stock_detail(symbol):
 
 @bp.route('/categories')
 def categories():
-    """股票分类管理页面"""
-    categories = StockCategory.query.order_by(StockCategory.sort_order).all()
+    """股票分类管理页面 - 暂时禁用"""
+    # categories = StockCategory.query.order_by(StockCategory.sort_order).all()  # 分类功能暂时移除
     return render_template('categories/list.html',
-                         title=_('Stock Categories'),
-                         categories=categories)
+                         title=_('Stock Categories - Disabled'),
+                         # categories=categories  # 分类功能暂时移除
+                         )
 
 
 @bp.route('/import-transactions')
@@ -505,6 +602,35 @@ def get_translations():
     }
     
     return jsonify(translations)
+
+@bp.route('/api/stock-lookup')
+def stock_lookup():
+    """股票信息查找API"""
+    symbol = request.args.get('symbol', '').strip().upper()
+    currency = request.args.get('currency', '').upper()
+    
+    if not symbol or not currency:
+        return jsonify({'success': False, 'error': 'Symbol and currency are required'})
+    
+    # 在股票缓存中查找股票
+    stock_cache = StocksCache.query.filter_by(symbol=symbol).first()
+    
+    if stock_cache:
+        return jsonify({
+            'success': True,
+            'stock': {
+                'id': stock_cache.id,
+                'symbol': stock_cache.symbol,
+                'name': stock_cache.name,
+                'exchange': stock_cache.exchange,
+                # 'currency': currency  # currency不在StocksCache中存储
+            }
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': 'Stock not found in cache'
+        })
 
 
 # 占位符路由 - 用于模板链接，避免 BuildError
@@ -784,11 +910,11 @@ def annual_stats():
     for year in years:
         year_transactions = Transaction.query.join(Account).filter(
             Account.family_id == family.id,
-            extract('year', Transaction.transaction_date) == year
+            extract('year', Transaction.trade_date) == year
         ).all()
         
-        buy_amount = sum(t.quantity * t.price_per_share for t in year_transactions if t.transaction_type == 'buy')
-        sell_amount = sum(t.quantity * t.price_per_share for t in year_transactions if t.transaction_type == 'sell')
+        buy_amount = sum(t.quantity * t.price for t in year_transactions if t.type == 'buy')
+        sell_amount = sum(t.quantity * t.price for t in year_transactions if t.type == 'sell')
         net_investment = buy_amount - sell_amount
         
         annual_data.append({
@@ -829,12 +955,12 @@ def monthly_stats():
         
         month_transactions = Transaction.query.join(Account).filter(
             Account.family_id == family.id,
-            extract('year', Transaction.transaction_date) == year,
-            extract('month', Transaction.transaction_date) == month
+            extract('year', Transaction.trade_date) == year,
+            extract('month', Transaction.trade_date) == month
         ).all()
         
-        buy_amount = sum(t.quantity * t.price_per_share for t in month_transactions if t.transaction_type == 'buy')
-        sell_amount = sum(t.quantity * t.price_per_share for t in month_transactions if t.transaction_type == 'sell')
+        buy_amount = sum(t.quantity * t.price for t in month_transactions if t.type == 'buy')
+        sell_amount = sum(t.quantity * t.price for t in month_transactions if t.type == 'sell')
         
         monthly_data.append({
             'year': year,
@@ -884,13 +1010,13 @@ def quarterly_stats():
             
             quarter_transactions = Transaction.query.join(Account).filter(
                 Account.family_id == family.id,
-                extract('year', Transaction.transaction_date) == year,
-                extract('month', Transaction.transaction_date) >= start_month,
-                extract('month', Transaction.transaction_date) <= end_month
+                extract('year', Transaction.trade_date) == year,
+                extract('month', Transaction.trade_date) >= start_month,
+                extract('month', Transaction.trade_date) <= end_month
             ).all()
             
-            buy_amount = sum(t.quantity * t.price_per_share for t in quarter_transactions if t.transaction_type == 'buy')
-            sell_amount = sum(t.quantity * t.price_per_share for t in quarter_transactions if t.transaction_type == 'sell')
+            buy_amount = sum(t.quantity * t.price for t in quarter_transactions if t.type == 'buy')
+            sell_amount = sum(t.quantity * t.price for t in quarter_transactions if t.type == 'sell')
             
             quarterly_data.append({
                 'year': year,
@@ -932,11 +1058,11 @@ def daily_stats():
     while current_date <= end_date:
         day_transactions = Transaction.query.join(Account).filter(
             Account.family_id == family.id,
-            func.date(Transaction.transaction_date) == current_date
+            func.date(Transaction.trade_date) == current_date
         ).all()
         
-        buy_amount = sum(t.quantity * t.price_per_share for t in day_transactions if t.transaction_type == 'buy')
-        sell_amount = sum(t.quantity * t.price_per_share for t in day_transactions if t.transaction_type == 'sell')
+        buy_amount = sum(t.quantity * t.price for t in day_transactions if t.type == 'buy')
+        sell_amount = sum(t.quantity * t.price for t in day_transactions if t.type == 'sell')
         
         daily_data.append({
             'date': current_date,
@@ -978,20 +1104,20 @@ def holdings_analysis():
         account_holdings = {}
         
         for transaction in account_transactions:
-            symbol = transaction.stock.symbol if transaction.stock else 'CASH'
+            symbol = transaction.stock if transaction.stock else 'CASH'
             if symbol not in account_holdings:
                 account_holdings[symbol] = {
                     'quantity': 0,
                     'total_cost': 0,
-                    'stock': transaction.stock
+                    'stock': symbol  # 现在直接使用股票代码字符串
                 }
             
-            if transaction.transaction_type == 'buy':
+            if transaction.type == 'buy':
                 account_holdings[symbol]['quantity'] += transaction.quantity
-                account_holdings[symbol]['total_cost'] += transaction.quantity * transaction.price_per_share
-            elif transaction.transaction_type == 'sell':
+                account_holdings[symbol]['total_cost'] += transaction.quantity * transaction.price
+            elif transaction.type == 'sell':
                 account_holdings[symbol]['quantity'] -= transaction.quantity
-                account_holdings[symbol]['total_cost'] -= transaction.quantity * transaction.price_per_share
+                account_holdings[symbol]['total_cost'] -= transaction.quantity * transaction.price
         
         # 过滤掉数量为0的持仓
         account_holdings = {k: v for k, v in account_holdings.items() if v['quantity'] > 0}
@@ -1039,11 +1165,11 @@ def delete_all_transactions():
     """删除所有交易记录"""
     try:
         from app.models.transaction import Transaction
-        from app.models.holding import CurrentHolding
+        # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
         from app import db
         
-        # 删除所有持仓记录
-        CurrentHolding.query.delete()
+        # 删除所有持仓记录 - temporarily disabled
+        # CurrentHolding.query.delete()
         
         # 删除所有交易记录
         deleted_count = Transaction.query.delete()
@@ -1074,8 +1200,15 @@ def export_transactions():
         from flask import Response
         from datetime import datetime
         
-        # 获取所有交易记录
-        transactions = Transaction.query.order_by(Transaction.transaction_date.desc()).all()
+        # 获取账户ID参数
+        account_id = request.args.get('account_id', type=int)
+        
+        # 构建查询
+        query = Transaction.query
+        if account_id:
+            query = query.filter_by(account_id=account_id)
+        
+        transactions = query.order_by(Transaction.trade_date.desc()).all()
         
         # 创建CSV内容
         output = io.StringIO()
@@ -1091,17 +1224,17 @@ def export_transactions():
         # 写入数据行
         for txn in transactions:
             writer.writerow([
-                txn.transaction_date.strftime('%Y-%m-%d'),
-                txn.transaction_type,
-                txn.stock.symbol if txn.stock else '',
-                txn.stock.name if txn.stock else '',
+                txn.trade_date.strftime('%Y-%m-%d'),
+                txn.type,
+                txn.stock if txn.stock else '',
+                '',  # 股票名称暂时不可用，需要从StocksCache查询
                 float(txn.quantity),
-                float(txn.price_per_share),
-                float(txn.transaction_fee) if txn.transaction_fee else 0,
+                float(txn.price),
+                float(txn.fee) if txn.fee else 0,
                 txn.account.currency if txn.account else '',
                 txn.account.name if txn.account else '',
-                txn.member.name if txn.member else '',
-                float(txn.exchange_rate) if txn.exchange_rate else '',
+                '',  # member信息暂时不可用
+                '',  # exchange_rate字段已移除
                 txn.notes or ''
             ])
         

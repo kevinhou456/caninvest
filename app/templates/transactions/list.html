@@ -3,20 +3,22 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>{{ _('All Transactions') }}</h2>
+    {% if request.args.get('account_id') %}
     <div class="btn-group">
-        <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
+        <button type="button" class="btn btn-primary" onclick="openAddTransactionModal({{ request.args.get('account_id') }})">
             <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
-        </a>
-        <a href="{{ url_for('main.import_transactions') }}" class="btn btn-success">
+        </button>
+        <a href="{{ url_for('main.import_transactions', account_id=request.args.get('account_id')) }}" class="btn btn-success">
             <i class="fas fa-file-import me-2"></i>{{ _('Import CSV') }}
         </a>
-        <a href="{{ url_for('main.export_transactions') }}" class="btn btn-info">
+        <a href="{{ url_for('main.export_transactions', account_id=request.args.get('account_id')) }}" class="btn btn-info">
             <i class="fas fa-file-export me-2"></i>{{ _('Export CSV') }}
         </a>
         <button type="button" class="btn btn-danger" onclick="deleteAllTransactions()">
             <i class="fas fa-trash me-2"></i>{{ _('Delete All') }}
         </button>
     </div>
+    {% endif %}
 </div>
 
 {% if transactions.items %}
@@ -39,7 +41,7 @@
         <tbody>
             {% for transaction in transactions.items %}
             <tr>
-                <td>{{ transaction.transaction_date.strftime('%Y-%m-%d') }}</td>
+                <td>{{ transaction.trade_date.strftime('%Y-%m-%d') }}</td>
                 <td>
                     {% if transaction.transaction_type == 'BUY' %}
                         <span class="badge bg-success">{{ _('Buy') }}</span>
@@ -141,4 +143,10 @@ function deleteAllTransactions() {
     }
 }
 </script>
+
+<!-- Include Transaction Creation Modal -->
+{% if request.args.get('account_id') %}
+{% include 'transactions/create.html' %}
+{% endif %}
+
 {% endblock %}

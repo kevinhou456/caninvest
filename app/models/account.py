@@ -51,8 +51,8 @@ class Account(db.Model):
     
     # 关系
     account_members = db.relationship('AccountMember', backref='account', lazy='dynamic', cascade='all, delete-orphan')
-    transactions = db.relationship('Transaction', backref='account', lazy='dynamic', cascade='all, delete-orphan')
-    holdings = db.relationship('CurrentHolding', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+    transactions = db.relationship('Transaction', back_populates='account', lazy='dynamic', cascade='all, delete-orphan')
+    # holdings = db.relationship('CurrentHolding', backref='account', lazy='dynamic', cascade='all, delete-orphan')  # CurrentHolding model deleted
     contributions = db.relationship('Contribution', backref='account', lazy='dynamic', cascade='all, delete-orphan')
     
     def __repr__(self):
@@ -79,7 +79,7 @@ class Account(db.Model):
                 'unrealized_gain': float(self.unrealized_gain or 0),
                 'realized_gain': float(self.realized_gain or 0),
                 'transaction_count': self.transactions.count(),
-                'holding_count': self.holdings.count(),
+                'holding_count': 0,  # TODO: Re-implement with new holding system
                 'members': [am.to_dict() for am in self.account_members]
             })
         
@@ -87,20 +87,24 @@ class Account(db.Model):
     
     @property
     def current_value(self):
-        """当前市值"""
-        total = 0
-        for holding in self.holdings:
-            if holding.current_price:
-                total += holding.total_shares * holding.current_price
-        return total
+        """当前市值 - temporarily disabled"""
+        # TODO: Re-implement with new holding system
+        # total = 0
+        # for holding in self.holdings:
+        #     if holding.current_price:
+        #         total += holding.total_shares * holding.current_price
+        # return total
+        return 0
     
     @property
     def total_cost(self):
-        """总成本"""
-        total = 0
-        for holding in self.holdings:
-            total += holding.total_shares * holding.average_cost
-        return total
+        """总成本 - temporarily disabled"""
+        # TODO: Re-implement with new holding system
+        # total = 0
+        # for holding in self.holdings:
+        #     total += holding.total_shares * holding.average_cost
+        # return total
+        return 0
     
     @property
     def unrealized_gain(self):
@@ -141,38 +145,16 @@ class Account(db.Model):
         return account_member
     
     def get_holdings_summary(self):
-        """获取持仓摘要"""
-        holdings_data = []
-        total_value = 0
-        total_cost = 0
-        
-        for holding in self.holdings:
-            current_value = holding.total_shares * (holding.current_price or 0)
-            cost_value = holding.total_shares * holding.average_cost
-            
-            holding_data = {
-                'stock': holding.stock.to_dict(),
-                'total_shares': float(holding.total_shares),
-                'average_cost': float(holding.average_cost),
-                'current_price': float(holding.current_price or 0),
-                'current_value': current_value,
-                'cost_value': cost_value,
-                'unrealized_gain': current_value - cost_value,
-                'unrealized_gain_percent': ((current_value - cost_value) / cost_value * 100) if cost_value > 0 else 0
-            }
-            holdings_data.append(holding_data)
-            
-            total_value += current_value
-            total_cost += cost_value
-        
+        """获取持仓摘要 - temporarily disabled"""
+        # TODO: Re-implement with new holding system
         return {
-            'holdings': holdings_data,
+            'holdings': [],
             'summary': {
-                'total_value': total_value,
-                'total_cost': total_cost,
-                'total_unrealized_gain': total_value - total_cost,
-                'total_unrealized_gain_percent': ((total_value - total_cost) / total_cost * 100) if total_cost > 0 else 0,
-                'holding_count': len(holdings_data)
+                'total_value': 0,
+                'total_cost': 0,
+                'total_unrealized_gain': 0,
+                'total_unrealized_gain_percent': 0,
+                'holding_count': 0
             }
         }
 
@@ -191,6 +173,9 @@ class AccountMember(db.Model):
     __table_args__ = (
         db.UniqueConstraint('account_id', 'member_id', name='uq_account_member'),
     )
+    
+    # Relationships
+    member = db.relationship('Member', backref='account_memberships', lazy='select')
     
     def __repr__(self):
         return f'<AccountMember account_id={self.account_id} member_id={self.member_id}>'

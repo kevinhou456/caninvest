@@ -1,0 +1,290 @@
+<!-- Transaction Creation Modal -->
+<div class="modal fade" id="addTransactionModal" tabindex="-1" aria-labelledby="addTransactionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addTransactionModalLabel">
+                    <i class="fas fa-plus me-2"></i>{{ _('Add New Transaction') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <form method="POST" id="addTransactionForm" action="{{ url_for('main.create_transaction') }}">
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="modal_account_id" class="form-label">{{ _('Account') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_account_id" name="account_id" required>
+                                <option value="">{{ _('Select Account') }}</option>
+                                {% for account in accounts %}
+                                <option value="{{ account.id }}" data-currency="{{ account.currency }}">
+                                    {{ account.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal_stock_symbol" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="modal_stock_symbol" name="stock_symbol" 
+                                   placeholder="{{ _('e.g. AAPL, SHOP.TO') }}" required>
+                            <small class="form-text text-muted">{{ _('System will auto-lookup stock information') }}</small>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="modal_currency" class="form-label">{{ _('Currency') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_currency" name="currency" required>
+                                <option value="">{{ _('Select Currency') }}</option>
+                                <option value="USD">USD</option>
+                                <option value="CAD">CAD</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal_stock_info" class="form-label">{{ _('Stock Information') }}</label>
+                            <div id="modal_stock_info" class="form-control-plaintext">
+                                <small class="text-muted">{{ _('Enter symbol and currency to lookup') }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Hidden fields for stock info -->
+                    <input type="hidden" id="modal_stock_name" name="stock_name">
+                    <input type="hidden" id="modal_exchange" name="exchange">
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="modal_transaction_type" class="form-label">{{ _('Transaction Type') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_transaction_type" name="transaction_type" required>
+                                <option value="">{{ _('Select Type') }}</option>
+                                <option value="BUY">{{ _('Buy') }}</option>
+                                <option value="SELL">{{ _('Sell') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal_trade_date" class="form-label">{{ _('Transaction Date') }} <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="modal_trade_date" name="trade_date" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="modal_quantity" class="form-label">{{ _('Quantity') }} <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="modal_quantity" name="quantity" 
+                                   step="0.0001" min="0.0001" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="modal_price_per_share" class="form-label">{{ _('Price per Share') }} <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="modal_price_per_share" name="price_per_share" 
+                                   step="0.01" min="0.01" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="modal_transaction_fee" class="form-label">{{ _('Transaction Fee') }}</label>
+                            <input type="number" class="form-control" id="modal_transaction_fee" name="transaction_fee" 
+                                   step="0.01" min="0" value="0">
+                        </div>
+                    </div>
+                    
+                    
+                    <div class="mb-3">
+                        <label for="modal_notes" class="form-label">{{ _('Notes') }}</label>
+                        <textarea class="form-control" id="modal_notes" name="notes" rows="2" 
+                                  placeholder="{{ _('Optional transaction notes...') }}"></textarea>
+                    </div>
+                    
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            <h6 class="card-title">{{ _('Transaction Summary') }}</h6>
+                            <div id="modal-summary-content">
+                                <p class="text-muted">{{ _('Fill in the form to see transaction summary') }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>{{ _('Cancel') }}
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>{{ _('Create Transaction') }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Calculate and display transaction summary in modal
+function updateModalSummary() {
+    const quantity = parseFloat(document.getElementById('modal_quantity').value) || 0;
+    const price = parseFloat(document.getElementById('modal_price_per_share').value) || 0;
+    const fee = parseFloat(document.getElementById('modal_transaction_fee').value) || 0;
+    const type = document.getElementById('modal_transaction_type').value;
+    const currency = document.getElementById('modal_currency').value;
+    
+    if (quantity > 0 && price > 0 && currency) {
+        const total = quantity * price;
+        const netAmount = type === 'BUY' ? total + fee : total - fee;
+        
+        const summaryHtml = `
+            <p><strong>{{ _('Total Amount') }}:</strong> ${currency} ${total.toFixed(2)}</p>
+            <p><strong>{{ _('Transaction Fee') }}:</strong> ${currency} ${fee.toFixed(2)}</p>
+            <p><strong>{{ _('Net Amount') }}:</strong> ${currency} ${netAmount.toFixed(2)}</p>
+            <p class="text-${type === 'BUY' ? 'success' : 'danger'}">
+                <strong>${type === 'BUY' ? '{{ _("Total Cost") }}' : '{{ _("Total Proceeds") }}'}: ${currency} ${netAmount.toFixed(2)}</strong>
+            </p>
+        `;
+        
+        document.getElementById('modal-summary-content').innerHTML = summaryHtml;
+    } else {
+        document.getElementById('modal-summary-content').innerHTML = '<p class="text-muted">{{ _("Fill in the form to see transaction summary") }}</p>';
+    }
+}
+
+// Lookup stock information
+async function lookupStockInfo() {
+    const symbol = document.getElementById('modal_stock_symbol').value.trim().toUpperCase();
+    const currency = document.getElementById('modal_currency').value;
+    const stockInfoDiv = document.getElementById('modal_stock_info');
+    
+    console.log('lookupStockInfo called with symbol:', symbol, 'currency:', currency);
+    
+    if (!symbol || !currency) {
+        stockInfoDiv.innerHTML = '<small class="text-muted">{{ _("Enter symbol and currency to lookup") }}</small>';
+        return;
+    }
+    
+    stockInfoDiv.innerHTML = '<small class="text-info"><i class="fas fa-spinner fa-spin"></i> {{ _("Looking up stock information...") }}</small>';
+    
+    try {
+        // First check if stock already exists in our database
+        const url = `/api/stock-lookup?symbol=${symbol}&currency=${currency}`;
+        console.log('Fetching from URL:', url);
+        const response = await fetch(url);
+        const data = await response.json();
+        console.log('API response:', data);
+        
+        if (data.success) {
+            // Stock found in database
+            document.getElementById('modal_stock_name').value = data.stock.name;
+            document.getElementById('modal_exchange').value = data.stock.exchange;
+            
+            stockInfoDiv.innerHTML = `
+                <div class="text-success">
+                    <i class="fas fa-check-circle"></i> 
+                    <strong>${data.stock.name}</strong><br>
+                    <small>${data.stock.exchange} • ${data.stock.currency}</small>
+                </div>
+            `;
+        } else {
+            // Stock not found, will be created as new
+            document.getElementById('modal_stock_name').value = '';
+            document.getElementById('modal_exchange').value = getDefaultExchange(currency);
+            
+            stockInfoDiv.innerHTML = `
+                <div class="text-warning">
+                    <i class="fas fa-plus-circle"></i> 
+                    <strong>{{ _("New Stock") }}: ${symbol}</strong><br>
+                    <small>{{ _("Will be created with") }} ${getDefaultExchange(currency)} • ${currency}</small>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Stock lookup error:', error);
+        document.getElementById('modal_stock_name').value = '';
+        document.getElementById('modal_exchange').value = getDefaultExchange(currency);
+        
+        stockInfoDiv.innerHTML = `
+            <div class="text-warning">
+                <i class="fas fa-plus-circle"></i> 
+                <strong>{{ _("New Stock") }}: ${symbol}</strong><br>
+                <small>{{ _("Will be created with") }} ${getDefaultExchange(currency)} • ${currency}</small>
+            </div>
+        `;
+    }
+}
+
+// Get default exchange based on currency
+function getDefaultExchange(currency) {
+    return currency === 'USD' ? 'NYSE' : 'TSX';
+}
+
+// Handle account selection change
+function handleAccountChange() {
+    const accountSelect = document.getElementById('modal_account_id');
+    const currencySelect = document.getElementById('modal_currency');
+    const selectedOption = accountSelect.options[accountSelect.selectedIndex];
+    
+    console.log('handleAccountChange called');
+    console.log('selectedOption:', selectedOption);
+    console.log('dataset.currency:', selectedOption ? selectedOption.dataset.currency : 'none');
+    
+    if (selectedOption && selectedOption.dataset.currency) {
+        console.log('Setting currency to:', selectedOption.dataset.currency);
+        currencySelect.value = selectedOption.dataset.currency;
+        console.log('Currency select value after setting:', currencySelect.value);
+        
+        // Trigger stock lookup if symbol is entered
+        if (document.getElementById('modal_stock_symbol').value.trim()) {
+            lookupStockInfo();
+        }
+        updateModalSummary();
+    }
+}
+
+// Initialize modal functionality
+document.addEventListener('DOMContentLoaded', function() {
+    // Set today's date as default
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('modal_trade_date').value = today;
+    
+    // Add event listeners for summary calculation
+    const modalInputs = ['modal_quantity', 'modal_price_per_share', 'modal_transaction_fee', 'modal_transaction_type', 'modal_currency'];
+    modalInputs.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.addEventListener('input', updateModalSummary);
+            element.addEventListener('change', updateModalSummary);
+        }
+    });
+    
+    // Add account change listener
+    document.getElementById('modal_account_id').addEventListener('change', handleAccountChange);
+    
+    // Add stock symbol and currency change listeners
+    document.getElementById('modal_stock_symbol').addEventListener('input', 
+        debounce(lookupStockInfo, 500));
+    document.getElementById('modal_currency').addEventListener('change', lookupStockInfo);
+    
+    // Pre-select account if specified in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const accountId = urlParams.get('account_id');
+    if (accountId) {
+        document.getElementById('modal_account_id').value = accountId;
+        handleAccountChange();
+    }
+});
+
+// Debounce function to limit API calls
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Function to open modal with account pre-selected
+function openAddTransactionModal(accountId = null) {
+    const modal = new bootstrap.Modal(document.getElementById('addTransactionModal'));
+    if (accountId) {
+        document.getElementById('modal_account_id').value = accountId;
+        handleAccountChange();
+    }
+    modal.show();
+}
+</script>

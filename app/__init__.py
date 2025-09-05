@@ -72,7 +72,7 @@ def create_app(config_name=None):
                     member_data = {
                         'id': member.id,
                         'name': member.name,
-                        'email': member.email,
+                        # 'email': member.email,  # email字段已从简化的Member模型中移除
                         'accounts': accounts
                     }
                     family_structure.append(member_data)
@@ -116,4 +116,4 @@ from app.models.family import Family
 from app.models.member import Member  
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction
-from app.models.stock import Stock, StockCategory
+from app.models.stocks_cache import StocksCache

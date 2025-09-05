@@ -252,7 +252,7 @@ class OCRTransactionPending(db.Model):
     quantity = db.Column(db.Numeric(15, 4), comment='数量')
     price_per_share = db.Column(db.Numeric(15, 4), comment='单价')
     transaction_fee = db.Column(db.Numeric(10, 2), default=0, comment='手续费')
-    transaction_date = db.Column(db.Date, comment='交易日期')
+    trade_date = db.Column(db.Date, comment='交易日期')
     confidence_score = db.Column(db.Numeric(5, 4), comment='置信度')
     needs_review = db.Column(db.Boolean, default=False, comment='需要审核')
     raw_text = db.Column(db.Text, comment='原始识别文本')
@@ -278,7 +278,7 @@ class OCRTransactionPending(db.Model):
             'price_per_share': float(self.price_per_share) if self.price_per_share else None,
             'transaction_fee': float(self.transaction_fee) if self.transaction_fee else None,
             'total_amount': float(self.total_amount) if self.total_amount else None,
-            'transaction_date': self.transaction_date.isoformat() if self.transaction_date else None,
+            'trade_date': self.trade_date.isoformat() if self.trade_date else None,
             'confidence_score': float(self.confidence_score) if self.confidence_score else None,
             'needs_review': self.needs_review,
             'raw_text': self.raw_text,
@@ -350,7 +350,7 @@ class OCRTransactionPending(db.Model):
             quantity=self.quantity,
             price_per_share=self.price_per_share,
             transaction_fee=self.transaction_fee or 0,
-            transaction_date=self.transaction_date,
+            trade_date=self.trade_date,
             notes=f'Imported from OCR task {self.ocr_task_id}' + 
                   (f'. Review notes: {self.notes}' if self.notes else '')
         )

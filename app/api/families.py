@@ -100,28 +100,29 @@ def get_family_dashboard(family_id):
         Transaction.account
     ).filter(
         Account.family_id == family_id
-    ).order_by(Transaction.transaction_date.desc()).limit(10).all()
+    ).order_by(Transaction.trade_date.desc()).limit(10).all()
     
     # 获取持仓分布（按分类）
-    from app.models.holding import CurrentHolding
+    # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
     holdings_by_category = {}
     
-    for account in family.accounts:
-        for holding in account.holdings:
-            if holding.total_shares > 0 and holding.stock and holding.stock.category:
-                category_name = holding.stock.category.get_localized_name()
-                current_value = holding.current_value or holding.cost_value
-                
-                if category_name not in holdings_by_category:
-                    holdings_by_category[category_name] = {
-                        'name': category_name,
-                        'color': holding.stock.category.color,
-                        'value': 0,
-                        'count': 0
-                    }
-                
-                holdings_by_category[category_name]['value'] += current_value
-                holdings_by_category[category_name]['count'] += 1
+    # TODO: Re-implement with new holding system
+    # for account in family.accounts:
+    #     for holding in account.holdings:
+    #         if holding.total_shares > 0 and holding.stock and holding.stock.category:
+    #             category_name = holding.stock.category.get_localized_name()
+    #             current_value = holding.current_value or holding.cost_value
+    #             
+    #             if category_name not in holdings_by_category:
+    #                 holdings_by_category[category_name] = {
+    #                     'name': category_name,
+    #                     'color': holding.stock.category.color,
+    #                     'value': 0,
+    #                     'count': 0
+    #                 }
+    #             
+    #             holdings_by_category[category_name]['value'] += current_value
+    #             holdings_by_category[category_name]['count'] += 1
     
     # 计算百分比
     total_value = sum(cat['value'] for cat in holdings_by_category.values())

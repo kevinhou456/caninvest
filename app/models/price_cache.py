@@ -11,7 +11,9 @@ class StockPriceCache(db.Model):
     __tablename__ = 'stock_price_cache'
     
     id = db.Column(db.Integer, primary_key=True)
-    stock_id = db.Column(db.Integer, db.ForeignKey('stocks.id'), nullable=False, comment='股票ID')
+    # TODO: Update to reference new stocks_cache table
+    # stock_id = db.Column(db.Integer, db.ForeignKey('stocks.id'), nullable=False, comment='股票ID')
+    stock_id = db.Column(db.Integer, nullable=False, comment='股票ID - temporarily removed FK constraint')
     price_type = db.Column(db.String(20), nullable=False, comment='价格类型: current/daily/weekly/monthly')
     price = db.Column(db.Numeric(15, 4), nullable=False, comment='价格')
     price_change = db.Column(db.Numeric(15, 4), comment='价格变化')
@@ -84,7 +86,7 @@ class StockPriceCache(db.Model):
     @staticmethod
     def cache_price(stock_id, price_data, price_type='current', ttl_minutes=15):
         """缓存价格数据"""
-        from app.models.stock import Stock
+        # from app.models.stock import Stock  # Stock model deleted
         
         stock = Stock.query.get(stock_id)
         if not stock:
@@ -145,7 +147,9 @@ class PriceUpdateLog(db.Model):
     __tablename__ = 'price_update_log'
     
     id = db.Column(db.Integer, primary_key=True)
-    stock_id = db.Column(db.Integer, db.ForeignKey('stocks.id'), nullable=False, comment='股票ID')
+    # TODO: Update to reference new stocks_cache table
+    # stock_id = db.Column(db.Integer, db.ForeignKey('stocks.id'), nullable=False, comment='股票ID')
+    stock_id = db.Column(db.Integer, nullable=False, comment='股票ID - temporarily removed FK constraint')
     data_source = db.Column(db.String(50), nullable=False, comment='数据源')
     request_count = db.Column(db.Integer, default=1, comment='当日请求次数')
     last_request_time = db.Column(db.DateTime, default=datetime.utcnow, comment='最后请求时间')

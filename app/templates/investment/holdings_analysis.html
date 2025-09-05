@@ -237,7 +237,7 @@
                                 </td>
                                 <td>
                                     <div class="progress">
-                                        <div class="progress-bar bg-{% cycle 'primary', 'success', 'info', 'warning', 'danger' %}" 
+                                        <div class="progress-bar bg-{{ ['primary', 'success', 'info', 'warning', 'danger'][loop.index0 % 5] }}" 
                                              role="progressbar" style="width: {{ weight }}%">
                                         </div>
                                     </div>

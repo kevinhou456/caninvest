@@ -182,7 +182,7 @@
                 <tbody>
                     {% for transaction in recent_transactions %}
                     <tr>
-                        <td>{{ transaction.transaction_date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ transaction.trade_date.strftime('%Y-%m-%d') }}</td>
                         <td>{{ transaction.account.name if transaction.account else '-' }}</td>
                         <td>
                             <span class="badge badge-{{ 'success' if transaction.transaction_type == 'buy' else 'danger' }}">

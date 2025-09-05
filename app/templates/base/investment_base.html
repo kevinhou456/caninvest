@@ -295,7 +295,7 @@
                 {% for account in member.accounts %}
                 <div class="nav-item nav-account {{ 'active' if current_account_id == account.id }}"
                      onclick="selectAccount({{ account.id }})">
-                    <i class="fas fa-university me-2 account-type-{{ account.account_type.name.lower() if account.account_type else 'taxable' }}"></i>
+                    <i class="fas fa-university me-2 account-type-{{ account.account_type.lower() if account.account_type else 'taxable' }}"></i>
                     {% if account.is_joint %}
                         {% set ns = namespace(ownership_percent=0) %}
                         {% for am in account.account_members %}

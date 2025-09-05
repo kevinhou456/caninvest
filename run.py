@@ -12,7 +12,8 @@ from app.models.family import Family
 from app.models.member import Member
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction
-from app.models.stock import Stock, StockCategory
+# from app.models.stock import Stock, StockCategory  # Stock models deleted
+from app.models.stocks_cache import StocksCache
 
 def check_and_initialize_database(app):
     """检查并自动初始化数据库"""

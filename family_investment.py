@@ -8,8 +8,8 @@ from app.models.family import Family
 from app.models.member import Member
 from app.models.account import Account, AccountType, AccountMember
 from app.models.transaction import Transaction
-from app.models.holding import CurrentHolding
-from app.models.stock import Stock, StockCategory, StockCategoryI18n
+# from app.models.holding import CurrentHolding  # CurrentHolding model deleted
+# from app.models.stock import Stock, StockCategory, StockCategoryI18n  # Stock models deleted
 from app.models.contribution import Contribution
 from app.models.price_cache import StockPriceCache, PriceUpdateLog
 from app.models.import_task import ImportTask, OCRTask, OCRTransactionPending
@@ -28,10 +28,10 @@ def make_shell_context():
         'AccountType': AccountType,
         'AccountMember': AccountMember,
         'Transaction': Transaction,
-        'CurrentHolding': CurrentHolding,
-        'Stock': Stock,
-        'StockCategory': StockCategory,
-        'StockCategoryI18n': StockCategoryI18n,
+        # 'CurrentHolding': CurrentHolding,  # CurrentHolding model deleted
+        # 'Stock': Stock,  # Stock models deleted
+        # 'StockCategory': StockCategory,  # Stock models deleted
+        # 'StockCategoryI18n': StockCategoryI18n,  # Stock models deleted
         'Contribution': Contribution,
         'StockPriceCache': StockPriceCache,
         'PriceUpdateLog': PriceUpdateLog,
