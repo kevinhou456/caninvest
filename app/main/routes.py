@@ -234,6 +234,13 @@ def create_account():
             account_type_id = request.form.get('account_type_id')
             is_joint = 'is_joint' in request.form
             
+            # 验证账户类型是否支持联名账户
+            if is_joint and account_type_id:
+                account_type = AccountType.query.get(account_type_id)
+                if account_type and account_type.name not in ['Regular', 'Margin']:
+                    flash(_('Only Regular and Margin accounts can be joint accounts. Tax-advantaged accounts (TFSA, RRSP, RESP, FHSA) must have a single owner.'), 'error')
+                    return redirect(url_for('main.accounts'))
+            
             # 获取家庭ID（假设只有一个家庭）
             family = Family.query.first()
             if not family:
@@ -407,8 +414,9 @@ def create_transaction():
             flash(_('Transaction created successfully'), 'success')
             
             # 如果有指定账户ID，重定向到该账户的交易页面
-            if request.args.get('account_id'):
-                return redirect(url_for('main.transactions', account_id=request.args.get('account_id')))
+            account_id = request.form.get('account_id')
+            if account_id:
+                return redirect(url_for('main.transactions', account_id=account_id))
             else:
                 return redirect(url_for('main.transactions'))
                 
@@ -490,6 +498,9 @@ def import_transactions():
     """数据导入页面"""
     accounts = Account.query.all()
     
+    # 获取预选账户ID
+    preselected_account_id = request.args.get('account_id', type=int)
+    
     # 获取最近的导入任务
     recent_imports = ImportTask.query.order_by(ImportTask.created_at.desc()).limit(10).all()
     recent_ocr = OCRTask.query.order_by(OCRTask.created_at.desc()).limit(10).all()
@@ -497,6 +508,7 @@ def import_transactions():
     return render_template('imports/index.html',
                          title=_('Import Data'),
                          accounts=accounts,
+                         preselected_account_id=preselected_account_id,
                          recent_imports=recent_imports,
                          recent_ocr=recent_ocr)
 
@@ -648,9 +660,15 @@ def edit_account(account_id):
             flash(_('Invalid account type'), 'error')
             return redirect(url_for('main.accounts'))
         
-        # 检查账户类型变更的合法性
-        if account.is_joint and new_account_type.name in ['TFSA', 'RRSP', 'RESP', 'FHSA']:
-            flash(_('Joint accounts cannot be changed to tax-advantaged account types (TFSA, RRSP, RESP, FHSA). These account types can only have single owners.'), 'error')
+        # 检查账户类型变更的合法性 - 加强验证
+        if account.is_joint and new_account_type.name not in ['Regular', 'Margin']:
+            flash(_('Joint accounts can only be Regular or Margin types. Tax-advantaged accounts (TFSA, RRSP, RESP, FHSA) can only have single owners.'), 'error')
+            return redirect(url_for('main.accounts'))
+        
+        # 检查多成员账户变更为税收优惠账户的情况
+        account_members_count = AccountMember.query.filter_by(account_id=account.id).count()
+        if account_members_count > 1 and new_account_type.name not in ['Regular', 'Margin']:
+            flash(_('Accounts with multiple members can only be Regular or Margin types. Tax-advantaged accounts can only have single owners.'), 'error')
             return redirect(url_for('main.accounts'))
         
         # 更新基本信息
@@ -1252,3 +1270,138 @@ def export_transactions():
         from flask import flash, redirect, url_for
         flash(f'导出失败: {str(e)}', 'error')
         return redirect(url_for('main.transactions'))
+
+
+@bp.route('/api/accounts/<int:account_id>/transactions', methods=['DELETE'])
+def delete_account_transactions(account_id):
+    """删除指定账户的所有交易记录"""
+    try:
+        # 验证账户是否存在
+        account = Account.query.get_or_404(account_id)
+        
+        # 删除该账户的所有交易记录
+        deleted_count = Transaction.query.filter_by(account_id=account_id).delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully deleted {deleted_count} transactions from account "{account.name}"',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/api/import-csv', methods=['POST'])
+def import_csv_api():
+    """CSV导入API"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+            
+        if not file.filename.lower().endswith('.csv'):
+            return jsonify({'success': False, 'error': 'Please upload a CSV file'}), 400
+            
+        account_id = request.form.get('account_id')
+        if not account_id:
+            return jsonify({'success': False, 'error': 'Account ID is required'}), 400
+            
+        # 验证账户是否存在
+        account = Account.query.get(account_id)
+        if not account:
+            return jsonify({'success': False, 'error': 'Account not found'}), 404
+            
+        # 处理CSV文件
+        import csv
+        import io
+        from datetime import datetime
+        
+        # 读取CSV内容
+        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+        csv_reader = csv.DictReader(stream)
+        
+        imported_count = 0
+        errors = []
+        
+        for row_num, row in enumerate(csv_reader, start=2):
+            try:
+                # 解析必要字段
+                trade_date = datetime.strptime(row.get('Date', ''), '%Y-%m-%d').date()
+                transaction_type = row.get('Type', '').upper()
+                stock_symbol = row.get('Stock Symbol', '').strip().upper()
+                quantity = float(row.get('Quantity', 0))
+                price = float(row.get('Price per Share', 0))
+                currency = row.get('Currency', 'CAD').upper()
+                fee = float(row.get('Transaction Fee', 0) or 0)
+                notes = row.get('Notes', '').strip()
+                
+                # 验证必要字段
+                if not all([trade_date, transaction_type, stock_symbol, quantity > 0, price > 0]):
+                    errors.append(f'Row {row_num}: Missing required fields')
+                    continue
+                    
+                if transaction_type not in ['BUY', 'SELL']:
+                    errors.append(f'Row {row_num}: Invalid transaction type (must be BUY or SELL)')
+                    continue
+                    
+                # 查找或创建股票缓存记录
+                stock_cache = StocksCache.query.filter_by(symbol=stock_symbol).first()
+                if not stock_cache:
+                    # 创建新的股票缓存记录
+                    stock_cache = StocksCache(
+                        symbol=stock_symbol,
+                        name=stock_symbol,  # 使用符号作为默认名称
+                        exchange='TSX' if currency == 'CAD' else 'NYSE'
+                    )
+                    db.session.add(stock_cache)
+                    db.session.flush()
+                
+                # 创建交易记录
+                transaction = Transaction(
+                    account_id=account_id,
+                    stock=stock_symbol,
+                    type=transaction_type,
+                    quantity=quantity,
+                    price=price,
+                    fee=fee,
+                    trade_date=trade_date,
+                    currency=currency,
+                    notes=notes
+                )
+                
+                db.session.add(transaction)
+                imported_count += 1
+                
+            except Exception as e:
+                errors.append(f'Row {row_num}: {str(e)}')
+        
+        db.session.commit()
+        
+        result = {
+            'success': True,
+            'imported_count': imported_count,
+            'message': f'Successfully imported {imported_count} transactions'
+        }
+        
+        if errors:
+            result['errors'] = errors
+            result['message'] += f' ({len(errors)} errors)'
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'Import failed: {str(e)}'
+        }), 500

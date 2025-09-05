@@ -191,8 +191,8 @@
                         </td>
                         <td>{{ transaction.stock.symbol if transaction.stock else '-' }}</td>
                         <td>{{ transaction.quantity }}</td>
-                        <td>${{ "{:.2f}".format(transaction.price_per_share) }}</td>
-                        <td>${{ "{:.2f}".format(transaction.quantity * transaction.price_per_share) }}</td>
+                        <td>${{ "{:.2f}".format(transaction.price) }}</td>
+                        <td>${{ "{:.2f}".format(transaction.quantity * transaction.price) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -207,9 +207,9 @@
         <div class="text-center py-4">
             <i class="fas fa-exchange-alt fa-3x text-gray-300 mb-3"></i>
             <p class="text-muted">{{ _('No transactions recorded yet') }}</p>
-            <a href="{{ url_for('main.create_transaction') }}" class="btn btn-primary">
-                {{ _('Record First Transaction') }}
-            </a>
+            <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal(null)">
+                <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
+            </button>
         </div>
         {% endif %}
     </div>

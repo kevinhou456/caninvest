@@ -182,9 +182,9 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="editAccountType" class="form-label">{{ _('Account Type') }}</label>
-                                <select class="form-select" name="account_type_id" id="editAccountType" required>
+                                <select class="form-select" name="account_type_id" id="editAccountType" required onchange="toggleEditJointAccountOption()">
                                     {% for type in account_types %}
-                                    <option value="{{ type.id }}">{{ type.name }}</option>
+                                    <option value="{{ type.id }}" data-type-name="{{ type.name }}">{{ type.name }}</option>
                                     {% endfor %}
                                 </select>
                             </div>
@@ -219,13 +219,14 @@ function toggleJointAccountOption() {
     const selectedOption = accountTypeSelect.options[accountTypeSelect.selectedIndex];
     const accountTypeName = selectedOption ? selectedOption.getAttribute('data-type-name') : '';
     
-    if (accountTypeName === 'Taxable') {
+    // Only Regular and Margin accounts can be joint accounts
+    if (accountTypeName === 'Regular' || accountTypeName === 'Margin') {
         jointAccountSection.style.display = 'block';
         singleOwnerSection.style.display = 'block';
     } else {
         jointAccountSection.style.display = 'none';
         singleOwnerSection.style.display = 'block';
-        // Clear joint account checkbox and member selection if not Taxable
+        // Clear joint account checkbox and member selection for tax-advantaged accounts
         document.getElementById('isJoint').checked = false;
         toggleMemberSelection();
     }
@@ -313,6 +314,28 @@ function showEditAccountModal(accountId) {
             console.error('Error:', error);
             alert('{{ _("Error loading account data") }}');
         });
+}
+
+function toggleEditJointAccountOption() {
+    const editAccountTypeSelect = document.getElementById('editAccountType');
+    const selectedOption = editAccountTypeSelect.options[editAccountTypeSelect.selectedIndex];
+    const accountTypeName = selectedOption ? selectedOption.getAttribute('data-type-name') : '';
+    
+    // Check if current account type supports joint accounts
+    const editMemberList = document.getElementById('editMemberList');
+    
+    if (accountTypeName !== 'Regular' && accountTypeName !== 'Margin') {
+        // For tax-advantaged accounts, show warning if multiple members exist
+        const memberInputs = editMemberList.querySelectorAll('input[name^="member_"]');
+        if (memberInputs.length > 1) {
+            const confirmChange = confirm('{{ _("Tax-advantaged accounts cannot be joint accounts. Changing to this account type will remove additional members. Continue?") }}');
+            if (!confirmChange) {
+                // Reset to previous selection - need to store it
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 function confirmDeleteAccount(accountId, accountName) {

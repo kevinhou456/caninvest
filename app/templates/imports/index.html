@@ -1,0 +1,694 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>{{ _('Import Data') }}</h2>
+    {% if preselected_account_id %}
+    <div class="alert alert-info mb-0">
+        <i class="fas fa-info-circle me-2"></i>
+        {{ _('Account pre-selected for import') }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- CSV导入区域 -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-file-csv me-2"></i>{{ _('CSV Import') }}
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">{{ _('Import transaction data from CSV files') }}</p>
+                <button type="button" class="btn btn-success" onclick="openImportModal()">
+                    <i class="fas fa-file-import me-2"></i>{{ _('Import CSV File') }}
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-camera me-2"></i>{{ _('OCR Import') }}
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">{{ _('Import transaction data from statement images using OCR') }}</p>
+                <button type="button" class="btn btn-info" disabled>
+                    <i class="fas fa-upload me-2"></i>{{ _('Upload Statement Image') }}
+                </button>
+                <small class="d-block text-muted mt-2">{{ _('Feature coming soon') }}</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 最近导入记录 -->
+<div class="row mt-4">
+    {% if recent_imports %}
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">{{ _('Recent CSV Imports') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>{{ _('Date') }}</th>
+                                <th>{{ _('Status') }}</th>
+                                <th>{{ _('Records') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for import_task in recent_imports %}
+                            <tr>
+                                <td>{{ import_task.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    {% if import_task.status == 'completed' %}
+                                        <span class="badge bg-success">{{ _('Completed') }}</span>
+                                    {% elif import_task.status == 'failed' %}
+                                        <span class="badge bg-danger">{{ _('Failed') }}</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">{{ _('Processing') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ import_task.processed_records or 0 }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if recent_ocr %}
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">{{ _('Recent OCR Tasks') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>{{ _('Date') }}</th>
+                                <th>{{ _('Status') }}</th>
+                                <th>{{ _('Action') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ocr_task in recent_ocr %}
+                            <tr>
+                                <td>{{ ocr_task.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    {% if ocr_task.status == 'completed' %}
+                                        <span class="badge bg-success">{{ _('Completed') }}</span>
+                                    {% elif ocr_task.status == 'failed' %}
+                                        <span class="badge bg-danger">{{ _('Failed') }}</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">{{ _('Processing') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if ocr_task.status == 'completed' %}
+                                        <a href="{{ url_for('main.review_ocr_task', task_id=ocr_task.id) }}" class="btn btn-sm btn-outline-primary">
+                                            {{ _('Review') }}
+                                        </a>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- CSV导入说明 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">{{ _('CSV Import Guidelines') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>{{ _('Smart Import Features:') }}</h6>
+                        <div class="alert alert-success">
+                            <i class="fas fa-magic me-2"></i>{{ _('Intelligent header matching - supports various broker formats!') }}
+                        </div>
+                        <h6>{{ _('Required Data (any column name):') }}</h6>
+                        <ul>
+                            <li><strong>{{ _('Date') }}</strong>: {{ _('trade_date, date, transaction_date, 日期...') }}</li>
+                            <li><strong>{{ _('Type') }}</strong>: {{ _('type, action, buy/sell, 类型...') }}</li>
+                            <li><strong>{{ _('Symbol') }}</strong>: {{ _('symbol, ticker, stock, 股票代码...') }}</li>
+                            <li><strong>{{ _('Quantity') }}</strong>: {{ _('quantity, shares, qty, 数量...') }}</li>
+                            <li><strong>{{ _('Price') }}</strong>: {{ _('price, unit_price, 价格...') }}</li>
+                        </ul>
+                        <h6>{{ _('Optional Data:') }}</h6>
+                        <ul>
+                            <li><strong>{{ _('Currency') }}</strong>: {{ _('currency, ccy, 货币 (defaults to USD)') }}</li>
+                            <li><strong>{{ _('Fee') }}</strong>: {{ _('fee, commission, 手续费') }}</li>
+                            <li><strong>{{ _('Notes') }}</strong>: {{ _('notes, description, 备注') }}</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>{{ _('Supported Formats:') }}</h6>
+                        <div class="mb-3">
+                            <small class="text-muted">{{ _('Standard Format') }}</small>
+                            <div class="bg-light p-2 rounded small">
+                                <code>
+Date,Type,Symbol,Shares,Price<br>
+2024-01-15,BUY,AAPL,100,150.00<br>
+2024-02-20,SELL,AAPL,50,160.00
+                                </code>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <small class="text-muted">{{ _('Broker Format Example') }}</small>
+                            <div class="bg-light p-2 rounded small">
+                                <code>
+Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
+01/15/2024,BOUGHT,AAPL,100,$150.00,$9.95<br>
+02/20/2024,SOLD,AAPL,50,$160.00,$9.95
+                                </code>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <small class="text-muted">{{ _('Chinese Format Example') }}</small>
+                            <div class="bg-light p-2 rounded small">
+                                <code>
+交易日期,操作,股票代码,数量,单价,手续费<br>
+2024-01-15,买入,AAPL,100,150.00,9.95<br>
+2024-02-20,卖出,AAPL,50,160.00,9.95
+                                </code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CSV导入模态框 -->
+<div class="modal fade" id="importCSVModal" tabindex="-1" aria-labelledby="importCSVModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="importCSVModalLabel">
+                    <i class="fas fa-file-import me-2"></i>{{ _('Import CSV File') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <form onsubmit="handleCsvUpload(event)" enctype="multipart/form-data" id="csvUploadForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="accountSelect" class="form-label">{{ _('Target Account') }} <span class="text-danger">*</span></label>
+                        <select class="form-select" name="account_id" id="accountSelect" required>
+                            <option value="">{{ _('Select Account') }}</option>
+                            {% for account in accounts %}
+                            <option value="{{ account.id }}" 
+                                    {% if preselected_account_id and account.id == preselected_account_id %}selected{% endif %}>
+                                {{ account.name }} ({{ account.account_type.name if account.account_type else 'Unknown' }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="csvFile" class="form-label">{{ _('CSV File') }} <span class="text-danger">*</span></label>
+                        <input type="file" class="form-control" name="file" id="csvFile" accept=".csv" required>
+                        <div class="form-text">{{ _('Please upload a CSV file with transaction data') }}</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="formatSelect" class="form-label">{{ _('Use Saved Format (optional)') }}</label>
+                        <select class="form-select" id="formatSelect" name="saved_format" onchange="handleFormatSelect()">
+                            <option value="">{{ _('-- Select a saved format or create new --') }}</option>
+                            <!-- 动态加载保存的格式 -->
+                        </select>
+                        <div class="form-text">{{ _('Choose a previously saved format or create a new one') }}</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="formatName" class="form-label">{{ _('Format Name') }}</label>
+                        <input type="text" class="form-control" id="formatName" name="format_name" 
+                               placeholder="{{ _('e.g., TD Ameritrade, Interactive Brokers...') }}">
+                        <div class="form-text">{{ _('Give this format a name to remember it for future imports') }}</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>{{ _('Cancel') }}
+                    </button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-eye me-2"></i>{{ _('Preview & Map Columns') }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- CSV列映射模态框 -->
+<div class="modal fade" id="csvMappingModal" tabindex="-1" aria-labelledby="csvMappingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="csvMappingModalLabel">
+                    <i class="fas fa-columns me-2"></i>{{ _('Map CSV Columns') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    {{ _('Please map your CSV columns to the required fields. The system will remember this mapping for future imports.') }}
+                </div>
+                
+                <div class="alert alert-success" id="csvInfo" style="display: none;">
+                    <i class="fas fa-file-csv me-2"></i>
+                    <span id="csvInfoText"></span>
+                </div>
+                
+                <div class="alert alert-info" id="autoMatchInfo" style="display: none;">
+                    <i class="fas fa-magic me-2"></i>
+                    <span id="autoMatchText"></span>
+                </div>
+                
+                <div class="alert alert-warning" id="mappingWarning" style="display: none;">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <span id="warningText"></span>
+                </div>
+                
+                <div class="alert alert-success" id="autoMappingSuccess" style="display: none;">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>{{ _('Perfect! All column mappings have been automatically configured.') }}</strong>
+                    <br>{{ _('You can click "Import Data" directly, or review and adjust the mappings below if needed.') }}
+                </div>
+
+                <!-- 列映射表格 -->
+                <div class="table-responsive mb-4">
+                    <table class="table table-bordered">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 150px;">{{ _('Required Field') }}</th>
+                                <th>{{ _('Your CSV Column') }}</th>
+                                <th style="width: 100px;">{{ _('Required') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody id="columnMappingTable">
+                            <!-- 动态生成映射行 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- CSV预览 -->
+                <h6>{{ _('CSV Preview (first 10 rows)') }}:</h6>
+                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                    <table class="table table-sm table-striped" id="csvPreviewTable">
+                        <thead class="table-dark sticky-top">
+                            <!-- 动态生成表头 -->
+                        </thead>
+                        <tbody>
+                            <!-- 动态生成预览数据 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-arrow-left me-2"></i>{{ _('Back') }}
+                </button>
+                <button type="button" class="btn btn-success" onclick="importWithMapping()">
+                    <i class="fas fa-file-import me-2"></i>{{ _('Import Data') }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let csvPreviewData = null;
+let savedFormats = [];
+
+function openImportModal() {
+    loadSavedFormats();
+    const modal = new bootstrap.Modal(document.getElementById('importCSVModal'));
+    modal.show();
+}
+
+function loadSavedFormats() {
+    fetch('/api/v1/csv-formats')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                savedFormats = data.formats;
+                populateFormatSelect(data.formats);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading saved formats:', error);
+        });
+}
+
+function populateFormatSelect(formats) {
+    const select = document.getElementById('formatSelect');
+    
+    // 清除现有选项（保留第一个默认选项）
+    while (select.children.length > 1) {
+        select.removeChild(select.lastChild);
+    }
+    
+    // 添加保存的格式选项
+    formats.forEach(format => {
+        const option = document.createElement('option');
+        option.value = format.format_name;
+        option.textContent = `${format.format_name} (${format.usage_count} times used)`;
+        select.appendChild(option);
+    });
+}
+
+function handleFormatSelect() {
+    const select = document.getElementById('formatSelect');
+    const formatNameInput = document.getElementById('formatName');
+    
+    if (select.value) {
+        formatNameInput.value = select.value;
+        formatNameInput.readOnly = true;
+    } else {
+        formatNameInput.value = '';
+        formatNameInput.readOnly = false;
+    }
+}
+
+function handleCsvUpload(event) {
+    event.preventDefault();
+    const form = event.target;
+    const formData = new FormData(form);
+    
+    // Show loading state
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>{{ _("Analyzing...") }}';
+    submitBtn.disabled = true;
+    
+    fetch('/api/v1/csv-preview', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            csvPreviewData = data;
+            showMappingModal(data);
+        } else {
+            alert('{{ _("Error analyzing CSV: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Error analyzing CSV. Please try again.") }}');
+    })
+    .finally(() => {
+        // Restore button state
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+    });
+}
+
+function showMappingModal(data) {
+    // 关闭上传模态框
+    const uploadModal = bootstrap.Modal.getInstance(document.getElementById('importCSVModal'));
+    uploadModal.hide();
+    
+    // 显示文件信息
+    const csvInfoDiv = document.getElementById('csvInfo');
+    const csvInfoText = document.getElementById('csvInfoText');
+    csvInfoText.textContent = `{{ _('Found ') }}${data.columns.length}{{ _(' columns and ') }}${data.total_rows}{{ _(' rows in your CSV file') }}`;
+    csvInfoDiv.style.display = 'block';
+    
+    // 显示自动匹配信息
+    const autoMatchDiv = document.getElementById('autoMatchInfo');
+    const autoMatchText = document.getElementById('autoMatchText');
+    if (data.auto_matched_format) {
+        autoMatchText.innerHTML = `<strong>{{ _('🎉 Great! Automatically matched format: ') }}"${data.auto_matched_format.name}"</strong><br>` +
+                                  `{{ _('This format has been used ') }}${data.auto_matched_format.usage_count}{{ _(' times before. Column mappings are pre-filled and ready to import!') }}`;
+        autoMatchDiv.style.display = 'block';
+        autoMatchDiv.className = 'alert alert-success'; // 更显眼的绿色背景
+        
+        // 自动设置格式名称，这样用户不需要重新输入
+        const formatNameInput = document.getElementById('formatName');
+        if (formatNameInput) {
+            formatNameInput.value = data.auto_matched_format.name;
+            formatNameInput.readOnly = true; // 使其只读，因为是自动匹配的
+        }
+    } else {
+        autoMatchDiv.style.display = 'none';
+        
+        // 如果没有自动匹配，确保格式名称输入框可以编辑
+        const formatNameInput = document.getElementById('formatName');
+        if (formatNameInput) {
+            formatNameInput.readOnly = false;
+        }
+    }
+    
+    // 构建列映射表格
+    buildColumnMappingTable(data.columns, data.suggested_mapping);
+    
+    // 构建CSV预览表格
+    buildCsvPreviewTable(data.columns, data.preview_data);
+    
+    // 显示映射模态框
+    const mappingModal = new bootstrap.Modal(document.getElementById('csvMappingModal'));
+    mappingModal.show();
+}
+
+function buildColumnMappingTable(csvColumns, suggestedMapping) {
+    const requiredFields = [
+        { field: 'date', name: '{{ _("Date") }}', required: true },
+        { field: 'type', name: '{{ _("Transaction Type") }}', required: true },
+        { field: 'symbol', name: '{{ _("Stock Symbol") }}', required: true },
+        { field: 'quantity', name: '{{ _("Quantity") }}', required: true },
+        { field: 'price', name: '{{ _("Price") }}', required: true },
+        { field: 'currency', name: '{{ _("Currency") }}', required: false },
+        { field: 'fee', name: '{{ _("Fee/Commission") }}', required: false },
+        { field: 'notes', name: '{{ _("Notes") }}', required: false }
+    ];
+    
+    // 检查是否所有必需字段都有建议的映射
+    const requiredFieldNames = requiredFields.filter(f => f.required).map(f => f.field);
+    const hasAllRequiredMappings = requiredFieldNames.every(field => suggestedMapping && suggestedMapping[field]);
+    
+    // 显示或隐藏自动映射成功提示
+    const autoMappingSuccessDiv = document.getElementById('autoMappingSuccess');
+    if (hasAllRequiredMappings && Object.keys(suggestedMapping).length > 0) {
+        autoMappingSuccessDiv.style.display = 'block';
+    } else {
+        autoMappingSuccessDiv.style.display = 'none';
+    }
+    
+    const tbody = document.getElementById('columnMappingTable');
+    tbody.innerHTML = '';
+    
+    requiredFields.forEach(fieldInfo => {
+        const row = document.createElement('tr');
+        
+        // 字段名列
+        const fieldCell = document.createElement('td');
+        fieldCell.innerHTML = `<strong>${fieldInfo.name}</strong>`;
+        if (fieldInfo.required) {
+            fieldCell.innerHTML += ' <span class="text-danger">*</span>';
+            fieldCell.style.backgroundColor = '#fff3cd'; // 浅黄色背景表示必需
+        }
+        row.appendChild(fieldCell);
+        
+        // 下拉选择列
+        const selectCell = document.createElement('td');
+        const select = document.createElement('select');
+        select.className = 'form-select';
+        select.setAttribute('data-field', fieldInfo.field);
+        
+        // 添加空选项
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = fieldInfo.required ? '{{ _("-- Please select --") }}' : '{{ _("-- Not used --") }}';
+        select.appendChild(emptyOption);
+        
+        // 添加CSV列选项
+        csvColumns.forEach(column => {
+            const option = document.createElement('option');
+            option.value = column;
+            option.textContent = column;
+            
+            // 设置建议的映射
+            if (suggestedMapping && suggestedMapping[fieldInfo.field] === column) {
+                option.selected = true;
+                option.style.backgroundColor = '#d4edda'; // 浅绿色背景表示建议
+                option.style.fontWeight = 'bold';
+                option.setAttribute('title', '{{ _("Auto-matched mapping") }}');
+                // 添加一个图标表示自动匹配
+                option.textContent = column + ' ✓';
+            }
+            
+            select.appendChild(option);
+        });
+        
+        selectCell.appendChild(select);
+        row.appendChild(selectCell);
+        
+        // 必需标识列
+        const requiredCell = document.createElement('td');
+        requiredCell.innerHTML = fieldInfo.required ? 
+            '<span class="badge bg-danger">{{ _("Required") }}</span>' : 
+            '<span class="badge bg-secondary">{{ _("Optional") }}</span>';
+        row.appendChild(requiredCell);
+        
+        tbody.appendChild(row);
+    });
+}
+
+function buildCsvPreviewTable(columns, previewData) {
+    const table = document.getElementById('csvPreviewTable');
+    
+    // 构建表头
+    const thead = table.querySelector('thead');
+    thead.innerHTML = '';
+    const headerRow = document.createElement('tr');
+    columns.forEach(column => {
+        const th = document.createElement('th');
+        th.textContent = column;
+        th.style.minWidth = '120px';
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    
+    // 构建表体
+    const tbody = table.querySelector('tbody');
+    tbody.innerHTML = '';
+    previewData.forEach(row => {
+        const tr = document.createElement('tr');
+        columns.forEach(column => {
+            const td = document.createElement('td');
+            td.textContent = row[column] || '';
+            td.style.maxWidth = '200px';
+            td.style.overflow = 'hidden';
+            td.style.textOverflow = 'ellipsis';
+            td.style.whiteSpace = 'nowrap';
+            td.title = row[column] || '';  // 悬停显示完整内容
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+}
+
+function importWithMapping() {
+    // 获取所有映射
+    const mappings = {};
+    const selects = document.querySelectorAll('#columnMappingTable select');
+    let hasRequiredFields = true;
+    let missingFields = [];
+    
+    selects.forEach(select => {
+        const field = select.getAttribute('data-field');
+        const csvColumn = select.value;
+        
+        if (csvColumn) {
+            mappings[field] = csvColumn;
+        }
+        
+        // 检查必需字段
+        const requiredFields = ['date', 'type', 'symbol', 'quantity', 'price'];
+        if (requiredFields.includes(field) && !csvColumn) {
+            hasRequiredFields = false;
+            missingFields.push(field);
+        }
+    });
+    
+    if (!hasRequiredFields) {
+        // 显示警告信息
+        const warningDiv = document.getElementById('mappingWarning');
+        const warningText = document.getElementById('warningText');
+        warningText.textContent = '{{ _("Please map all required fields: ") }}' + missingFields.join(', ');
+        warningDiv.style.display = 'block';
+        
+        // 滚动到警告位置
+        warningDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+    }
+    
+    // 隐藏警告
+    document.getElementById('mappingWarning').style.display = 'none';
+    
+    // 准备导入数据
+    const importData = {
+        account_id: document.getElementById('accountSelect').value,
+        format_name: document.getElementById('formatName').value,
+        column_mappings: mappings,
+        session_id: csvPreviewData.session_id
+    };
+    
+    // 显示加载状态
+    const importBtn = document.querySelector('#csvMappingModal .btn-success');
+    const originalText = importBtn.innerHTML;
+    importBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>{{ _("Importing...") }}';
+    importBtn.disabled = true;
+    
+    fetch('/api/v1/import-csv-with-mapping', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(importData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            let message = `{{ _("Import completed!") }}\n{{ _("Created: ") }}${data.created_count}\n{{ _("Failed: ") }}${data.failed_count || 0}`;
+            
+            // 如果有跳过的重复记录，显示跳过数量
+            if (data.skipped_count && data.skipped_count > 0) {
+                message += `\n{{ _("Skipped (duplicates): ") }}${data.skipped_count}`;
+            }
+            
+            alert(message);
+            
+            // 如果返回了重定向URL，则跳转到对应账户的交易记录页面
+            if (data.redirect_url) {
+                window.location.href = data.redirect_url;
+            } else {
+                location.reload();
+            }
+        } else {
+            alert('{{ _("Error importing CSV: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Error importing CSV. Please try again.") }}');
+    })
+    .finally(() => {
+        // Restore button state
+        importBtn.innerHTML = originalText;
+        importBtn.disabled = false;
+    });
+}
+</script>
+
+{% endblock %}

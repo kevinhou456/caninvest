@@ -17,7 +17,19 @@
                                 <option value="">{{ _('Select Account') }}</option>
                                 {% for account in accounts %}
                                 <option value="{{ account.id }}" data-currency="{{ account.currency }}">
-                                    {{ account.name }}
+                                    {% if account.account_members %}
+                                        {% set member_names = [] %}
+                                        {% for am in account.account_members %}
+                                            {% if account.is_joint %}
+                                                {{ member_names.append(am.member.name + " (" + "%.1f"|format(am.ownership_percentage|float) + "%)") or "" }}
+                                            {% else %}
+                                                {{ member_names.append(am.member.name) or "" }}
+                                            {% endif %}
+                                        {% endfor %}
+                                        {{ member_names|join(", ") }} - {{ account.name }}
+                                    {% else %}
+                                        {{ account.name }}
+                                    {% endif %}
                                 </option>
                                 {% endfor %}
                             </select>
@@ -54,7 +66,7 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="modal_transaction_type" class="form-label">{{ _('Transaction Type') }} <span class="text-danger">*</span></label>
-                            <select class="form-select" id="modal_transaction_type" name="transaction_type" required>
+                            <select class="form-select" id="modal_transaction_type" name="type" required>
                                 <option value="">{{ _('Select Type') }}</option>
                                 <option value="BUY">{{ _('Buy') }}</option>
                                 <option value="SELL">{{ _('Sell') }}</option>
@@ -74,12 +86,12 @@
                         </div>
                         <div class="col-md-4">
                             <label for="modal_price_per_share" class="form-label">{{ _('Price per Share') }} <span class="text-danger">*</span></label>
-                            <input type="number" class="form-control" id="modal_price_per_share" name="price_per_share" 
+                            <input type="number" class="form-control" id="modal_price_per_share" name="price" 
                                    step="0.01" min="0.01" required>
                         </div>
                         <div class="col-md-4">
                             <label for="modal_transaction_fee" class="form-label">{{ _('Transaction Fee') }}</label>
-                            <input type="number" class="form-control" id="modal_transaction_fee" name="transaction_fee" 
+                            <input type="number" class="form-control" id="modal_transaction_fee" name="fee" 
                                    step="0.01" min="0" value="0">
                         </div>
                     </div>

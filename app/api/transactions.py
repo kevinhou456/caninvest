@@ -148,7 +148,10 @@ def create_transaction(account_id):
 def get_transaction(transaction_id):
     """获取交易详情"""
     transaction = Transaction.query.get_or_404(transaction_id)
-    return jsonify(transaction.to_dict())
+    return jsonify({
+        'success': True,
+        'transaction': transaction.to_dict()
+    })
 
 @bp.route('/transactions/<int:transaction_id>', methods=['PUT'])
 def update_transaction(transaction_id):
@@ -157,82 +160,86 @@ def update_transaction(transaction_id):
     data = request.get_json()
     
     if not data:
-        return jsonify({'error': _('No data provided')}), 400
+        return jsonify({'success': False, 'error': _('No data provided')}), 400
     
-    # 保存原始数据用于回滚持仓
-    original_data = {
-        'transaction_type': transaction.transaction_type,
-        'quantity': transaction.quantity,
-        'price_per_share': transaction.price_per_share,
-        'transaction_fee': transaction.transaction_fee
-    }
-    
-    # 更新字段
-    if 'quantity' in data:
-        try:
+    try:
+        # 更新字段
+        if 'trade_date' in data:
+            transaction.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
+        
+        if 'type' in data:
+            if data['type'] not in ['BUY', 'SELL']:
+                return jsonify({'success': False, 'error': _('Invalid transaction type')}), 400
+            transaction.type = data['type']
+        
+        if 'stock' in data:
+            transaction.stock = data['stock'].upper()
+        
+        if 'quantity' in data:
             quantity = float(data['quantity'])
             if quantity <= 0:
-                return jsonify({'error': _('Quantity must be positive')}), 400
+                return jsonify({'success': False, 'error': _('Quantity must be positive')}), 400
             transaction.quantity = quantity
-        except (ValueError, TypeError):
-            return jsonify({'error': _('Invalid quantity')}), 400
-    
-    if 'price_per_share' in data:
-        try:
-            price = float(data['price_per_share'])
+        
+        if 'price' in data:
+            price = float(data['price'])
             if price <= 0:
-                return jsonify({'error': _('Price must be positive')}), 400
-            transaction.price_per_share = price
-        except (ValueError, TypeError):
-            return jsonify({'error': _('Invalid price')}), 400
-    
-    if 'transaction_fee' in data:
-        try:
-            transaction.transaction_fee = float(data['transaction_fee'])
-        except (ValueError, TypeError):
-            return jsonify({'error': _('Invalid transaction fee')}), 400
-    
-    if 'trade_date' in data:
-        try:
-            transaction.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({'error': _('Invalid date format')}), 400
-    
-    if 'notes' in data:
-        transaction.notes = data['notes']
-    
-    if 'exchange_rate' in data:
-        transaction.exchange_rate = data.get('exchange_rate')
-    
-    # TODO: Re-implement holdings recalculation with new system
-    # if any(key in data for key in ['quantity', 'price_per_share', 'transaction_fee']):
-    #     CurrentHolding.recalculate_holding(transaction.account_id, transaction.stock_id)
-    
-    db.session.commit()
-    
-    return jsonify({
-        'message': _('Transaction updated successfully'),
-        'transaction': transaction.to_dict()
-    })
+                return jsonify({'success': False, 'error': _('Price must be positive')}), 400
+            transaction.price = price
+        
+        if 'currency' in data:
+            if data['currency'] not in ['USD', 'CAD']:
+                return jsonify({'success': False, 'error': _('Invalid currency')}), 400
+            transaction.currency = data['currency']
+        
+        if 'fee' in data:
+            transaction.fee = float(data['fee']) if data['fee'] else 0
+        
+        if 'account_id' in data:
+            account = Account.query.get(data['account_id'])
+            if not account:
+                return jsonify({'success': False, 'error': _('Invalid account')}), 400
+            transaction.account_id = data['account_id']
+        
+        if 'notes' in data:
+            transaction.notes = data['notes']
+        
+        transaction.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Transaction updated successfully'),
+            'transaction': transaction.to_dict()
+        })
+        
+    except ValueError as e:
+        return jsonify({'success': False, 'error': _('Invalid numeric values')}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/transactions/<int:transaction_id>', methods=['DELETE'])
 def delete_transaction(transaction_id):
     """删除交易记录"""
     transaction = Transaction.query.get_or_404(transaction_id)
     
-    account_id = transaction.account_id
-    stock_id = transaction.stock_id
-    
-    db.session.delete(transaction)
-    
-    # TODO: Re-implement holdings recalculation with new system
-    # CurrentHolding.recalculate_holding(account_id, stock_id)
-    
-    db.session.commit()
-    
-    return jsonify({
-        'message': _('Transaction deleted successfully')
-    })
+    try:
+        db.session.delete(transaction)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Transaction deleted successfully')
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @bp.route('/members/<int:member_id>/transactions', methods=['GET'])
 def get_member_transactions(member_id):

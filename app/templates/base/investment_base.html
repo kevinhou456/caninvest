@@ -273,12 +273,8 @@
             <div class="nav-item nav-all-members {{ 'active' if not current_member_id and not current_account_id }}"
                  onclick="selectAllMembers()">
                 <i class="fas fa-users me-2"></i>{{ _('All Members') }}
-                {% if family_structure %}
-                {% set ns = namespace(total=0) %}
-                {% for member in family_structure %}
-                    {% set ns.total = ns.total + member.accounts|length %}
-                {% endfor %}
-                <small class="text-muted ms-1">({{ ns.total }} {{ _('accounts') }})</small>
+                {% if total_accounts_count %}
+                <small class="text-muted ms-1">({{ total_accounts_count }} {{ _('accounts') }})</small>
                 {% endif %}
             </div>
             
@@ -295,15 +291,10 @@
                 {% for account in member.accounts %}
                 <div class="nav-item nav-account {{ 'active' if current_account_id == account.id }}"
                      onclick="selectAccount({{ account.id }})">
-                    <i class="fas fa-university me-2 account-type-{{ account.account_type.lower() if account.account_type else 'taxable' }}"></i>
+                    <i class="fas fa-university me-2 account-type-{{ account.account_type.lower() if account.account_type else 'regular' }}"></i>
                     {% if account.is_joint %}
-                        {% set ns = namespace(ownership_percent=0) %}
-                        {% for am in account.account_members %}
-                            {% if am.member_id == member.id %}
-                                {% set ns.ownership_percent = am.ownership_percentage %}
-                            {% endif %}
-                        {% endfor %}
-                        {{ account.name }} ({{ "%.1f"|format(ns.ownership_percent|float) }}%)
+                        {% set current_member_percent = account.ownership_percentage %}
+                        <i class="fas fa-users me-1 text-warning" title="联名账户"></i>{{ account.name }} ({{ "%.1f"|format(current_member_percent|float) }}%)
                     {% else %}
                         {{ account.name }}
                     {% endif %}

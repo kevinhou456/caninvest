@@ -28,6 +28,59 @@ class Transaction(db.Model):
     def __repr__(self):
         return f'<Transaction {self.type} {self.stock} {self.quantity}@{self.price}>'
     
+    @classmethod
+    def is_duplicate(cls, account_id, trade_date, type, stock, quantity, price, currency, fee, notes=''):
+        """
+        检查是否存在重复的交易记录
+        
+        Args:
+            account_id: 账户ID
+            trade_date: 交易日期
+            type: 交易类型
+            stock: 股票代码
+            quantity: 数量
+            price: 价格
+            currency: 货币
+            fee: 手续费
+            notes: 备注
+            
+        Returns:
+            bool: True if duplicate exists, False otherwise
+        """
+        # 检查是否存在完全相同的记录
+        existing = cls.query.filter_by(
+            account_id=account_id,
+            trade_date=trade_date,
+            type=type,
+            stock=stock,
+            quantity=quantity,
+            price=price,
+            currency=currency,
+            fee=fee,
+            notes=notes
+        ).first()
+        
+        return existing is not None
+    
+    @classmethod
+    def count_same_day_trades(cls, account_id, trade_date, type, stock, quantity, price):
+        """
+        计算同一天相同交易的数量（用于调试和统计）
+        
+        Returns:
+            int: 同一天相同交易的数量
+        """
+        count = cls.query.filter_by(
+            account_id=account_id,
+            trade_date=trade_date,
+            type=type,
+            stock=stock,
+            quantity=quantity,
+            price=price
+        ).count()
+        
+        return count
+    
     def to_dict(self):
         return {
             'id': self.id,
