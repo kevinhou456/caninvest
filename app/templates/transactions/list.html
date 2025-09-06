@@ -2,7 +2,19 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>{{ _('All Transactions') }}</h2>
+    <div>
+        <h2>
+            {% if request.args.get('account_id') %}
+                {% for account in accounts %}
+                    {% if account.id == request.args.get('account_id')|int %}
+                        {{ account.name }} - {{ _('Transactions') }}
+                    {% endif %}
+                {% endfor %}
+            {% else %}
+                {{ _('All Transactions') }}
+            {% endif %}
+        </h2>
+    </div>
     <div class="btn-group">
         <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
             <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
@@ -88,7 +100,7 @@
     <ul class="pagination justify-content-center">
         {% if transactions.has_prev %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.prev_num) }}">{{ _('Previous') }}</a>
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.prev_num, account_id=request.args.get('account_id')) }}">{{ _('Previous') }}</a>
             </li>
         {% endif %}
         
@@ -96,7 +108,7 @@
             {% if page_num %}
                 {% if page_num != transactions.page %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('main.transactions', page=page_num) }}">{{ page_num }}</a>
+                        <a class="page-link" href="{{ url_for('main.transactions', page=page_num, account_id=request.args.get('account_id')) }}">{{ page_num }}</a>
                     </li>
                 {% else %}
                     <li class="page-item active">
@@ -112,7 +124,7 @@
         
         {% if transactions.has_next %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.next_num) }}">{{ _('Next') }}</a>
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.next_num, account_id=request.args.get('account_id')) }}">{{ _('Next') }}</a>
             </li>
         {% endif %}
     </ul>
@@ -130,6 +142,7 @@
 {% endif %}
 
 <script>
+
 function deleteAccountTransactions(accountId) {
     if (confirm('{{ _("Are you sure you want to delete all transactions for this account? This action cannot be undone.") }}')) {
         fetch(`/api/accounts/${accountId}/transactions`, {

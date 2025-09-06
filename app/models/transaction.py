@@ -149,10 +149,14 @@ class Transaction(db.Model):
         return query.all()
     
     @classmethod
-    def get_portfolio_summary(cls, account_id=None):
+    def get_portfolio_summary(cls, account_id=None, account_ids=None):
         """获取投资组合摘要"""
         query = cls.query
-        if account_id:
+        if account_ids:
+            # 支持多个账户ID的过滤
+            query = query.filter(cls.account_id.in_(account_ids))
+        elif account_id:
+            # 向后兼容单个账户ID
             query = query.filter_by(account_id=account_id)
         
         transactions = query.all()
@@ -165,24 +169,43 @@ class Transaction(db.Model):
                     'currency': tx.currency,
                     'total_shares': 0,
                     'total_cost': 0,
+                    'total_bought_shares': 0,
+                    'total_sold_shares': 0,
+                    'total_bought_value': 0,
+                    'total_sold_value': 0,
+                    'realized_gain': 0,
                     'transactions': 0
                 }
             
             if tx.type == 'BUY':
                 portfolio[tx.stock]['total_shares'] += float(tx.quantity)
                 portfolio[tx.stock]['total_cost'] += tx.net_amount
+                portfolio[tx.stock]['total_bought_shares'] += float(tx.quantity)
+                portfolio[tx.stock]['total_bought_value'] += tx.net_amount
             else:  # SELL
                 portfolio[tx.stock]['total_shares'] -= float(tx.quantity)
                 portfolio[tx.stock]['total_cost'] -= tx.net_amount
+                portfolio[tx.stock]['total_sold_shares'] += float(tx.quantity)
+                portfolio[tx.stock]['total_sold_value'] += tx.net_amount
+                
+                # 计算已实现收益（基于FIFO或平均成本）
+                if portfolio[tx.stock]['total_bought_shares'] > 0:
+                    avg_cost_per_share = portfolio[tx.stock]['total_bought_value'] / portfolio[tx.stock]['total_bought_shares']
+                    cost_of_sold = avg_cost_per_share * float(tx.quantity)
+                    portfolio[tx.stock]['realized_gain'] += tx.net_amount - cost_of_sold
             
             portfolio[tx.stock]['transactions'] += 1
         
-        # 计算平均成本
+        # 计算平均成本和已实现收益
         for stock_data in portfolio.values():
             if stock_data['total_shares'] > 0:
                 stock_data['average_cost'] = stock_data['total_cost'] / stock_data['total_shares']
             else:
                 stock_data['average_cost'] = 0
+                
+            # 如果是已清仓股票，重新计算已实现收益
+            if stock_data['total_shares'] == 0 and stock_data['total_sold_shares'] > 0:
+                stock_data['realized_gain'] = stock_data['total_sold_value'] - stock_data['total_bought_value']
         
         return portfolio
     

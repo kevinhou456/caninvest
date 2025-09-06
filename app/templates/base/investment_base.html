@@ -235,6 +235,9 @@
     
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- Page-specific CSS -->
+    {% block extra_css %}{% endblock %}
 </head>
 <body>
     <!-- Top Header Bar -->
@@ -324,6 +327,9 @@
                 <div class="nav-item nav-management" onclick="window.location.href='{{ url_for('main.accounts') }}'">
                     <i class="fas fa-university me-2 text-success"></i>{{ _('Manage Accounts') }}
                 </div>
+                <div class="nav-item nav-management" onclick="window.location.href='{{ url_for('main.stock_categories') }}'">
+                    <i class="fas fa-chart-bar me-2 text-info"></i>{{ _('Manage Stock Category') }}
+                </div>
             </div>
         </div>
     </div>
@@ -333,32 +339,32 @@
         <!-- Statistics Views Navigation -->
         <nav class="top-nav">
             <div class="nav nav-tabs border-0" role="tablist">
-                <a class="nav-link {{ 'active' if current_view == 'dashboard' }}" 
-                   href="{{ url_for('main.dashboard') }}">
-                    <i class="fas fa-tachometer-alt me-2"></i>{{ _('Dashboard') }}
+                <a class="nav-link {{ 'active' if current_view == 'overview' }}" 
+                   href="{{ url_for('main.overview', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                    <i class="fas fa-eye me-2"></i>{{ _('Overview') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'transactions' }}" 
-                   href="{{ url_for('main.transactions') }}">
+                   href="{{ url_for('main.transactions', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-exchange-alt me-2"></i>{{ _('Transactions') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'annual' }}" 
-                   href="{{ url_for('main.annual_stats') }}">
+                   href="{{ url_for('main.annual_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar-alt me-2"></i>{{ _('Annual Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'monthly' }}" 
-                   href="{{ url_for('main.monthly_stats') }}">
+                   href="{{ url_for('main.monthly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar me-2"></i>{{ _('Monthly Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'quarterly' }}" 
-                   href="{{ url_for('main.quarterly_stats') }}">
+                   href="{{ url_for('main.quarterly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar-week me-2"></i>{{ _('Quarterly Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'daily' }}" 
-                   href="{{ url_for('main.daily_stats') }}">
+                   href="{{ url_for('main.daily_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar-day me-2"></i>{{ _('Daily Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'holdings' }}" 
-                   href="{{ url_for('main.holdings_analysis') }}">
+                   href="{{ url_for('main.holdings_analysis', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-chart-pie me-2"></i>{{ _('Holdings Analysis') }}
                 </a>
             </div>

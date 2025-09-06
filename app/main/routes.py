@@ -13,17 +13,19 @@ from app.models.transaction import Transaction
 # from app.models.stock import Stock, StockCategory  # Stock models deleted
 from app.models.stocks_cache import StocksCache
 from app.models.import_task import ImportTask, OCRTask
+from app.services.analytics_service import analytics_service, TimePeriod
+from app.services.currency_service import currency_service
 
 
 @bp.route('/')
 @bp.route('/index')
 def index():
     """首页 - 直接重定向到仪表板"""
-    return redirect(url_for('main.dashboard'))
+    return redirect(url_for('main.overview'))
 
 
-@bp.route('/dashboard')
-def dashboard():
+@bp.route('/overview')
+def overview():
     """仪表板 - 投资组合总览"""
     # 获取默认家庭（假设只有一个家庭，或者使用第一个家庭）
     family = Family.query.first()
@@ -37,103 +39,147 @@ def dashboard():
     # 获取过滤参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    time_period = request.args.get('period', 'all_time')
     
-    # 根据选择过滤账户
-    if account_id:
-        # 选择了特定账户
-        accounts = Account.query.filter_by(id=account_id, family_id=family.id).all()
-        filter_description = f"账户: {accounts[0].name}" if accounts else "未找到账户"
-    elif member_id:
-        # 选择了特定成员
-        from app.models.account import AccountMember
-        member_accounts = AccountMember.query.filter_by(member_id=member_id).all()
-        account_ids = [am.account_id for am in member_accounts]
-        accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
+    # 转换时间段参数
+    try:
+        period_enum = TimePeriod(time_period)
+    except ValueError:
+        period_enum = TimePeriod.ALL_TIME
+    
+    # 使用新的分析服务获取投资组合指标
+    try:
+        metrics = analytics_service.get_portfolio_metrics(
+            family_id=family.id,
+            member_id=member_id,
+            account_id=account_id,
+            period=period_enum
+        )
         
+        # 获取汇率信息
+        exchange_rates = currency_service.get_cad_usd_rates()
+        
+        # 获取基本统计数据
         from app.models.member import Member
-        member = Member.query.get(member_id)
-        filter_description = f"成员: {member.name}" if member else "未找到成员"
-    else:
-        # 显示所有成员数据
-        accounts = Account.query.filter_by(family_id=family.id).all()
-        filter_description = "全部成员"
-    
-    # 获取基本统计数据
-    from app.models.member import Member
-    members_count = Member.query.filter_by(family_id=family.id).count()
-    accounts_count = len(accounts)
-    
-    # 计算交易数量（基于过滤的账户）
-    if accounts:
-        account_ids = [acc.id for acc in accounts]
-        transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count()
-    else:
-        transactions_count = 0
-    
-    # 计算投资组合统计
-    portfolio_stats = {
-        'total_value': 0,
-        'total_cost': 0,
-        'total_gain': 0,
-        'total_gain_percent': 0
-    }
-    
-    account_balances = []
-    for account in accounts:
-        current_value = float(account.current_value or 0)
-        total_cost = float(account.total_cost or 0)
-        gain_loss = current_value - total_cost
-        gain_loss_percent = (gain_loss / total_cost * 100) if total_cost > 0 else 0
+        members_count = Member.query.filter_by(family_id=family.id).count()
         
-        portfolio_stats['total_value'] += current_value
-        portfolio_stats['total_cost'] += total_cost
-        portfolio_stats['total_gain'] += gain_loss
+        # 根据过滤条件获取账户
+        if account_id:
+            accounts = Account.query.filter_by(id=account_id, family_id=family.id).all()
+            filter_description = f"账户: {accounts[0].name}" if accounts else "未找到账户"
+        elif member_id:
+            from app.models.account import AccountMember
+            member_accounts = AccountMember.query.filter_by(member_id=member_id).all()
+            account_ids = [am.account_id for am in member_accounts]
+            accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
+            
+            member = Member.query.get(member_id)
+            filter_description = f"成员: {member.name}" if member else "未找到成员"
+        else:
+            accounts = Account.query.filter_by(family_id=family.id).all()
+            filter_description = "全部成员"
         
-        account_balances.append({
-            'id': account.id,
-            'name': account.name,
-            'account_type': account.account_type,
-            'current_value': current_value,
-            'gain_loss': gain_loss,
-            'gain_loss_percent': gain_loss_percent
-        })
-    
-    # 计算总收益率
-    if portfolio_stats['total_cost'] > 0:
-        portfolio_stats['total_gain_percent'] = (portfolio_stats['total_gain'] / portfolio_stats['total_cost']) * 100
-    
-    # 获取最近的交易（基于过滤的账户）
-    if accounts:
-        account_ids = [acc.id for acc in accounts]
-        recent_transactions = Transaction.query.filter(
-            Transaction.account_id.in_(account_ids)
-        ).order_by(Transaction.trade_date.desc()).limit(10).all()
-    else:
-        recent_transactions = []
-    
-    # 投资组合分配数据（简化版）
-    portfolio_allocation = None
-    if accounts:
-        labels = [account.name for account in accounts]
-        data = [float(account.current_value or 0) for account in accounts]
-        if any(value > 0 for value in data):
-            portfolio_allocation = {'labels': labels, 'data': data}
-    
-    stats = {
-        'members_count': members_count,
-        'accounts_count': accounts_count,
-        'transactions_count': transactions_count
-    }
-    
-    return render_template('investment/dashboard.html', 
-                         title=_('Dashboard'),
-                         stats=stats,
-                         portfolio_stats=portfolio_stats,
-                         account_balances=account_balances,
-                         portfolio_allocation=portfolio_allocation,
-                         recent_transactions=recent_transactions,
-                         filter_description=filter_description,
-                         filtered_accounts_count=len(accounts))
+        accounts_count = len(accounts)
+        
+        # 计算交易数量
+        if accounts:
+            account_ids = [acc.id for acc in accounts]
+            transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count()
+        else:
+            transactions_count = 0
+        
+        # 获取最近的交易
+        if accounts:
+            account_ids = [acc.id for acc in accounts]
+            recent_transactions = Transaction.query.filter(
+                Transaction.account_id.in_(account_ids)
+            ).order_by(Transaction.trade_date.desc()).limit(8).all()
+        else:
+            recent_transactions = []
+        
+        # 获取股票数量
+        stocks_count = StocksCache.query.count()
+        
+        # 获取待处理任务
+        pending_imports = ImportTask.query.filter_by(status='pending').count()
+        pending_ocr = OCRTask.query.filter_by(status='pending').count()
+        
+        stats = {
+            'members_count': members_count,
+            'accounts_count': accounts_count,
+            'transactions_count': transactions_count,
+            'stocks_count': stocks_count,
+            'pending_imports': pending_imports,
+            'pending_ocr': pending_ocr
+        }
+        
+        # 准备持仓数据  
+        holdings = metrics.holdings
+        cleared_holdings = metrics.cleared_holdings
+        
+        # 调试信息
+        print(f"Overview debug - Holdings count: {len(holdings)}, Cleared: {len(cleared_holdings)}")
+        if len(holdings) > 0:
+            print(f"First holding: {holdings[0]}")
+        
+        return render_template('investment/overview.html',
+                             title=_('Overview'),
+                             family=family,
+                             stats=stats,
+                             metrics=metrics.to_dict(),
+                             holdings=holdings,
+                             cleared_holdings=cleared_holdings,
+                             exchange_rates=exchange_rates,
+                             recent_transactions=recent_transactions,
+                             filter_description=filter_description,
+                             current_period=time_period,
+                             member_id=member_id,
+                             account_id=account_id,
+                             current_view='overview')
+        
+    except Exception as e:
+        # 如果新服务出错，回退到基本仪表板
+        import logging
+        import traceback
+        logging.error(f"Dashboard analytics error: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        
+        # 基本统计信息  
+        from app.models.member import Member
+        from app.models.account import AccountMember
+        members_count = Member.query.filter_by(family_id=family.id).count()
+        accounts_count = Account.query.filter_by(family_id=family.id).count()
+        transactions_count = Transaction.query.join(Account).filter(Account.family_id == family.id).count()
+        stocks_count = StocksCache.query.count()
+        
+        stats = {
+            'members_count': members_count,
+            'accounts_count': accounts_count,
+            'transactions_count': transactions_count,
+            'stocks_count': stocks_count,
+            'pending_imports': 0,
+            'pending_ocr': 0
+        }
+        
+        recent_transactions = Transaction.query.join(Account).filter(
+            Account.family_id == family.id
+        ).order_by(Transaction.trade_date.desc()).limit(8).all()
+        
+        
+        # 使用默认的空metrics对象，确保使用新的overview模板
+        return render_template('investment/overview.html',
+                             title=_('Overview'),
+                             family=family,
+                             stats=stats,
+                             metrics=None,
+                             holdings=[],
+                             exchange_rates=None,
+                             recent_transactions=recent_transactions,
+                             filter_description="全部成员",
+                             current_period='all_time',
+                             member_id=None,
+                             account_id=None,
+                             current_view='overview')
 
 
 @bp.route('/family-members')
@@ -317,27 +363,35 @@ def account_types():
 @bp.route('/transactions')
 def transactions():
     """交易记录列表页面"""
-    page = request.args.get('page', 1, type=int)
-    account_id = request.args.get('account_id', type=int)
-    type = request.args.get('type')
-    
-    query = Transaction.query
-    if account_id:
-        query = query.filter_by(account_id=account_id)
-    if type:
-        query = query.filter_by(type=type)
-    
-    transactions = query.order_by(Transaction.trade_date.desc()).paginate(
-        page=page, per_page=50, error_out=False
-    )
-    
-    accounts = Account.query.all()
-    
-    return render_template('transactions/list.html',
-                         title=_('Transactions'),
-                         transactions=transactions,
-                         accounts=accounts,
-                         current_view='transactions')
+    try:
+        page = request.args.get('page', 1, type=int)
+        account_id = request.args.get('account_id', type=int)
+        type_filter = request.args.get('type')
+        
+        # 构建查询
+        query = Transaction.query
+        if account_id:
+            query = query.filter(Transaction.account_id == account_id)
+        if type_filter:
+            query = query.filter(Transaction.type == type_filter)
+        
+        # 执行分页查询
+        transactions = query.order_by(Transaction.trade_date.desc()).paginate(
+            page=page, per_page=50, error_out=False
+        )
+        
+        # 获取所有账户
+        accounts = Account.query.all()
+        
+        return render_template('transactions/list.html',
+                             title=_('Transactions'),
+                             transactions=transactions,
+                             accounts=accounts,
+                             current_view='transactions')
+    except Exception as e:
+        current_app.logger.error(f"Error in transactions route: {str(e)}")
+        flash(_('Error loading transactions: ') + str(e), 'error')
+        return redirect(url_for('main.dashboard'))
 
 
 @bp.route('/transactions/create', methods=['GET', 'POST'])
@@ -383,14 +437,24 @@ def create_transaction():
             # 查找或创建股票缓存记录
             stock_cache = StocksCache.query.filter_by(symbol=stock_symbol).first()
             if not stock_cache:
-                # 创建新的股票缓存记录
+                # 使用智能推断来创建股票缓存记录
+                from app.services.stock_price_service import StockPriceService
+                price_service = StockPriceService()
+                
+                inferred_name = stock_name if stock_name else price_service._infer_stock_name(stock_symbol)
+                inferred_exchange = exchange if exchange else price_service._infer_exchange(stock_symbol)
+                inferred_currency = price_service._infer_currency(stock_symbol)
+                
                 stock_cache = StocksCache(
                     symbol=stock_symbol,
-                    name=stock_name or stock_symbol,
-                    exchange=exchange or 'UNKNOWN'
+                    name=inferred_name,
+                    exchange=inferred_exchange,
+                    currency=inferred_currency
                 )
                 db.session.add(stock_cache)
                 db.session.flush()  # 获取股票ID
+                
+                print(f"创建新股票缓存: {stock_symbol} -> 名称: {inferred_name}, 交易所: {inferred_exchange}")
             
             # 创建交易记录
             transaction = Transaction(
@@ -839,8 +903,154 @@ def create_stock():
 
 @bp.route('/stocks/categories')
 def stock_categories():
-    """股票分类 - 占位符"""
-    return "<h1>Stock Categories</h1><p>This feature is under development.</p>"
+    """股票分类管理页面"""
+    try:
+        from app.models.stock_category import StockCategory
+        
+        # 获取所有分类及其股票数量
+        categories = StockCategory.get_all_with_counts()
+        
+        # 获取未分类的股票
+        uncategorized_stocks = StocksCache.query.filter(
+            StocksCache.category_id.is_(None)
+        ).all()
+        
+        # 获取所有分类的详细信息（用于编辑）
+        all_categories = StockCategory.query.all()
+        
+        # 获取所有股票
+        all_stocks = StocksCache.query.all()
+        
+        return render_template('stocks/categories.html',
+                             title=_('Manage Stock Category'),
+                             categories=categories,
+                             uncategorized=uncategorized_stocks,
+                             all_categories=all_categories,
+                             all_stocks=all_stocks,
+                             current_view='stock_categories')
+    except Exception as e:
+        flash(_('Error loading stock categories: ') + str(e), 'error')
+        return redirect(url_for('main.dashboard'))
+
+# 股票分类CRUD路由
+@bp.route('/api/stock-categories', methods=['POST'])
+def create_stock_category():
+    """创建股票分类"""
+    try:
+        from app.models.stock_category import StockCategory
+        data = request.get_json()
+        
+        if not data or not data.get('name'):
+            return jsonify({'success': False, 'error': _('Category name is required')}), 400
+        
+        # 检查是否已存在同名分类
+        existing = StockCategory.query.filter_by(name=data['name']).first()
+        if existing:
+            return jsonify({'success': False, 'error': _('Category name already exists')}), 400
+        
+        category = StockCategory(
+            name=data['name'],
+            name_en=data.get('name_en', ''),
+            description=data.get('description', ''),
+            color=data.get('color', '#007bff')
+        )
+        
+        db.session.add(category)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Category created successfully'),
+            'category': category.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@bp.route('/api/stock-categories/<int:category_id>', methods=['PUT'])
+def update_stock_category(category_id):
+    """更新股票分类"""
+    try:
+        from app.models.stock_category import StockCategory
+        category = StockCategory.query.get_or_404(category_id)
+        data = request.get_json()
+        
+        if not data or not data.get('name'):
+            return jsonify({'success': False, 'error': _('Category name is required')}), 400
+        
+        # 检查是否已存在同名分类（除了当前分类）
+        existing = StockCategory.query.filter(
+            StockCategory.name == data['name'],
+            StockCategory.id != category_id
+        ).first()
+        if existing:
+            return jsonify({'success': False, 'error': _('Category name already exists')}), 400
+        
+        category.name = data['name']
+        category.name_en = data.get('name_en', '')
+        category.description = data.get('description', '')
+        category.color = data.get('color', category.color)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Category updated successfully'),
+            'category': category.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@bp.route('/api/stock-categories/<int:category_id>', methods=['DELETE'])
+def delete_stock_category(category_id):
+    """删除股票分类"""
+    try:
+        from app.models.stock_category import StockCategory
+        category = StockCategory.query.get_or_404(category_id)
+        
+        # 检查是否有股票使用这个分类
+        stock_count = StocksCache.query.filter_by(category_id=category_id).count()
+        if stock_count > 0:
+            return jsonify({
+                'success': False, 
+                'error': _('Cannot delete category with %(count)d stocks. Please reassign stocks first.', count=stock_count)
+            }), 400
+        
+        db.session.delete(category)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Category deleted successfully')
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@bp.route('/api/stocks/<int:stock_id>/category', methods=['PUT'])
+def assign_stock_category(stock_id):
+    """分配股票分类"""
+    try:
+        stock = StocksCache.query.get_or_404(stock_id)
+        data = request.get_json()
+        
+        category_id = data.get('category_id') if data else None
+        stock.category_id = category_id
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Stock category updated successfully')
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/members/create', methods=['GET', 'POST'])
 def create_member():

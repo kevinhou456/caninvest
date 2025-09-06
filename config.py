@@ -26,6 +26,9 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'csv', 'xlsx'}
     
+    # 股票价格API配置
+    ALPHA_VANTAGE_API_KEY = os.environ.get('ALPHA_VANTAGE_API_KEY')
+    
     # 股票价格缓存配置
     PRICE_CACHE_TTL = 900  # 15分钟
     PRICE_UPDATE_INTERVAL = 300  # 5分钟
@@ -37,6 +40,7 @@ class Config:
     
     # 任务调度配置
     SCHEDULER_API_ENABLED = True
+    SCHEDULER_AUTO_START = False  # 暂时禁用自动启动，保留代码供将来使用
     
     # 日志配置
     LOG_LEVEL = 'INFO'
@@ -54,12 +58,13 @@ class Config:
 class DevelopmentConfig(Config):
     """开发环境配置"""
     DEBUG = True
-    SQLALCHEMY_ECHO = True
+    SQLALCHEMY_ECHO = False
     LOG_LEVEL = 'DEBUG'
     
     # 开发模式下的股票价格配置
     PRICE_CACHE_TTL = 300  # 5分钟缓存
     MAX_DAILY_PRICE_REQUESTS = 500
+    SCHEDULER_AUTO_START = False  # 开发环境暂时禁用自动启动
 
 class TestingConfig(Config):
     """测试环境配置"""

@@ -1,4 +1,4 @@
-{% extends "base/base.html" %}
+{% extends "base/investment_base.html" %}
 
 {% block content %}
 <div class="row mb-4">
@@ -8,59 +8,146 @@
     </div>
 </div>
 
-<!-- Statistics Cards -->
+<!-- Investment Statistics Cards -->
 <div class="row mb-4">
+    <!-- 总资产 -->
     <div class="col-md-3 col-sm-6 mb-3">
         <div class="stat-card">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
-                    <div class="stat-value">{{ stats.members_count }}</div>
-                    <div class="stat-label">{{ _('Family Members') }}</div>
+                    <div class="stat-value">${{ "{:,.0f}".format(metrics.total_assets.cad if metrics else 0) }}</div>
+                    <div class="stat-label">{{ _('Total Assets') }} <small class="text-muted">CAD</small></div>
+                    <small class="text-muted">${{ "{:,.0f}".format(metrics.total_assets.usd if metrics else 0) }} USD</small>
                 </div>
                 <div class="text-end">
-                    <i class="fas fa-users fa-2x opacity-50"></i>
+                    <i class="fas fa-wallet fa-2x opacity-50 text-primary"></i>
                 </div>
             </div>
         </div>
     </div>
     
+    <!-- 总收益 -->
     <div class="col-md-3 col-sm-6 mb-3">
         <div class="stat-card success">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
-                    <div class="stat-value">{{ stats.accounts_count }}</div>
-                    <div class="stat-label">{{ _('Accounts') }}</div>
+                    <div class="stat-value {{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }}">
+                        {% if metrics and metrics.total_return.cad >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.total_return.cad if metrics else 0) }}
+                    </div>
+                    <div class="stat-label">{{ _('Total Return') }} <small class="text-muted">CAD</small></div>
+                    <small class="text-muted">
+                        {% if metrics and metrics.total_return.usd >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.total_return.usd if metrics else 0) }} USD
+                    </small>
                 </div>
                 <div class="text-end">
-                    <i class="fas fa-university fa-2x opacity-50"></i>
+                    <i class="fas fa-chart-line fa-2x opacity-50 {{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }}"></i>
                 </div>
             </div>
         </div>
     </div>
     
+    <!-- 已实现收益 -->
     <div class="col-md-3 col-sm-6 mb-3">
         <div class="stat-card warning">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
-                    <div class="stat-value">{{ "{:,}".format(stats.transactions_count) }}</div>
-                    <div class="stat-label">{{ _('Transactions') }}</div>
+                    <div class="stat-value {{ 'text-success' if metrics and metrics.realized_gain.cad >= 0 else 'text-danger' }}">
+                        {% if metrics and metrics.realized_gain.cad >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.realized_gain.cad if metrics else 0) }}
+                    </div>
+                    <div class="stat-label">{{ _('Realized Gain') }} <small class="text-muted">CAD</small></div>
+                    <small class="text-muted">
+                        {% if metrics and metrics.realized_gain.usd >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.realized_gain.usd if metrics else 0) }} USD
+                    </small>
                 </div>
                 <div class="text-end">
-                    <i class="fas fa-exchange-alt fa-2x opacity-50"></i>
+                    <i class="fas fa-coins fa-2x opacity-50 text-info"></i>
                 </div>
             </div>
         </div>
     </div>
     
+    <!-- 浮动盈亏 -->
     <div class="col-md-3 col-sm-6 mb-3">
         <div class="stat-card info">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
-                    <div class="stat-value">{{ stats.stocks_count }}</div>
-                    <div class="stat-label">{{ _('Stocks Tracked') }}</div>
+                    <div class="stat-value {{ 'text-success' if metrics and metrics.unrealized_gain.cad >= 0 else 'text-danger' }}">
+                        {% if metrics and metrics.unrealized_gain.cad >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.unrealized_gain.cad if metrics else 0) }}
+                    </div>
+                    <div class="stat-label">{{ _('Unrealized Gain') }} <small class="text-muted">CAD</small></div>
+                    <small class="text-muted">
+                        {% if metrics and metrics.unrealized_gain.usd >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.unrealized_gain.usd if metrics else 0) }} USD
+                    </small>
                 </div>
                 <div class="text-end">
-                    <i class="fas fa-chart-line fa-2x opacity-50"></i>
+                    <i class="fas fa-balance-scale fa-2x opacity-50 text-warning"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 额外统计行 -->
+<div class="row mb-4">
+    <!-- 总分红 -->
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-success">${{ "{:,.0f}".format(metrics.total_dividends.cad if metrics else 0) }}</div>
+                    <div class="stat-label">{{ _('Total Dividends') }} <small class="text-muted">CAD</small></div>
+                    <small class="text-muted">${{ "{:,.0f}".format(metrics.total_dividends.usd if metrics else 0) }} USD</small>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-gift fa-2x opacity-50 text-success"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 当前汇率 -->
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ "{:.4f}".format(exchange_rates.cad_to_usd if exchange_rates else 0.74) }}</div>
+                    <div class="stat-label">{{ _('CAD to USD') }}</div>
+                    <small class="text-muted">1 USD = {{ "{:.4f}".format(exchange_rates.usd_to_cad if exchange_rates else 1.35) }} CAD</small>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-exchange-alt fa-2x opacity-50 text-secondary"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 持仓数量 -->
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ holdings|length if holdings else 0 }}</div>
+                    <div class="stat-label">{{ _('Holdings') }}</div>
+                    <small class="text-muted">{{ stats.stocks_count }} {{ _('stocks tracked') }}</small>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-briefcase fa-2x opacity-50 text-info"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 交易数量 -->
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ "{:,}".format(stats.transactions_count) }}</div>
+                    <div class="stat-label">{{ _('Transactions') }}</div>
+                    <small class="text-muted">{{ stats.accounts_count }} {{ _('accounts') }}</small>
+                </div>
+                <div class="text-end">
+                    <i class="fas fa-exchange-alt fa-2x opacity-50 text-primary"></i>
                 </div>
             </div>
         </div>
@@ -82,6 +169,74 @@
                     {{ stats.pending_ocr }} {{ _('OCR tasks awaiting review') }}.
                 {% endif %}
                 <a href="{{ url_for('main.import_transactions') }}" class="alert-link">{{ _('Review now') }}</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Current Holdings Table -->
+{% if holdings %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-briefcase me-2"></i>{{ _('Current Holdings') }}
+                    <span class="badge bg-secondary ms-2">{{ holdings|length }}</span>
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>{{ _('Stock') }}</th>
+                                <th class="d-none d-md-table-cell">{{ _('Account') }}</th>
+                                <th class="text-end">{{ _('Shares') }}</th>
+                                <th class="text-end">{{ _('Avg Cost') }}</th>
+                                <th class="text-end">{{ _('Market Value') }}</th>
+                                <th class="text-end">{{ _('Gain/Loss') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for holding in holdings %}
+                            <tr>
+                                <td class="align-middle">
+                                    <div class="d-flex flex-column">
+                                        <strong>{{ holding.symbol }}</strong>
+                                        <small class="text-muted d-none d-sm-inline">{{ holding.company_name or holding.sector }}</small>
+                                    </div>
+                                </td>
+                                <td class="align-middle d-none d-md-table-cell">
+                                    <span class="badge bg-light text-dark">{{ holding.account_name }}</span>
+                                </td>
+                                <td class="align-middle text-end">
+                                    <strong>{{ "{:,.0f}".format(holding.shares) }}</strong>
+                                </td>
+                                <td class="align-middle text-end">
+                                    ${{ "{:.2f}".format(holding.average_cost) }}
+                                    <br><small class="text-muted">{{ holding.currency }}</small>
+                                </td>
+                                <td class="align-middle text-end">
+                                    <strong>${{ "{:,.0f}".format(holding.current_value) }}</strong>
+                                    <br><small class="text-muted">{{ holding.currency }}</small>
+                                </td>
+                                <td class="align-middle text-end">
+                                    <div class="{{ 'text-success' if holding.unrealized_gain >= 0 else 'text-danger' }}">
+                                        <strong>
+                                            {% if holding.unrealized_gain >= 0 %}+{% endif %}${{ "{:,.0f}".format(holding.unrealized_gain) }}
+                                        </strong>
+                                        <br><small>
+                                            ({% if holding.unrealized_gain_percent >= 0 %}+{% endif %}{{ "{:.1f}".format(holding.unrealized_gain_percent) }}%)
+                                        </small>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -167,13 +322,13 @@
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
                                         <h6 class="mb-1">
-                                            {{ transaction.stock.symbol }}
-                                            <span class="badge badge-{{ 'success' if transaction.transaction_type == 'BUY' else 'danger' if transaction.transaction_type == 'SELL' else 'info' }}">
-                                                {{ transaction.transaction_type }}
+                                            {{ transaction.stock }}
+                                            <span class="badge bg-{{ 'success' if transaction.type == 'BUY' else 'danger' if transaction.type == 'SELL' else 'info' }}">
+                                                {{ transaction.type }}
                                             </span>
                                         </h6>
                                         <small class="text-muted">
-                                            {{ transaction.account.name }} • 
+                                            {{ transaction.account.name if transaction.account else 'Account #' + transaction.account_id|string }} • 
                                             {{ transaction.trade_date.strftime('%Y-%m-%d') }}
                                         </small>
                                     </div>
@@ -182,7 +337,7 @@
                                             {% if transaction.currency == 'USD' %}
                                                 ${{ "{:,.2f}".format(transaction.total_amount|float) }} USD
                                             {% else %}
-                                                ${{ "{:,.2f}".format(transaction.total_amount|float) }}
+                                                ${{ "{:,.2f}".format(transaction.total_amount|float) }} CAD
                                             {% endif %}
                                         </div>
                                         <small class="text-muted">

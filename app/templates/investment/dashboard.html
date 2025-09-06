@@ -28,7 +28,10 @@
                             {{ _('Total Portfolio Value') }}
                         </div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            ${{ "{:,.2f}".format(portfolio_stats.total_value) }}
+                            ${{ "{:,.0f}".format(metrics.total_assets.cad if metrics else 0) }} CAD
+                        </div>
+                        <div class="text-xs text-gray-500">
+                            ${{ "{:,.0f}".format(metrics.total_assets.usd if metrics else 0) }} USD
                         </div>
                     </div>
                     <div class="col-auto">
@@ -48,9 +51,12 @@
                             {{ _('Total Gain/Loss') }}
                         </div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            <span class="{{ 'text-success' if portfolio_stats.total_gain >= 0 else 'text-danger' }}">
-                                ${{ "{:,.2f}".format(portfolio_stats.total_gain) }}
+                            <span class="{{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }}">
+                                {% if metrics and metrics.total_return.cad >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.total_return.cad if metrics else 0) }} CAD
                             </span>
+                        </div>
+                        <div class="text-xs text-gray-500">
+                            {% if metrics and metrics.total_return.usd >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.total_return.usd if metrics else 0) }} USD
                         </div>
                     </div>
                     <div class="col-auto">
@@ -72,6 +78,9 @@
                         <div class="h5 mb-0 font-weight-bold text-gray-800">
                             {{ stats.accounts_count }}
                         </div>
+                        <div class="text-xs text-gray-500">
+                            {{ holdings|length if holdings else 0 }} {{ _('holdings') }}
+                        </div>
                     </div>
                     <div class="col-auto">
                         <i class="fas fa-university fa-2x text-gray-300"></i>
@@ -90,7 +99,10 @@
                             {{ _('Recent Transactions') }}
                         </div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ stats.transactions_count }}
+                            {{ "{:,}".format(stats.transactions_count) }}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                            ${{ "{:,.0f}".format(metrics.total_dividends.cad if metrics else 0) }} {{ _('dividends') }}
                         </div>
                     </div>
                     <div class="col-auto">
@@ -102,53 +114,154 @@
     </div>
 </div>
 
-<!-- Charts Row -->
+<!-- Holdings and Account Information Row -->
 <div class="row">
-    <!-- Portfolio Allocation Chart -->
+    <!-- Current Holdings Table -->
     <div class="col-xl-8 col-lg-7">
+        {% if holdings %}
         <div class="card shadow mb-4">
-            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Portfolio Allocation') }}</h6>
-                <div class="dropdown no-arrow">
-                    <a class="dropdown-toggle" href="#" role="button" data-toggle="dropdown">
-                        <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
-                    </a>
-                </div>
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Current Holdings') }} ({{ holdings|length }})</h6>
             </div>
-            <div class="card-body">
-                <div class="chart-area">
-                    <canvas id="portfolioChart"></canvas>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="border-0">{{ _('Stock') }}</th>
+                                <th class="border-0 text-end">{{ _('Shares') }}</th>
+                                <th class="border-0 text-end">{{ _('Avg Cost') }}</th>
+                                <th class="border-0 text-end">{{ _('Market Value') }}</th>
+                                <th class="border-0 text-end">{{ _('Gain/Loss') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for holding in holdings %}
+                            <tr>
+                                <td class="align-middle">
+                                    <div class="d-flex flex-column">
+                                        <strong>{{ holding.symbol }}</strong>
+                                        <small class="text-muted">{{ holding.company_name or holding.sector }}</small>
+                                    </div>
+                                </td>
+                                <td class="align-middle text-end">
+                                    <strong>{{ "{:,.0f}".format(holding.shares) }}</strong>
+                                </td>
+                                <td class="align-middle text-end">
+                                    ${{ "{:.2f}".format(holding.average_cost) }}
+                                    <br><small class="text-muted">{{ holding.currency }}</small>
+                                </td>
+                                <td class="align-middle text-end">
+                                    <strong>${{ "{:,.0f}".format(holding.current_value) }}</strong>
+                                    <br><small class="text-muted">{{ holding.currency }}</small>
+                                </td>
+                                <td class="align-middle text-end">
+                                    <div class="{{ 'text-success' if holding.unrealized_gain >= 0 else 'text-danger' }}">
+                                        <strong>
+                                            {% if holding.unrealized_gain >= 0 %}+{% endif %}${{ "{:,.0f}".format(holding.unrealized_gain) }}
+                                        </strong>
+                                        <br><small>
+                                            ({% if holding.unrealized_gain_percent >= 0 %}+{% endif %}{{ "{:.1f}".format(holding.unrealized_gain_percent) }}%)
+                                        </small>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
+        {% else %}
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Current Holdings') }}</h6>
+            </div>
+            <div class="card-body text-center py-4">
+                <i class="fas fa-briefcase fa-3x text-gray-300 mb-3"></i>
+                <p class="text-muted">{{ _('No holdings found') }}</p>
+                <p class="text-muted">{{ _('Add some transactions to see your portfolio') }}</p>
+            </div>
+        </div>
+        {% endif %}
     </div>
     
     <!-- Account Balances -->
     <div class="col-xl-4 col-lg-5">
         <div class="card shadow mb-4">
             <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Account Balances') }}</h6>
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Portfolio Summary') }}</h6>
             </div>
             <div class="card-body">
-                {% if account_balances %}
-                    {% for account in account_balances %}
-                    <div class="d-flex align-items-center justify-content-between mb-3">
-                        <div>
-                            <div class="small font-weight-bold">{{ account.name }}</div>
-                            <div class="text-xs text-gray-500">{{ account.account_type.name if account.account_type else 'Taxable' }}</div>
-                        </div>
+                {% if metrics %}
+                <!-- Exchange Rate Info -->
+                <div class="mb-4 p-3 bg-light rounded">
+                    <h6 class="text-muted mb-2">
+                        <i class="fas fa-exchange-alt me-2"></i>{{ _('Current Exchange Rate') }}
+                    </h6>
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="small">1 CAD =</span>
+                        <strong>${{ "{:.4f}".format(exchange_rates.cad_to_usd if exchange_rates else 0.74) }} USD</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="small">1 USD =</span>
+                        <strong>${{ "{:.4f}".format(exchange_rates.usd_to_cad if exchange_rates else 1.35) }} CAD</strong>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-2">
+                        {{ _('Updated') }}: {{ exchange_rates.updated_date if exchange_rates else 'N/A' }}
+                    </div>
+                </div>
+                
+                <!-- Key Metrics -->
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-xs font-weight-bold text-muted text-uppercase">{{ _('Realized Gains') }}</span>
                         <div class="text-right">
-                            <div class="font-weight-bold">${{ "{:,.2f}".format(account.current_value) }}</div>
-                            <div class="text-xs {{ 'text-success' if account.gain_loss >= 0 else 'text-danger' }}">
-                                {{ "{:+.1f}%".format(account.gain_loss_percent) }}
+                            <div class="font-weight-bold {{ 'text-success' if metrics.realized_gain.cad >= 0 else 'text-danger' }}">
+                                {% if metrics.realized_gain.cad >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.realized_gain.cad) }}
                             </div>
+                            <div class="text-xs text-gray-500">CAD</div>
                         </div>
                     </div>
-                    {% endfor %}
+                </div>
+                
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-xs font-weight-bold text-muted text-uppercase">{{ _('Unrealized Gains') }}</span>
+                        <div class="text-right">
+                            <div class="font-weight-bold {{ 'text-success' if metrics.unrealized_gain.cad >= 0 else 'text-danger' }}">
+                                {% if metrics.unrealized_gain.cad >= 0 %}+{% endif %}${{ "{:,.0f}".format(metrics.unrealized_gain.cad) }}
+                            </div>
+                            <div class="text-xs text-gray-500">CAD</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-xs font-weight-bold text-muted text-uppercase">{{ _('Total Dividends') }}</span>
+                        <div class="text-right">
+                            <div class="font-weight-bold text-success">
+                                ${{ "{:,.0f}".format(metrics.total_dividends.cad) }}
+                            </div>
+                            <div class="text-xs text-gray-500">CAD</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                <div class="text-center">
+                    <a href="{{ url_for('main.transactions') }}" class="btn btn-primary btn-sm me-2">
+                        <i class="fas fa-list me-1"></i>{{ _('View Transactions') }}
+                    </a>
+                    <a href="{{ url_for('main.accounts') }}" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-university me-1"></i>{{ _('Accounts') }}
+                    </a>
+                </div>
                 {% else %}
                     <div class="text-center py-3">
                         <i class="fas fa-chart-bar fa-2x text-gray-300 mb-2"></i>
-                        <p class="text-muted">{{ _('No account data available') }}</p>
+                        <p class="text-muted">{{ _('No portfolio data available') }}</p>
                         <a href="{{ url_for('main.create_account') }}" class="btn btn-primary btn-sm">
                             {{ _('Add Account') }}
                         </a>
@@ -183,16 +296,16 @@
                     {% for transaction in recent_transactions %}
                     <tr>
                         <td>{{ transaction.trade_date.strftime('%Y-%m-%d') }}</td>
-                        <td>{{ transaction.account.name if transaction.account else '-' }}</td>
+                        <td>{{ transaction.account.name if transaction.account else 'Account #' + transaction.account_id|string }}</td>
                         <td>
-                            <span class="badge badge-{{ 'success' if transaction.transaction_type == 'buy' else 'danger' }}">
-                                {{ transaction.transaction_type|title }}
+                            <span class="badge badge-{{ 'success' if transaction.type == 'BUY' else 'danger' if transaction.type == 'SELL' else 'info' }}">
+                                {{ transaction.type }}
                             </span>
                         </td>
-                        <td>{{ transaction.stock.symbol if transaction.stock else '-' }}</td>
-                        <td>{{ transaction.quantity }}</td>
+                        <td><strong>{{ transaction.stock }}</strong></td>
+                        <td>{{ "{:,.0f}".format(transaction.quantity) }}</td>
                         <td>${{ "{:.2f}".format(transaction.price) }}</td>
-                        <td>${{ "{:.2f}".format(transaction.quantity * transaction.price) }}</td>
+                        <td>${{ "{:.2f}".format(transaction.total_amount) }} <small class="text-muted">{{ transaction.currency }}</small></td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -235,45 +348,18 @@
 
 {% block scripts %}
 <script>
-// Portfolio Chart
-if (document.getElementById('portfolioChart')) {
-    const ctx = document.getElementById('portfolioChart').getContext('2d');
-    const portfolioChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: {{ portfolio_allocation.labels | tojson if portfolio_allocation else '[]' }},
-            datasets: [{
-                data: {{ portfolio_allocation.data | tojson if portfolio_allocation else '[]' }},
-                backgroundColor: [
-                    '#4e73df',
-                    '#1cc88a', 
-                    '#36b9cc',
-                    '#f6c23e',
-                    '#e74a3b',
-                    '#858796'
-                ],
-                hoverBorderColor: "rgba(234, 236, 244, 1)",
-            }],
-        },
-        options: {
-            maintainAspectRatio: false,
-            tooltips: {
-                backgroundColor: "rgb(255,255,255)",
-                bodyFontColor: "#858796",
-                borderColor: '#dddfeb',
-                borderWidth: 1,
-                xPadding: 15,
-                yPadding: 15,
-                displayColors: false,
-                caretPadding: 10,
-            },
-            legend: {
-                display: true,
-                position: 'bottom'
-            },
-            cutoutPercentage: 60,
-        },
+// Dashboard initialization
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize tooltips
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    const tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
     });
-}
+    
+    // Auto-refresh data every 5 minutes (optional)
+    // setInterval(() => {
+    //     location.reload();
+    // }, 300000);
+});
 </script>
 {% endblock %}

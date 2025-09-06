@@ -1,0 +1,624 @@
+{% extends "base/investment_base.html" %}
+
+{% block extra_css %}
+<style>
+    /* Overview Page Specific Styles */
+    .metric-card {
+        border: none;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
+    .metric-icon {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        margin-right: 0.5rem;
+        flex-shrink: 0;
+    }
+    
+    .holdings-table {
+        font-size: 0.9rem;
+    }
+    
+    .stock-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    
+    .return-badge {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+    }
+    
+    @media (max-width: 768px) {
+        .metric-card .card-body {
+            padding: 1rem 0.75rem;
+        }
+        
+        .holdings-table {
+            font-size: 0.8rem;
+        }
+        
+        .stock-avatar {
+            width: 24px;
+            height: 24px;
+            font-size: 10px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Portfolio Overview Header -->
+<div class="row mb-3">
+    <div class="col-12">
+        <h4>{{ _('Portfolio Overview') }}</h4>
+        <p class="text-muted">{{ _('Summary of investment portfolio for') }} {{ filter_description }}</p>
+    </div>
+</div>
+
+<!-- Key Investment Metrics -->
+<div class="row mb-4">
+    <!-- Total Assets -->
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card h-100 metric-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <div class="metric-icon bg-primary bg-opacity-10">
+                        <i class="fas fa-wallet text-primary"></i>
+                    </div>
+                    <h6 class="card-title text-muted mb-0">{{ _('Total Assets') }}</h6>
+                </div>
+                <h4 class="text-primary mb-1">${{ "{:,.2f}".format(metrics.total_assets.cad if metrics else 0) }}</h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_assets.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_assets.usd_only if metrics else 0) }}</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Total Return -->
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card h-100 metric-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <div class="metric-icon bg-{{ 'success' if metrics and metrics.total_return.cad >= 0 else 'danger' }} bg-opacity-10">
+                        <i class="fas fa-chart-line {{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }}"></i>
+                    </div>
+                    <h6 class="card-title text-muted mb-0">{{ _('Total Return') }}</h6>
+                </div>
+                <h4 class="{{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }} mb-1">
+                    {% if metrics and metrics.total_return.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.total_return.cad if metrics else 0) }}
+                </h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_return.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_return.usd_only if metrics else 0) }}</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Realized Gain -->
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card h-100 metric-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <div class="metric-icon bg-{{ 'success' if metrics and metrics.realized_gain.cad >= 0 else 'danger' }} bg-opacity-10">
+                        <i class="fas fa-coins {{ 'text-success' if metrics and metrics.realized_gain.cad >= 0 else 'text-danger' }}"></i>
+                    </div>
+                    <h6 class="card-title text-muted mb-0">{{ _('Realized Gain') }}</h6>
+                </div>
+                <h4 class="{{ 'text-success' if metrics and metrics.realized_gain.cad >= 0 else 'text-danger' }} mb-1">
+                    {% if metrics and metrics.realized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.realized_gain.cad if metrics else 0) }}
+                </h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.realized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.realized_gain.usd_only if metrics else 0) }}</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Unrealized Gain -->
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card h-100 metric-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <div class="metric-icon bg-{{ 'success' if metrics and metrics.unrealized_gain.cad >= 0 else 'danger' }} bg-opacity-10">
+                        <i class="fas fa-chart-area {{ 'text-success' if metrics and metrics.unrealized_gain.cad >= 0 else 'text-danger' }}"></i>
+                    </div>
+                    <h6 class="card-title text-muted mb-0">{{ _('Unrealized Gain') }}</h6>
+                </div>
+                <h4 class="{{ 'text-success' if metrics and metrics.unrealized_gain.cad >= 0 else 'text-danger' }} mb-1">
+                    {% if metrics and metrics.unrealized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.unrealized_gain.cad if metrics else 0) }}
+                </h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.unrealized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.unrealized_gain.usd_only if metrics else 0) }}</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Total Dividends -->
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card h-100 metric-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <div class="metric-icon bg-info bg-opacity-10">
+                        <i class="fas fa-hand-holding-usd text-info"></i>
+                    </div>
+                    <h6 class="card-title text-muted mb-0">{{ _('Total Dividends') }}</h6>
+                </div>
+                <h4 class="text-info mb-1">${{ "{:,.2f}".format(metrics.total_dividends.cad if metrics else 0) }}</h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_dividends.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_dividends.usd_only if metrics else 0) }}</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Exchange Rate -->
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card h-100 metric-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <div class="metric-icon bg-warning bg-opacity-10">
+                        <i class="fas fa-exchange-alt text-warning"></i>
+                    </div>
+                    <h6 class="card-title text-muted mb-0">{{ _('USD/CAD Rate') }}</h6>
+                </div>
+                <h4 class="text-warning mb-1">{{ "{:.4f}".format(exchange_rates['usd_to_cad'] if exchange_rates else 1.35) }}</h4>
+                <small class="text-muted">{{ _('Current Rate') }}</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Holdings Table -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-pie me-2"></i>{{ _('Current Holdings') }}
+                </h5>
+                <span class="badge bg-secondary">{{ holdings|length if holdings else 0 }} {{ _('stocks') }}</span>
+            </div>
+            <div class="card-body p-0">
+                {% if holdings %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 holdings-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">{{ _('Stock Symbol') }}</th>
+                                <th class="text-end">{{ _('Shares') }}</th>
+                                <th class="text-end">{{ _('Avg Cost') }}</th>
+                                <th class="text-end">{{ _('Current Price') }}</th>
+                                <th class="text-end">{{ _('Market Value') }}</th>
+                                <th class="text-end">{{ _('Unrealized P&L') }}</th>
+                                <th class="text-end">{{ _('Realized Gains') }}</th>
+                                <th class="text-end">{{ _('Dividends') }}</th>
+                                <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for holding in holdings %}
+                            <tr class="align-middle">
+                                <!-- Stock Symbol -->
+                                <td class="ps-3">
+                                    <div class="d-flex align-items-center">
+                                        <div class="bg-{{ 'warning' if holding['currency'] == 'CAD' else 'success' }} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar" 
+                                             style="color: {{ 'black' if holding['currency'] == 'CAD' else 'white' }};">
+                                            {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
+                                        </div>
+                                        <div>
+                                            <strong>{{ holding['symbol'] }}</strong>
+                                            <br><small class="text-muted">{{ holding['sector'] or 'Unknown' }}</small>
+                                        </div>
+                                    </div>
+                                </td>
+                                
+                                <!-- Shares -->
+                                <td class="text-end">
+                                    <span class="fw-medium">{{ "{:,.2f}".format(holding['shares'] or 0) }}</span>
+                                </td>
+                                
+                                <!-- Average Cost -->
+                                <td class="text-end">
+                                    <span class="text-muted">${{ "{:.2f}".format(holding['average_cost'] or 0) }}</span>
+                                    <br><small class="text-muted">{{ holding['currency'] }}</small>
+                                </td>
+                                
+                                <!-- Current Price -->
+                                <td class="text-end">
+                                    <span class="fw-medium">${{ "{:.2f}".format(holding['current_price'] or 0) }}</span>
+                                    <br><small class="text-muted">{{ holding['currency'] }}</small>
+                                </td>
+                                
+                                <!-- Market Value -->
+                                <td class="text-end">
+                                    <span class="fw-bold">${{ "{:,.0f}".format(holding['current_value'] or 0) }}</span>
+                                    <br><small class="text-muted">{{ holding['currency'] }}</small>
+                                </td>
+                                
+                                <!-- Unrealized Gain/Loss -->
+                                <td class="text-end">
+                                    <span class="fw-bold {{ 'text-success' if holding['unrealized_gain'] >= 0 else 'text-danger' }}">
+                                        {% if holding['unrealized_gain'] >= 0 %}+{% endif %}
+                                        ${{ "{:,.0f}".format(holding['unrealized_gain'] or 0) }}
+                                    </span>
+                                </td>
+                                
+                                <!-- Realized Gains -->
+                                <td class="text-end">
+                                    <span class="fw-medium {{ 'text-success' if holding['realized_gain'] >= 0 else 'text-danger' }}">
+                                        {% if holding['realized_gain'] >= 0 %}+{% endif %}
+                                        ${{ "{:,.0f}".format(holding['realized_gain'] or 0) }}
+                                    </span>
+                                </td>
+                                
+                                <!-- Dividends -->
+                                <td class="text-end">
+                                    <span class="fw-medium text-info">
+                                        ${{ "{:,.0f}".format(holding['dividends'] or 0) }}
+                                    </span>
+                                </td>
+                                
+                                <!-- Return Percentage -->
+                                <td class="text-end pe-3">
+                                    <span class="badge {{ 'bg-success' if holding['unrealized_gain_percent'] >= 0 else 'bg-danger' }} return-badge">
+                                        {% if holding['unrealized_gain_percent'] >= 0 %}+{% endif %}
+                                        {{ "{:.1f}".format(holding['unrealized_gain_percent'] or 0) }}%
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-chart-pie fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">{{ _('No holdings found') }}</h5>
+                    <p class="text-muted mb-0">{{ _('Start investing to see your portfolio here') }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Cleared Holdings Section -->
+{% if cleared_holdings %}
+<div class="row">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-light border-0">
+                <div class="d-flex align-items-center justify-content-between">
+                    <h5 class="mb-0">
+                        <i class="fas fa-history me-2 text-muted"></i>{{ _('Cleared Holdings') }}
+                        <small class="text-muted ms-2">({{ _('Previously Owned Stocks') }})</small>
+                    </h5>
+                    <span class="badge bg-secondary">{{ cleared_holdings|length }} {{ _('stocks') }}</span>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                {% if cleared_holdings %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="clearedHoldingsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">{{ _('Stock') }}</th>
+                                <th>{{ _('Company') }}</th>
+                                <th class="text-end">{{ _('Bought Shares') }}</th>
+                                <th class="text-end">{{ _('Sold Shares') }}</th>
+                                <th class="text-end">{{ _('Total Invested') }}</th>
+                                <th class="text-end">{{ _('Total Received') }}</th>
+                                <th class="text-end">{{ _('Realized Gain') }}</th>
+                                <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for holding in cleared_holdings %}
+                            <tr>
+                                <!-- Stock Symbol -->
+                                <td class="ps-3">
+                                    <div class="d-flex align-items-center">
+                                        <div class="bg-{{ 'warning' if holding['currency'] == 'CAD' else 'success' }} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar" 
+                                             style="color: {{ 'black' if holding['currency'] == 'CAD' else 'white' }};">
+                                            {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
+                                        </div>
+                                        <strong>{{ holding['symbol'] }}</strong>
+                                    </div>
+                                </td>
+                                
+                                <!-- Company Name -->
+                                <td>
+                                    <div>
+                                        <div class="fw-medium">{{ holding['company_name'] or holding['symbol'] }}</div>
+                                        <small class="text-muted">{{ holding['sector'] or 'Unknown Sector' }}</small>
+                                    </div>
+                                </td>
+                                
+                                <!-- Bought Shares -->
+                                <td class="text-end">
+                                    <span class="fw-medium">{{ "{:,.0f}".format(holding['total_bought_shares'] or 0) }}</span>
+                                </td>
+                                
+                                <!-- Sold Shares -->
+                                <td class="text-end">
+                                    <span class="fw-medium">{{ "{:,.0f}".format(holding['total_sold_shares'] or 0) }}</span>
+                                </td>
+                                
+                                <!-- Total Invested -->
+                                <td class="text-end">
+                                    <span class="text-muted">${{ "{:,.0f}".format(holding['total_bought_value'] or 0) }}</span>
+                                    <br><small class="text-muted">{{ holding['currency'] }}</small>
+                                </td>
+                                
+                                <!-- Total Received -->
+                                <td class="text-end">
+                                    <span class="text-muted">${{ "{:,.0f}".format(holding['total_sold_value'] or 0) }}</span>
+                                    <br><small class="text-muted">{{ holding['currency'] }}</small>
+                                </td>
+                                
+                                <!-- Realized Gain/Loss -->
+                                <td class="text-end">
+                                    <span class="fw-bold {{ 'text-success' if holding['realized_gain'] >= 0 else 'text-danger' }}">
+                                        {% if holding['realized_gain'] >= 0 %}+{% endif %}
+                                        ${{ "{:,.0f}".format(holding['realized_gain'] or 0) }}
+                                    </span>
+                                </td>
+                                
+                                <!-- Return Percentage -->
+                                <td class="text-end pe-3">
+                                    <span class="badge {{ 'bg-success' if holding['realized_gain_percent'] >= 0 else 'bg-danger' }} return-badge">
+                                        {% if holding['realized_gain_percent'] >= 0 %}+{% endif %}
+                                        {{ "{:.1f}".format(holding['realized_gain_percent'] or 0) }}%
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-history fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">{{ _('No cleared holdings found') }}</h5>
+                    <p class="text-muted mb-0">{{ _('Stocks you have completely sold will appear here') }}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Additional Information Cards -->
+{% if exchange_rates %}
+<div class="row">
+    <!-- Exchange Rate Details -->
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-exchange-alt me-2"></i>{{ _('Exchange Rates') }}
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="border-end">
+                            <h4 class="text-primary mb-1">{{ "{:.4f}".format(exchange_rates['cad_to_usd']) }}</h4>
+                            <small class="text-muted">CAD → USD</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <h4 class="text-info mb-1">{{ "{:.4f}".format(exchange_rates['usd_to_cad']) }}</h4>
+                        <small class="text-muted">USD → CAD</small>
+                    </div>
+                </div>
+                <hr class="my-3">
+                <div class="text-center">
+                    <small class="text-muted">
+                        <i class="fas fa-clock me-1"></i>
+                        {{ _('Updated') }}: {{ exchange_rates['updated_date'] }}
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Portfolio Statistics -->
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-chart-bar me-2"></i>{{ _('Portfolio Statistics') }}
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row g-0">
+                    <div class="col-6 text-center border-end">
+                        <h5 class="text-info mb-1">{{ stats.accounts_count }}</h5>
+                        <small class="text-muted">{{ _('Active Accounts') }}</small>
+                    </div>
+                    <div class="col-6 text-center">
+                        <h5 class="text-warning mb-1">{{ stats.transactions_count }}</h5>
+                        <small class="text-muted">{{ _('Total Transactions') }}</small>
+                    </div>
+                </div>
+                <hr class="my-3">
+                <div class="row g-0">
+                    <div class="col-6 text-center border-end">
+                        <h5 class="text-success mb-1">{{ stats.pending_imports }}</h5>
+                        <small class="text-muted">{{ _('Pending Imports') }}</small>
+                    </div>
+                    <div class="col-6 text-center">
+                        <h5 class="text-danger mb-1">{{ stats.pending_ocr }}</h5>
+                        <small class="text-muted">{{ _('Pending OCR') }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 添加持仓表格搜索功能
+    const holdingsTable = document.querySelector('.holdings-table');
+    if (holdingsTable) {
+        // 添加搜索框
+        const searchContainer = document.createElement('div');
+        searchContainer.className = 'row mb-3';
+        searchContainer.innerHTML = `
+            <div class="col-md-6">
+                <div class="input-group">
+                    <span class="input-group-text">
+                        <i class="fas fa-search"></i>
+                    </span>
+                    <input type="text" class="form-control" id="holdingsSearch" 
+                           placeholder="{{ _('Search stocks...') }}">
+                </div>
+            </div>
+            <div class="col-md-6 text-end">
+                <small class="text-muted">
+                    <span id="holdingsCount">{{ holdings|length if holdings else 0 }}</span> 
+                    {{ _('holdings displayed') }}
+                </small>
+            </div>
+        `;
+        
+        const tableCard = holdingsTable.closest('.card');
+        if (tableCard) {
+            tableCard.querySelector('.card-body').insertBefore(searchContainer, tableCard.querySelector('.table-responsive'));
+        }
+        
+        // 搜索功能实现
+        const searchInput = document.getElementById('holdingsSearch');
+        const tableRows = holdingsTable.querySelectorAll('tbody tr');
+        const countSpan = document.getElementById('holdingsCount');
+        
+        searchInput?.addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase().trim();
+            let visibleCount = 0;
+            
+            tableRows.forEach(row => {
+                const symbol = row.querySelector('td:first-child strong')?.textContent.toLowerCase() || '';
+                const sector = row.querySelector('td:first-child small')?.textContent.toLowerCase() || '';
+                
+                const isVisible = symbol.includes(searchTerm) || 
+                                sector.includes(searchTerm);
+                
+                row.style.display = isVisible ? '' : 'none';
+                if (isVisible) visibleCount++;
+            });
+            
+            if (countSpan) {
+                countSpan.textContent = visibleCount;
+            }
+        });
+    }
+    
+    // 添加指标卡片点击动画效果
+    const metricCards = document.querySelectorAll('.metric-card');
+    metricCards.forEach(card => {
+        card.addEventListener('click', function() {
+            this.style.transform = 'scale(0.98)';
+            setTimeout(() => {
+                this.style.transform = '';
+            }, 150);
+        });
+    });
+    
+    // 添加清仓持仓表格搜索功能
+    const clearedHoldingsTable = document.querySelector('#clearedHoldingsTable');
+    if (clearedHoldingsTable) {
+        // 添加搜索框
+        const searchContainer = document.createElement('div');
+        searchContainer.className = 'row mb-3';
+        searchContainer.innerHTML = `
+            <div class="col-md-6">
+                <div class="input-group">
+                    <span class="input-group-text">
+                        <i class="fas fa-search"></i>
+                    </span>
+                    <input type="text" class="form-control" id="clearedHoldingsSearch" 
+                           placeholder="{{ _('Search cleared stocks...') }}">
+                </div>
+            </div>
+            <div class="col-md-6 text-end">
+                <small class="text-muted">
+                    <span id="clearedHoldingsCount">{{ cleared_holdings|length if cleared_holdings else 0 }}</span> 
+                    {{ _('cleared holdings displayed') }}
+                </small>
+            </div>
+        `;
+        
+        const tableCard = clearedHoldingsTable.closest('.card');
+        if (tableCard) {
+            tableCard.querySelector('.card-body').insertBefore(searchContainer, tableCard.querySelector('.table-responsive'));
+        }
+        
+        // 搜索功能实现
+        const searchInput = document.getElementById('clearedHoldingsSearch');
+        const tableRows = clearedHoldingsTable.querySelectorAll('tbody tr');
+        const countSpan = document.getElementById('clearedHoldingsCount');
+        
+        searchInput?.addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase().trim();
+            let visibleCount = 0;
+            
+            tableRows.forEach(row => {
+                const symbol = row.querySelector('td:first-child strong')?.textContent.toLowerCase() || '';
+                const sector = row.querySelector('td:first-child small')?.textContent.toLowerCase() || '';
+                
+                const isVisible = symbol.includes(searchTerm) || 
+                                sector.includes(searchTerm);
+                
+                row.style.display = isVisible ? '' : 'none';
+                if (isVisible) visibleCount++;
+            });
+            
+            if (countSpan) {
+                countSpan.textContent = visibleCount;
+            }
+        });
+    }
+    
+    // 工具提示功能
+    const tooltipElements = document.querySelectorAll('[title]');
+    tooltipElements.forEach(element => {
+        if (element.title) {
+            element.setAttribute('data-bs-toggle', 'tooltip');
+            element.setAttribute('data-bs-placement', 'top');
+        }
+    });
+    
+    // 初始化 Bootstrap 工具提示
+    if (typeof bootstrap !== 'undefined') {
+        const tooltips = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+        tooltips.forEach(tooltip => new bootstrap.Tooltip(tooltip));
+    }
+});
+
+// 格式化数字显示（可扩展）
+function formatCurrency(amount, currency = 'CAD') {
+    return new Intl.NumberFormat('en-CA', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    }).format(amount);
+}
+
+function formatPercent(value) {
+    const sign = value >= 0 ? '+' : '';
+    return `${sign}${value.toFixed(1)}%`;
+}
+</script>
+{% endblock %}
