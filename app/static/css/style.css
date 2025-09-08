@@ -38,7 +38,7 @@ body {
 }
 
 .card-header {
-    background: linear-gradient(135deg, var(--primary-color), #e74c3c);
+    background: linear-gradient(135deg, #007bff, #0056b3);
     color: white;
     border-radius: 10px 10px 0 0 !important;
     border: none;
@@ -302,7 +302,7 @@ body {
 }
 
 .modal-header {
-    background: linear-gradient(135deg, var(--primary-color), #e74c3c);
+    background: linear-gradient(135deg, #007bff, #0056b3);
     color: white;
     border-radius: 15px 15px 0 0;
 }

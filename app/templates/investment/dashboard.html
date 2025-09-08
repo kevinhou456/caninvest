@@ -10,7 +10,7 @@
             {{ _('Current Filter') }}: <strong>{{ filter_description }}</strong>
             <span class="text-muted ms-2">({{ filtered_accounts_count }} {{ _('accounts') }})</span>
         </div>
-        <a href="{{ url_for('main.dashboard') }}" class="btn btn-sm btn-outline-secondary">
+        <a href="{{ url_for('main.overview') }}" class="btn btn-sm btn-outline-secondary">
             <i class="fas fa-times me-1"></i>{{ _('Clear Filter') }}
         </a>
     </div>

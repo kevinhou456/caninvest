@@ -34,8 +34,8 @@
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-6">
-                            <label for="modal_stock_symbol" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger">*</span></label>
+                        <div class="col-md-6" id="stock_symbol_section">
+                            <label for="modal_stock_symbol" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger" id="stock_required">*</span></label>
                             <input type="text" class="form-control" id="modal_stock_symbol" name="stock_symbol" 
                                    placeholder="{{ _('e.g. AAPL, SHOP.TO') }}" required>
                             <small class="form-text text-muted">{{ _('System will auto-lookup stock information') }}</small>
@@ -51,7 +51,7 @@
                                 <option value="CAD">CAD</option>
                             </select>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-6" id="stock_info_section">
                             <label for="modal_stock_info" class="form-label">{{ _('Stock Information') }}</label>
                             <div id="modal_stock_info" class="form-control-plaintext">
                                 <small class="text-muted">{{ _('Enter symbol and currency to lookup') }}</small>
@@ -68,8 +68,16 @@
                             <label for="modal_transaction_type" class="form-label">{{ _('Transaction Type') }} <span class="text-danger">*</span></label>
                             <select class="form-select" id="modal_transaction_type" name="type" required>
                                 <option value="">{{ _('Select Type') }}</option>
-                                <option value="BUY">{{ _('Buy') }}</option>
-                                <option value="SELL">{{ _('Sell') }}</option>
+                                <optgroup label="{{ _('Stock Transactions') }}">
+                                    <option value="BUY">{{ _('Buy') }}</option>
+                                    <option value="SELL">{{ _('Sell') }}</option>
+                                </optgroup>
+                                <optgroup label="{{ _('Cash Transactions') }}">
+                                    <option value="DEPOSIT">{{ _('Deposit') }}</option>
+                                    <option value="WITHDRAWAL">{{ _('Withdrawal') }}</option>
+                                    <option value="DIVIDEND">{{ _('Dividend') }}</option>
+                                    <option value="INTEREST">{{ _('Interest') }}</option>
+                                </optgroup>
                             </select>
                         </div>
                         <div class="col-md-6">
@@ -79,17 +87,23 @@
                     </div>
                     
                     <div class="row mb-3">
-                        <div class="col-md-4">
-                            <label for="modal_quantity" class="form-label">{{ _('Quantity') }} <span class="text-danger">*</span></label>
+                        <div class="col-md-4" id="quantity_section">
+                            <label for="modal_quantity" class="form-label"><span id="quantity_label">{{ _('Quantity') }}</span> <span class="text-danger" id="quantity_required">*</span></label>
                             <input type="number" class="form-control" id="modal_quantity" name="quantity" 
                                    step="0.0001" min="0.0001" required>
                         </div>
-                        <div class="col-md-4">
-                            <label for="modal_price_per_share" class="form-label">{{ _('Price per Share') }} <span class="text-danger">*</span></label>
+                        <!-- Amount Field for cash transactions -->
+                        <div class="col-md-4" id="amount_section" style="display: none;">
+                            <label for="modal_amount" class="form-label"><span id="amount_label">{{ _('Amount') }}</span> <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="modal_amount" name="amount"
+                                   step="0.01" min="0.01" placeholder="{{ _('Enter amount') }}">
+                        </div>
+                        <div class="col-md-4" id="price_section">
+                            <label for="modal_price_per_share" class="form-label"><span id="price_label">{{ _('Price per Share') }}</span> <span class="text-danger" id="price_required">*</span></label>
                             <input type="number" class="form-control" id="modal_price_per_share" name="price" 
                                    step="0.01" min="0.01" required>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-4" id="fee_section">
                             <label for="modal_transaction_fee" class="form-label">{{ _('Transaction Fee') }}</label>
                             <input type="number" class="form-control" id="modal_transaction_fee" name="fee" 
                                    step="0.01" min="0" value="0">
@@ -128,24 +142,75 @@
 <script>
 // Calculate and display transaction summary in modal
 function updateModalSummary() {
-    const quantity = parseFloat(document.getElementById('modal_quantity').value) || 0;
-    const price = parseFloat(document.getElementById('modal_price_per_share').value) || 0;
+    let quantity = parseFloat(document.getElementById('modal_quantity').value) || 0;
+    let price = parseFloat(document.getElementById('modal_price_per_share').value) || 1;
     const fee = parseFloat(document.getElementById('modal_transaction_fee').value) || 0;
     const type = document.getElementById('modal_transaction_type').value;
     const currency = document.getElementById('modal_currency').value;
     
-    if (quantity > 0 && price > 0 && currency) {
+    // For cash transactions, use the amount field
+    if (['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST'].includes(type)) {
+        const amountValue = parseFloat(document.getElementById('modal_amount').value) || 0;
+        if (amountValue > 0) {
+            quantity = amountValue;
+            price = 1; // Set price to 1 so total = amount
+        }
+    }
+    
+    if (quantity > 0 && currency && type) {
+        const isStockTransaction = ['BUY', 'SELL'].includes(type);
         const total = quantity * price;
-        const netAmount = type === 'BUY' ? total + fee : total - fee;
         
-        const summaryHtml = `
-            <p><strong>{{ _('Total Amount') }}:</strong> ${currency} ${total.toFixed(2)}</p>
-            <p><strong>{{ _('Transaction Fee') }}:</strong> ${currency} ${fee.toFixed(2)}</p>
-            <p><strong>{{ _('Net Amount') }}:</strong> ${currency} ${netAmount.toFixed(2)}</p>
-            <p class="text-${type === 'BUY' ? 'success' : 'danger'}">
-                <strong>${type === 'BUY' ? '{{ _("Total Cost") }}' : '{{ _("Total Proceeds") }}'}: ${currency} ${netAmount.toFixed(2)}</strong>
-            </p>
-        `;
+        let summaryHtml = '';
+        
+        if (isStockTransaction) {
+            // Stock transactions
+            const netAmount = type === 'BUY' ? total + fee : total - fee;
+            summaryHtml = `
+                <p><strong>{{ _('Total Amount') }}:</strong> ${currency} ${total.toFixed(2)}</p>
+                <p><strong>{{ _('Transaction Fee') }}:</strong> ${currency} ${fee.toFixed(2)}</p>
+                <p><strong>{{ _('Net Amount') }}:</strong> ${currency} ${netAmount.toFixed(2)}</p>
+                <p class="text-${type === 'BUY' ? 'success' : 'danger'}">
+                    <strong>${type === 'BUY' ? '{{ _("Total Cost") }}' : '{{ _("Total Proceeds") }}'}: ${currency} ${netAmount.toFixed(2)}</strong>
+                </p>
+            `;
+        } else {
+            // Cash transactions
+            const netAmount = ['DEPOSIT', 'DIVIDEND', 'INTEREST'].includes(type) ? total - fee : total + fee;
+            let amountLabel = '';
+            let colorClass = '';
+            
+            switch(type) {
+                case 'DEPOSIT':
+                    amountLabel = '{{ _("Deposit Amount") }}';
+                    colorClass = 'success';
+                    break;
+                case 'WITHDRAWAL':
+                    amountLabel = '{{ _("Withdrawal Amount") }}';
+                    colorClass = 'danger';
+                    break;
+                case 'DIVIDEND':
+                    amountLabel = '{{ _("Dividend Amount") }}';
+                    colorClass = 'success';
+                    break;
+                case 'INTEREST':
+                    amountLabel = '{{ _("Interest Amount") }}';
+                    colorClass = 'success';
+                    break;
+                default:
+                    amountLabel = '{{ _("Transaction Amount") }}';
+                    colorClass = 'info';
+            }
+            
+            summaryHtml = `
+                <p><strong>{{ _('Amount') }}:</strong> ${currency} ${total.toFixed(2)}</p>
+                ${fee > 0 ? `<p><strong>{{ _('Transaction Fee') }}:</strong> ${currency} ${fee.toFixed(2)}</p>` : ''}
+                <p><strong>{{ _('Net Amount') }}:</strong> ${currency} ${netAmount.toFixed(2)}</p>
+                <p class="text-${colorClass}">
+                    <strong>${amountLabel}: ${currency} ${netAmount.toFixed(2)}</strong>
+                </p>
+            `;
+        }
         
         document.getElementById('modal-summary-content').innerHTML = summaryHtml;
     } else {
@@ -244,6 +309,134 @@ function handleAccountChange() {
     }
 }
 
+// Handle transaction type change
+function handleTransactionTypeChange() {
+    const transactionType = document.getElementById('modal_transaction_type').value;
+    const stockSymbolSection = document.getElementById('stock_symbol_section');
+    const stockInfoSection = document.getElementById('stock_info_section');
+    const stockSymbolInput = document.getElementById('modal_stock_symbol');
+    const stockRequired = document.getElementById('stock_required');
+    const quantitySection = document.getElementById('quantity_section');
+    const quantityInput = document.getElementById('modal_quantity');
+    const quantityLabel = document.getElementById('quantity_label');
+    const quantityRequired = document.getElementById('quantity_required');
+    const priceSection = document.getElementById('price_section');
+    const priceInput = document.getElementById('modal_price_per_share');
+    const priceLabel = document.getElementById('price_label');
+    const priceRequired = document.getElementById('price_required');
+    
+    // Define transaction type categories
+    const needsStockSymbol = ['BUY', 'SELL', 'DIVIDEND', 'INTEREST'].includes(transactionType);
+    const isStockTransaction = ['BUY', 'SELL'].includes(transactionType);
+    const isCashTransaction = ['DEPOSIT', 'WITHDRAWAL'].includes(transactionType);
+    const isDividendOrInterest = ['DIVIDEND', 'INTEREST'].includes(transactionType);
+    
+    if (isStockTransaction) {
+        // Show stock symbol and quantity/price for BUY/SELL transactions
+        stockSymbolSection.style.display = 'block';
+        stockInfoSection.style.display = 'block';
+        stockSymbolInput.required = true;
+        stockRequired.style.display = 'inline';
+        
+        quantitySection.style.display = 'block';
+        priceSection.style.display = 'block';
+        document.getElementById('amount_section').style.display = 'none';
+        
+        quantityLabel.textContent = '{{ _("Quantity") }}';
+        priceLabel.textContent = '{{ _("Price per Share") }}';
+        quantityInput.required = true;
+        priceInput.required = true;
+        document.getElementById('modal_amount').required = false;
+        quantityRequired.style.display = 'inline';
+        priceRequired.style.display = 'inline';
+        
+    } else if (isDividendOrInterest) {
+        // For DIVIDEND/INTEREST: show stock symbol and amount field, quantity/price are optional
+        stockSymbolSection.style.display = 'block';
+        stockInfoSection.style.display = 'block';
+        stockSymbolInput.required = true;
+        stockRequired.style.display = 'inline';
+        
+        // Show all fields but make quantity/price optional
+        quantitySection.style.display = 'block';
+        priceSection.style.display = 'block';
+        document.getElementById('amount_section').style.display = 'block';
+        
+        const amountInput = document.getElementById('modal_amount');
+        const amountLabel = document.getElementById('amount_label');
+        
+        // Set requirements - only amount is required
+        quantityInput.required = false;
+        priceInput.required = false;
+        amountInput.required = true;
+        quantityRequired.style.display = 'none';
+        priceRequired.style.display = 'none';
+        
+        // Set appropriate labels
+        quantityLabel.textContent = '{{ _("Shares (optional)") }}';
+        priceLabel.textContent = '{{ _("Per Share (optional)") }}';
+        
+        if (transactionType === 'DIVIDEND') {
+            amountLabel.textContent = '{{ _("Dividend Amount") }}';
+            amountInput.placeholder = '{{ _("Total dividend received") }}';
+        } else if (transactionType === 'INTEREST') {
+            amountLabel.textContent = '{{ _("Interest Amount") }}';
+            amountInput.placeholder = '{{ _("Total interest received") }}';
+        }
+        
+    } else if (isCashTransaction) {
+        // Hide stock-related fields for DEPOSIT/WITHDRAWAL cash transactions
+        stockSymbolSection.style.display = 'none';
+        stockInfoSection.style.display = 'none';
+        stockSymbolInput.required = false;
+        stockSymbolInput.value = '';
+        stockRequired.style.display = 'none';
+        
+        quantitySection.style.display = 'none';
+        priceSection.style.display = 'none';
+        document.getElementById('amount_section').style.display = 'block';
+        
+        const amountInput = document.getElementById('modal_amount');
+        const amountLabel = document.getElementById('amount_label');
+        
+        // Set requirements
+        quantityInput.required = false;
+        priceInput.required = false;
+        amountInput.required = true;
+        quantityRequired.style.display = 'none';
+        priceRequired.style.display = 'none';
+        
+        // Set appropriate labels
+        if (transactionType === 'DEPOSIT') {
+            amountLabel.textContent = '{{ _("Deposit Amount") }}';
+            amountInput.placeholder = '{{ _("Amount to deposit") }}';
+        } else if (transactionType === 'WITHDRAWAL') {
+            amountLabel.textContent = '{{ _("Withdrawal Amount") }}';
+            amountInput.placeholder = '{{ _("Amount to withdraw") }}';
+        }
+    } else {
+        // Reset to default when no type selected
+        stockSymbolSection.style.display = 'block';
+        stockInfoSection.style.display = 'block';
+        priceSection.style.display = 'block';
+        quantitySection.style.display = 'block';
+        document.getElementById('amount_section').style.display = 'none';
+        
+        stockSymbolInput.required = true;
+        quantityInput.required = true;
+        priceInput.required = true;
+        document.getElementById('modal_amount').required = false;
+        
+        stockRequired.style.display = 'inline';
+        quantityRequired.style.display = 'inline';
+        priceRequired.style.display = 'inline';
+        quantityLabel.textContent = '{{ _("Quantity") }}';
+        priceLabel.textContent = '{{ _("Price per Share") }}';
+    }
+    
+    updateModalSummary();
+}
+
 // Initialize modal functionality
 document.addEventListener('DOMContentLoaded', function() {
     // Set today's date as default
@@ -251,7 +444,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('modal_trade_date').value = today;
     
     // Add event listeners for summary calculation
-    const modalInputs = ['modal_quantity', 'modal_price_per_share', 'modal_transaction_fee', 'modal_transaction_type', 'modal_currency'];
+    const modalInputs = ['modal_quantity', 'modal_price_per_share', 'modal_transaction_fee', 'modal_transaction_type', 'modal_currency', 'modal_amount'];
     modalInputs.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -262,6 +455,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Add account change listener
     document.getElementById('modal_account_id').addEventListener('change', handleAccountChange);
+    
+    // Add transaction type change listener
+    document.getElementById('modal_transaction_type').addEventListener('change', handleTransactionTypeChange);
     
     // Add stock symbol and currency change listeners
     document.getElementById('modal_stock_symbol').addEventListener('input', 
@@ -290,13 +486,54 @@ function debounce(func, wait) {
     };
 }
 
+
 // Function to open modal with account pre-selected
 function openAddTransactionModal(accountId = null) {
     const modal = new bootstrap.Modal(document.getElementById('addTransactionModal'));
+    
+    // Reset form to default state
+    resetTransactionForm();
+    
     if (accountId) {
         document.getElementById('modal_account_id').value = accountId;
         handleAccountChange();
     }
     modal.show();
 }
+
+// Reset form to default state
+function resetTransactionForm() {
+    // Reset form fields
+    document.getElementById('addTransactionForm').reset();
+    
+    // Reset visibility and requirements
+    document.getElementById('stock_symbol_section').style.display = 'block';
+    document.getElementById('stock_info_section').style.display = 'block';
+    document.getElementById('price_section').style.display = 'block';
+    document.getElementById('quantity_section').style.display = 'block';
+    document.getElementById('amount_section').style.display = 'none';
+    
+    // Reset required fields
+    document.getElementById('modal_stock_symbol').required = true;
+    document.getElementById('modal_quantity').required = true;
+    document.getElementById('modal_price_per_share').required = true;
+    document.getElementById('modal_amount').required = false;
+    
+    // Reset labels
+    document.getElementById('quantity_label').textContent = '{{ _("Quantity") }}';
+    document.getElementById('price_label').textContent = '{{ _("Price per Share") }}';
+    
+    // Reset required indicators
+    document.getElementById('stock_required').style.display = 'inline';
+    document.getElementById('quantity_required').style.display = 'inline';
+    document.getElementById('price_required').style.display = 'inline';
+    
+    // Set today's date
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('modal_trade_date').value = today;
+    
+    // Reset summary
+    document.getElementById('modal-summary-content').innerHTML = '<p class="text-muted">{{ _("Fill in the form to see transaction summary") }}</p>';
+}
+
 </script>

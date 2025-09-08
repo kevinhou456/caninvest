@@ -24,6 +24,7 @@ from app.models.transaction import Transaction
 from app.models.stocks_cache import StocksCache
 from app.models.contribution import Contribution
 from app.models.price_cache import StockPriceCache
+from app.services.holdings_service import holdings_service
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,16 @@ class PortfolioMetrics:
         # 股息统计
         self.total_dividends_cad = Decimal('0')
         self.total_dividends_usd = Decimal('0')
+        
+        # 利息统计
+        self.total_interest_cad = Decimal('0')
+        self.total_interest_usd = Decimal('0')
+        
+        # 资金流统计
+        self.total_deposits_cad = Decimal('0')
+        self.total_deposits_usd = Decimal('0')
+        self.total_withdrawals_cad = Decimal('0')
+        self.total_withdrawals_usd = Decimal('0')
         
         # 费用统计
         self.total_fees_cad = Decimal('0')
@@ -114,6 +125,24 @@ class PortfolioMetrics:
                 'cad_only': float(getattr(self, 'cad_dividends_only', 0)),
                 'usd_only': float(getattr(self, 'usd_dividends_only', 0))
             },
+            'total_interest': {
+                'cad': float(self.total_interest_cad),
+                'usd': float(self.total_interest_usd),
+                'cad_only': float(getattr(self, 'cad_interest_only', 0)),
+                'usd_only': float(getattr(self, 'usd_interest_only', 0))
+            },
+            'total_deposits': {
+                'cad': float(self.total_deposits_cad),
+                'usd': float(self.total_deposits_usd),
+                'cad_only': float(getattr(self, 'cad_deposits_only', 0)),
+                'usd_only': float(getattr(self, 'usd_deposits_only', 0))
+            },
+            'total_withdrawals': {
+                'cad': float(self.total_withdrawals_cad),
+                'usd': float(self.total_withdrawals_usd),
+                'cad_only': float(getattr(self, 'cad_withdrawals_only', 0)),
+                'usd_only': float(getattr(self, 'usd_withdrawals_only', 0))
+            },
             'exchange_rate': float(self.exchange_rate),
             'holdings': self.holdings,
             'cleared_holdings': self.cleared_holdings,
@@ -144,6 +173,7 @@ class HoldingInfo:
         self.unrealized_gain_percent = Decimal('0')
         self.realized_gain = Decimal('0')
         self.dividends = Decimal('0')
+        self.interest = Decimal('0')
         
         # 股票信息
         self.company_name = ""
@@ -165,6 +195,7 @@ class HoldingInfo:
             'unrealized_gain_percent': float(self.unrealized_gain_percent),
             'realized_gain': float(self.realized_gain),
             'dividends': float(self.dividends),
+            'interest': float(self.interest),
             'company_name': self.company_name,
             'sector': self.sector
         }
@@ -268,6 +299,9 @@ class AnalyticsService:
         self._calculate_assets(metrics, accounts)  # 移到这里，在holdings计算之后
         self._calculate_returns(metrics, accounts, period_start, period_end)
         self._calculate_dividends(metrics, accounts, period_start, period_end)
+        self._calculate_interest(metrics, accounts, period_start, period_end)
+        self._calculate_deposits(metrics, accounts, period_start, period_end)
+        self._calculate_withdrawals(metrics, accounts, period_start, period_end)
         self._calculate_fees(metrics, accounts, period_start, period_end)
         self._calculate_account_stats(metrics, accounts)
         
@@ -483,6 +517,132 @@ class AnalyticsService:
         # 存储分币种分红
         metrics.cad_dividends_only = cad_dividends
         metrics.usd_dividends_only = usd_dividends
+
+    def _calculate_interest(self, metrics: PortfolioMetrics, accounts: list,
+                          start_date: Optional[date], end_date: Optional[date]):
+        """计算利息收入"""
+        account_ids = [acc.id for acc in accounts]
+        
+        # 查询利息交易
+        query = db.session.query(
+            Transaction.currency,
+            func.sum(Transaction.amount).label('total_interest')
+        ).filter(
+            Transaction.account_id.in_(account_ids),
+            Transaction.type == 'INTEREST'
+        )
+        
+        if start_date:
+            query = query.filter(Transaction.trade_date >= start_date)
+        if end_date:
+            query = query.filter(Transaction.trade_date <= end_date)
+        
+        query = query.group_by(Transaction.currency)
+        interest_results = query.all()
+        
+        # 分币种统计
+        cad_interest = Decimal('0')
+        usd_interest = Decimal('0')
+        
+        for currency, interest_amount in interest_results:
+            interest_amount = Decimal(str(interest_amount or 0))
+            
+            if currency == 'CAD':
+                metrics.total_interest_cad += interest_amount
+                metrics.total_interest_usd += interest_amount / self.exchange_rate
+                cad_interest += interest_amount
+            else:  # USD
+                metrics.total_interest_usd += interest_amount
+                metrics.total_interest_cad += interest_amount * self.exchange_rate
+                usd_interest += interest_amount
+        
+        # 存储分币种利息
+        metrics.cad_interest_only = cad_interest
+        metrics.usd_interest_only = usd_interest
+
+    def _calculate_deposits(self, metrics: PortfolioMetrics, accounts: list,
+                          start_date: Optional[date], end_date: Optional[date]):
+        """计算存入金额"""
+        account_ids = [acc.id for acc in accounts]
+        
+        # 查询存入交易
+        query = db.session.query(
+            Transaction.currency,
+            func.sum(Transaction.amount).label('total_deposits')
+        ).filter(
+            Transaction.account_id.in_(account_ids),
+            Transaction.type == 'DEPOSIT'
+        )
+        
+        if start_date:
+            query = query.filter(Transaction.trade_date >= start_date)
+        if end_date:
+            query = query.filter(Transaction.trade_date <= end_date)
+        
+        query = query.group_by(Transaction.currency)
+        deposit_results = query.all()
+        
+        # 分币种统计
+        cad_deposits = Decimal('0')
+        usd_deposits = Decimal('0')
+        
+        for currency, deposit_amount in deposit_results:
+            deposit_amount = Decimal(str(deposit_amount or 0))
+            
+            if currency == 'CAD':
+                metrics.total_deposits_cad += deposit_amount
+                metrics.total_deposits_usd += deposit_amount / self.exchange_rate
+                cad_deposits += deposit_amount
+            else:  # USD
+                metrics.total_deposits_usd += deposit_amount
+                metrics.total_deposits_cad += deposit_amount * self.exchange_rate
+                usd_deposits += deposit_amount
+        
+        # 存储分币种存入
+        metrics.cad_deposits_only = cad_deposits
+        metrics.usd_deposits_only = usd_deposits
+
+    def _calculate_withdrawals(self, metrics: PortfolioMetrics, accounts: list,
+                             start_date: Optional[date], end_date: Optional[date]):
+        """计算取出金额"""
+        account_ids = [acc.id for acc in accounts]
+        
+        # 查询取出交易
+        query = db.session.query(
+            Transaction.currency,
+            func.sum(Transaction.amount).label('total_withdrawals')
+        ).filter(
+            Transaction.account_id.in_(account_ids),
+            Transaction.type == 'WITHDRAWAL'
+        )
+        
+        if start_date:
+            query = query.filter(Transaction.trade_date >= start_date)
+        if end_date:
+            query = query.filter(Transaction.trade_date <= end_date)
+        
+        query = query.group_by(Transaction.currency)
+        withdrawal_results = query.all()
+        
+        # 分币种统计
+        cad_withdrawals = Decimal('0')
+        usd_withdrawals = Decimal('0')
+        
+        for currency, withdrawal_amount in withdrawal_results:
+            withdrawal_amount = Decimal(str(withdrawal_amount or 0))
+            
+            if currency == 'CAD':
+                metrics.total_withdrawals_cad += withdrawal_amount
+                metrics.total_withdrawals_usd += withdrawal_amount / self.exchange_rate
+                cad_withdrawals += withdrawal_amount
+            else:  # USD
+                metrics.total_withdrawals_usd += withdrawal_amount
+                metrics.total_withdrawals_cad += withdrawal_amount * self.exchange_rate
+                usd_withdrawals += withdrawal_amount
+        
+        # 存储分币种取出
+        metrics.cad_withdrawals_only = cad_withdrawals
+        metrics.usd_withdrawals_only = usd_withdrawals
     
     def _calculate_fees(self, metrics: PortfolioMetrics, accounts: list,
                       start_date: Optional[date], end_date: Optional[date]):
@@ -512,79 +672,16 @@ class AnalyticsService:
                 metrics.total_fees_cad += total_fees * self.exchange_rate
     
     def _calculate_holdings(self, metrics: PortfolioMetrics, accounts: list):
-        """计算当前持仓"""
+        """计算当前持仓 - 使用统一的PortfolioService"""
+        from app.services.portfolio_service import portfolio_service
+        
         account_ids = [acc.id for acc in accounts]
         
-        # 获取当前持仓数据 - 使用过滤后的账户ID列表
-        portfolio_summary = Transaction.get_portfolio_summary(account_ids=account_ids)
+        # 使用新的统一服务获取投资组合汇总
+        portfolio_summary = portfolio_service.get_portfolio_summary(account_ids)
         
-        holdings = []
-        cleared_holdings = []
-        
-        for symbol, data in portfolio_summary.items():
-            if data['total_shares'] > 0:  # 当前持仓的股票
-                holding = HoldingInfo(symbol, data.get('account_id', 0))
-                holding.shares = Decimal(str(data['total_shares']))
-                holding.average_cost = Decimal(str(data['average_cost']))
-                holding.total_cost = Decimal(str(data['total_cost']))
-                holding.currency = data['currency']
-                
-                # 获取当前价格（从价格缓存或股票缓存）
-                current_price = self._get_current_stock_price(symbol)
-                if current_price:
-                    holding.current_price = current_price
-                    holding.current_value = holding.shares * current_price
-                    holding.unrealized_gain = holding.current_value - holding.total_cost
-                    if holding.total_cost > 0:
-                        holding.unrealized_gain_percent = (holding.unrealized_gain / holding.total_cost) * 100
-                
-                # 获取股票信息
-                stock_info = StocksCache.query.filter_by(symbol=symbol).first()
-                if stock_info:
-                    holding.company_name = stock_info.name or symbol
-                    # StocksCache模型没有sector字段，使用分类信息或默认值
-                    if hasattr(stock_info, 'category') and stock_info.category:
-                        holding.sector = stock_info.category.name
-                    else:
-                        holding.sector = "Unknown"
-                
-                # 计算已实现收益（来自已卖出股票的收益）
-                holding.realized_gain = Decimal(str(data.get('realized_gain', 0)))
-                
-                # 计算分红（目前为0，因为没有分红数据）
-                holding.dividends = self._get_stock_dividends(symbol, account_ids)
-                
-                holdings.append(holding.to_dict())
-                
-            elif data['total_shares'] == 0 and data.get('total_sold_shares', 0) > 0:  # 已清仓的股票
-                # 创建清仓股票记录
-                cleared_holding = {
-                    'symbol': symbol,
-                    'currency': data['currency'],
-                    'total_bought_shares': data.get('total_bought_shares', 0),
-                    'total_sold_shares': data.get('total_sold_shares', 0),
-                    'total_bought_value': data.get('total_bought_value', 0),
-                    'total_sold_value': data.get('total_sold_value', 0),
-                    'realized_gain': data.get('realized_gain', 0),
-                    'company_name': '',
-                    'sector': 'Unknown'
-                }
-                
-                # 获取股票信息
-                stock_info = StocksCache.query.filter_by(symbol=symbol).first()
-                if stock_info:
-                    cleared_holding['company_name'] = stock_info.name or symbol
-                
-                # 计算已实现收益率
-                if cleared_holding['total_bought_value'] > 0:
-                    cleared_holding['realized_gain_percent'] = (cleared_holding['realized_gain'] / cleared_holding['total_bought_value']) * 100
-                else:
-                    cleared_holding['realized_gain_percent'] = 0
-                    
-                cleared_holdings.append(cleared_holding)
-        
-        metrics.holdings = holdings
-        metrics.cleared_holdings = cleared_holdings
+        metrics.holdings = portfolio_summary['current_holdings']
+        metrics.cleared_holdings = portfolio_summary['cleared_holdings']
     
     def _calculate_account_stats(self, metrics: PortfolioMetrics, accounts: list):
         """计算账户统计"""
@@ -676,14 +773,55 @@ class AnalyticsService:
         return dict(sector_holdings)
     
     def _get_stock_dividends(self, symbol: str, account_ids: list) -> Decimal:
-        """获取股票的分红收入（目前返回0，因为没有分红数据）"""
-        # TODO: 当系统支持分红数据时，这里需要查询分红记录
-        # 查询类似：SELECT SUM(dividend_amount) FROM dividends WHERE symbol = ? AND account_id IN (...)
-        return Decimal('0')
+        """获取股票的分红收入"""
+        # 查询DIVIDEND类型的交易记录
+        dividend_transactions = Transaction.query.filter(
+            Transaction.type == 'DIVIDEND',
+            Transaction.stock == symbol,
+            Transaction.account_id.in_(account_ids)
+        ).all()
+        
+        total_dividends = Decimal('0')
+        for tx in dividend_transactions:
+            total_dividends += Decimal(str(tx.amount or 0))
+            
+        return total_dividends
+
+    def _get_stock_interest(self, symbol: str, account_ids: list) -> Decimal:
+        """获取股票的利息收入"""
+        # 查询INTEREST类型的交易记录
+        interest_transactions = Transaction.query.filter(
+            Transaction.type == 'INTEREST',
+            Transaction.stock == symbol,
+            Transaction.account_id.in_(account_ids)
+        ).all()
+        
+        total_interest = Decimal('0')
+        for tx in interest_transactions:
+            total_interest += Decimal(str(tx.amount or 0))
+            
+        return total_interest
+    
+    def _determine_currency_by_symbol(self, symbol: str) -> str:
+        """根据股票代码判断货币"""
+        if symbol.endswith('.TO') or symbol.endswith('.V'):
+            return 'CAD'
+        return 'USD'
+    
+    def _get_stock_sector(self, stock_info) -> str:
+        """获取股票行业信息"""
+        if stock_info:
+            # 如果有分类信息
+            if hasattr(stock_info, 'category') and stock_info.category:
+                return stock_info.category.name
+            # 可以在这里添加更多的行业判断逻辑
+        return 'Unknown'
     
     def clear_cache(self):
         """清除缓存"""
         self._cache.clear()
+        # 同时清除HoldingsService的缓存
+        holdings_service.clear_cache()
 
 
 # 全局服务实例

@@ -69,4 +69,4 @@ def create_demo():
     print(f"演示家庭 '{demo_family.name}' 创建完成！")
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5050)

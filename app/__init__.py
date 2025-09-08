@@ -26,6 +26,11 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     cors.init_app(app)
     
+    # 初始化任务调度器 - 检查配置选项
+    if not app.config.get('TESTING') and app.config.get('SCHEDULER_AUTO_START', False):
+        from app.scheduler import scheduler
+        scheduler.init_app(app)
+    
     # 注册蓝图
     from app.api import bp as api_bp
     app.register_blueprint(api_bp, url_prefix='/api/v1')
@@ -155,8 +160,7 @@ def create_app(config_name=None):
             'Member': Member,
             'Account': Account,
             'Transaction': Transaction,
-            'Stock': Stock,
-            'StockCategory': StockCategory
+            'StocksCache': StocksCache
         }
     
     return app

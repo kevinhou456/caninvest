@@ -14,7 +14,8 @@ class StocksCache(db.Model):
     symbol = db.Column(db.String(20), unique=True, nullable=False, comment='股票代码')
     name = db.Column(db.String(255), comment='股票名称')
     exchange = db.Column(db.String(50), comment='交易所')
-    category_id = db.Column(db.Integer, comment='分类ID')
+    currency = db.Column(db.String(10), default='USD', comment='交易货币')
+    category_id = db.Column(db.Integer, db.ForeignKey('stock_categories.id'), comment='分类ID')
     current_price = db.Column(db.Numeric(15, 4), comment='当前价格')
     price_updated_at = db.Column(db.DateTime, comment='价格更新时间')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
@@ -29,6 +30,7 @@ class StocksCache(db.Model):
             'symbol': self.symbol,
             'name': self.name,
             'exchange': self.exchange,
+            'currency': self.currency,
             'category_id': self.category_id,
             'current_price': float(self.current_price) if self.current_price else None,
             'price_updated_at': self.price_updated_at.isoformat() if self.price_updated_at else None,

@@ -1,0 +1,367 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>
+            <i class="fas fa-chart-bar me-2"></i>{{ _('Manage Stock Category') }}
+        </h2>
+        <p class="text-muted mb-0">{{ _('Organize your stocks by categories for better analysis') }}</p>
+    </div>
+    <div class="btn-group">
+        <button type="button" class="btn btn-primary" onclick="openAddCategoryModal()">
+            <i class="fas fa-plus me-2"></i>{{ _('Add Category') }}
+        </button>
+    </div>
+</div>
+
+<!-- Stock Categories Table -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <i class="fas fa-folder me-2"></i>{{ _('Stock Categories') }}
+        </h5>
+    </div>
+    <div class="card-body">
+        {% if categories %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Category') }}</th>
+                        <th>{{ _('English Name') }}</th>
+                        <th>{{ _('Description') }}</th>
+                        <th>{{ _('Color') }}</th>
+                        <th>{{ _('Stock Count') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for category in categories %}
+                    <tr>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="color-indicator me-2" style="width: 12px; height: 12px; background-color: {{ category.color or '#007bff' }}; border-radius: 50%;"></div>
+                                <strong>{{ category.name }}</strong>
+                            </div>
+                        </td>
+                        <td>{{ category.name_en or '-' }}</td>
+                        <td>
+                            <span class="text-truncate d-inline-block" style="max-width: 200px;" title="{{ category.description or '' }}">
+                                {{ category.description or '-' }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge" style="background-color: {{ category.color or '#007bff' }}; color: white;">
+                                {{ category.color or '#007bff' }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary">{{ category.stock_count }}</span>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-secondary btn-sm" 
+                                        onclick="editCategory({{ category.id }}, '{{ category.name }}', '{{ category.name_en or '' }}', '{{ category.description or '' }}', '{{ category.color or '#007bff' }}')">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" 
+                                        onclick="deleteCategory({{ category.id }}, '{{ category.name }}', {{ category.stock_count }})">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <i class="fas fa-folder-open fa-2x text-muted mb-2"></i>
+            <p class="text-muted">{{ _('No categories created yet') }}</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Stocks Table -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <i class="fas fa-chart-line me-2"></i>{{ _('Stocks') }}
+        </h5>
+    </div>
+    <div class="card-body">
+        {% if all_stocks %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>{{ _('Symbol') }}</th>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Exchange') }}</th>
+                        <th>{{ _('Currency') }}</th>
+                        <th>{{ _('Current Price') }}</th>
+                        <th>{{ _('Category') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stock in all_stocks %}
+                    <tr>
+                        <td><strong>{{ stock.symbol }}</strong></td>
+                        <td>{{ stock.name or '-' }}</td>
+                        <td>{{ stock.exchange or '-' }}</td>
+                        <td>
+                            <span class="badge {% if stock.currency == 'USD' %}bg-success{% else %}bg-info{% endif %}">
+                                {{ stock.currency or 'USD' }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if stock.current_price %}
+                            {{ stock.currency or 'USD' }} ${{ "%.2f"|format(stock.current_price|float) }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm category-select" 
+                                    data-stock-id="{{ stock.id }}" 
+                                    style="max-width: 200px;">
+                                <option value="">{{ _('No Category') }}</option>
+                                {% for category in all_categories %}
+                                <option value="{{ category.id }}" 
+                                        {% if stock.category_id == category.id %}selected{% endif %}>
+                                    {{ category.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <i class="fas fa-chart-line fa-2x text-muted mb-2"></i>
+            <p class="text-muted">{{ _('No stocks found') }}</p>
+            <a href="{{ url_for('main.stocks') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>{{ _('View Stocks') }}
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Add/Edit Category Modal -->
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-labelledby="categoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="categoryModalLabel">{{ _('Add Category') }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <form id="categoryForm">
+                <div class="modal-body">
+                    <input type="hidden" id="categoryId" name="categoryId">
+                    
+                    <div class="mb-3">
+                        <label for="categoryName" class="form-label">{{ _('Category Name') }} <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="categoryName" name="name" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="categoryNameEn" class="form-label">{{ _('English Name') }}</label>
+                        <input type="text" class="form-control" id="categoryNameEn" name="name_en">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="categoryDescription" class="form-label">{{ _('Description') }}</label>
+                        <textarea class="form-control" id="categoryDescription" name="description" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="categoryColor" class="form-label">{{ _('Color') }}</label>
+                        <input type="color" class="form-control form-control-color" id="categoryColor" name="color" value="#007bff">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-primary" id="saveCategoryBtn">{{ _('Save') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<script>
+let isEditMode = false;
+
+function openAddCategoryModal() {
+    isEditMode = false;
+    document.getElementById('categoryModalLabel').textContent = '{{ _("Add Category") }}';
+    document.getElementById('saveCategoryBtn').textContent = '{{ _("Save") }}';
+    document.getElementById('categoryForm').reset();
+    document.getElementById('categoryId').value = '';
+    const modal = new bootstrap.Modal(document.getElementById('categoryModal'));
+    modal.show();
+}
+
+function editCategory(categoryId, name, nameEn, description, color) {
+    isEditMode = true;
+    document.getElementById('categoryModalLabel').textContent = '{{ _("Edit Category") }}';
+    document.getElementById('saveCategoryBtn').textContent = '{{ _("Update") }}';
+    document.getElementById('categoryId').value = categoryId;
+    document.getElementById('categoryName').value = name;
+    document.getElementById('categoryNameEn').value = nameEn;
+    document.getElementById('categoryDescription').value = description;
+    document.getElementById('categoryColor').value = color;
+    const modal = new bootstrap.Modal(document.getElementById('categoryModal'));
+    modal.show();
+}
+
+function deleteCategory(categoryId, categoryName, stockCount) {
+    if (stockCount > 0) {
+        alert('{{ _("Cannot delete category with stocks. Please reassign stocks first.") }}');
+        return;
+    }
+    
+    if (confirm('{{ _("Are you sure you want to delete the category") }} "' + categoryName + '"?')) {
+        fetch(`/api/stock-categories/${categoryId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('{{ _("Error: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('{{ _("Error deleting category. Please try again.") }}');
+        });
+    }
+}
+
+function categorizeAllStocks() {
+    alert('{{ _("Auto categorize functionality is under development") }}');
+}
+
+function updateStockCategory(stockId) {
+    const selectElement = document.querySelector(`select[data-stock-id="${stockId}"]`);
+    const categoryId = selectElement.value || null;
+    const originalValue = selectElement.getAttribute('data-original-value');
+    
+    // 检查是否有变化
+    if (categoryId === originalValue) {
+        return;
+    }
+    
+    // 显示加载状态
+    selectElement.disabled = true;
+    selectElement.style.opacity = '0.6';
+    
+    fetch(`/api/stocks/${stockId}/category`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ category_id: categoryId })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // 更新原始值
+            selectElement.setAttribute('data-original-value', categoryId || '');
+            
+            // 显示成功反馈
+            selectElement.style.backgroundColor = '#d4edda';
+            selectElement.style.borderColor = '#c3e6cb';
+            
+            // 2秒后恢复样式
+            setTimeout(() => {
+                selectElement.style.backgroundColor = '';
+                selectElement.style.borderColor = '';
+            }, 2000);
+        } else {
+            alert('{{ _("Error: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            // 恢复选择框到原始值
+            selectElement.value = originalValue || '';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Error updating category. Please try again.") }}');
+        selectElement.value = originalValue || '';
+    })
+    .finally(() => {
+        // 恢复选择框状态
+        selectElement.disabled = false;
+        selectElement.style.opacity = '1';
+    });
+}
+
+// 添加自动更新功能
+document.addEventListener('DOMContentLoaded', function() {
+    // 为所有选择框添加原始值属性
+    const selects = document.querySelectorAll('.category-select');
+    selects.forEach(select => {
+        select.setAttribute('data-original-value', select.value);
+        
+        // 添加change事件监听器用于自动更新
+        select.addEventListener('change', function() {
+            const stockId = this.getAttribute('data-stock-id');
+            updateStockCategory(stockId);
+        });
+    });
+});
+
+// Form submission handlers
+document.getElementById('categoryForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = {
+        name: formData.get('name'),
+        name_en: formData.get('name_en'),
+        description: formData.get('description'),
+        color: formData.get('color')
+    };
+    
+    const categoryId = formData.get('categoryId');
+    const url = isEditMode ? `/api/stock-categories/${categoryId}` : '/api/stock-categories';
+    const method = isEditMode ? 'PUT' : 'POST';
+    
+    fetch(url, {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('{{ _("Error: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Error saving category. Please try again.") }}');
+    });
+});
+
+</script>
+
+{% endblock %}

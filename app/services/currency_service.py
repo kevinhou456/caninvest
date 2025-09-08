@@ -108,14 +108,7 @@ class CurrencyService:
             ExchangeRate.date == today
         ).first()
         
-        # 如果没有当日汇率，查找最近3天内的汇率
-        if not rate_record:
-            three_days_ago = today - timedelta(days=3)
-            rate_record = ExchangeRate.query.filter(
-                ExchangeRate.from_currency == from_currency,
-                ExchangeRate.to_currency == to_currency,
-                ExchangeRate.date >= three_days_ago
-            ).order_by(ExchangeRate.date.desc()).first()
+        
         
         return Decimal(str(rate_record.rate)) if rate_record else None
     

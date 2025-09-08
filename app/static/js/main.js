@@ -74,8 +74,8 @@ const Utils = {
         
         // 自动隐藏
         setTimeout(() => {
-            const alert = document.querySelector('.alert');
-            if (alert) {
+            const alert = alertContainer.firstElementChild;
+            if (alert && alert.classList.contains('alert')) {
                 const bsAlert = new bootstrap.Alert(alert);
                 bsAlert.close();
             }
@@ -400,16 +400,15 @@ document.addEventListener('DOMContentLoaded', function() {
         return new bootstrap.Popover(popoverTriggerEl);
     });
 
-    // 自动隐藏警告消息
-    setTimeout(() => {
-        const alerts = document.querySelectorAll('.alert');
-        alerts.forEach(alert => {
-            const bsAlert = bootstrap.Alert.getInstance(alert);
-            if (bsAlert) {
-                bsAlert.close();
-            }
-        });
-    }, 5000);
+    // 暂时禁用自动隐藏警告消息功能来调试
+    console.log('页面已加载，Bootstrap alerts应该正常工作');
+    
+    // 检查 Bootstrap 是否正确加载
+    if (typeof bootstrap === 'undefined') {
+        console.error('Bootstrap JavaScript 没有正确加载');
+    } else {
+        console.log('Bootstrap 已正确加载');
+    }
 
     // 表单自动保存草稿（可选功能）
     const forms = document.querySelectorAll('form[data-auto-save]');

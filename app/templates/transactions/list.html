@@ -1,9 +1,10 @@
 {% extends "base/investment_base.html" %}
 
 {% block content %}
+{% if transactions.items %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2>
+        <h2 class="mb-1">
             {% if request.args.get('account_id') %}
                 {% for account in accounts %}
                     {% if account.id == request.args.get('account_id')|int %}
@@ -14,6 +15,13 @@
                 {{ _('All Transactions') }}
             {% endif %}
         </h2>
+        <p class="text-muted mb-0">
+            {% if request.args.get('account_id') %}
+                共有 <strong>{{ transactions.total }}</strong> 条交易记录
+            {% else %}
+                共有 <strong>{{ transactions.total }}</strong> 条交易记录（所有账户）
+            {% endif %}
+        </p>
     </div>
     <div class="btn-group">
         <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
@@ -40,7 +48,6 @@
     </div>
 </div>
 
-{% if transactions.items %}
 <div class="table-responsive">
     <table class="table table-striped">
         <thead>
@@ -50,6 +57,7 @@
                 <th>{{ _('Stock') }}</th>
                 <th>{{ _('Quantity') }}</th>
                 <th>{{ _('Price') }}</th>
+                <th>{{ _('Amount') }}</th>
                 <th>{{ _('Currency') }}</th>
                 <th>{{ _('Fee') }}</th>
                 <th>{{ _('Account') }}</th>
@@ -64,13 +72,26 @@
                 <td>
                     {% if transaction.type == 'BUY' %}
                         <span class="badge bg-success">{{ _('Buy') }}</span>
-                    {% else %}
+                    {% elif transaction.type == 'SELL' %}
                         <span class="badge bg-danger">{{ _('Sell') }}</span>
+                    {% elif transaction.type == 'DIVIDEND' %}
+                        <span class="badge bg-primary">分红</span>
+                    {% elif transaction.type == 'INTEREST' %}
+                        <span class="badge bg-info">利息</span>
+                    {% elif transaction.type == 'DEPOSIT' %}
+                        <span class="badge bg-secondary">存入</span>
+                    {% elif transaction.type == 'WITHDRAWAL' %}
+                        <span class="badge bg-warning">取出</span>
+                    {% elif transaction.type == 'FEE' %}
+                        <span class="badge bg-dark">费用</span>
+                    {% else %}
+                        <span class="badge bg-light text-dark">{{ transaction.type }}</span>
                     {% endif %}
                 </td>
-                <td>{{ transaction.stock }}</td>
-                <td>{{ "%.4f"|format(transaction.quantity) }}</td>
-                <td>{{ "%.2f"|format(transaction.price) }}</td>
+                <td>{{ transaction.stock or '-' }}</td>
+                <td>{{ "%.4f"|format(transaction.quantity) if transaction.quantity != 0 else '-' }}</td>
+                <td>{{ "%.2f"|format(transaction.price) if transaction.price != 0 else '-' }}</td>
+                <td>{{ "%.2f"|format(transaction.amount) if transaction.amount else '-' }}</td>
                 <td>{{ transaction.currency }}</td>
                 <td>{{ "%.2f"|format(transaction.fee) if transaction.fee else '0.00' }}</td>
                 <td>{{ transaction.account.name if transaction.account else '-' }}</td>
@@ -131,13 +152,52 @@
 </nav>
 {% endif %}
 {% else %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">
+            {% if request.args.get('account_id') %}
+                {% for account in accounts %}
+                    {% if account.id == request.args.get('account_id')|int %}
+                        {{ account.name }} - {{ _('Transactions') }}
+                    {% endif %}
+                {% endfor %}
+            {% else %}
+                {{ _('All Transactions') }}
+            {% endif %}
+        </h2>
+        <p class="text-muted mb-0">
+            共有 <strong>0</strong> 条交易记录
+        </p>
+    </div>
+    <div class="btn-group">
+        <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
+            <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
+        </button>
+        {% if request.args.get('account_id') %}
+        <a href="{{ url_for('main.import_transactions', account_id=request.args.get('account_id')) }}" class="btn btn-success">
+            <i class="fas fa-file-import me-2"></i>{{ _('Import CSV') }}
+        </a>
+        <a href="{{ url_for('main.export_transactions', account_id=request.args.get('account_id')) }}" class="btn btn-info">
+            <i class="fas fa-file-export me-2"></i>{{ _('Export CSV') }}
+        </a>
+        <button type="button" class="btn btn-danger" onclick="deleteAccountTransactions({{ request.args.get('account_id') }})">
+            <i class="fas fa-trash me-2"></i>{{ _('Delete Account Transactions') }}
+        </button>
+        {% else %}
+        <a href="{{ url_for('main.import_transactions') }}" class="btn btn-success">
+            <i class="fas fa-file-import me-2"></i>{{ _('Import CSV') }}
+        </a>
+        <button type="button" class="btn btn-info" onclick="exportAllTransactions()">
+            <i class="fas fa-file-export me-2"></i>{{ _('Export CSV') }}
+        </button>
+        {% endif %}
+    </div>
+</div>
+
 <div class="text-center py-5">
     <i class="fas fa-exchange-alt fa-3x text-muted mb-3"></i>
     <h4>{{ _('No transactions recorded yet') }}</h4>
     <p class="text-muted">{{ _('Add your first transaction to get started') }}</p>
-    <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
-        <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
-    </button>
 </div>
 {% endif %}
 

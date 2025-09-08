@@ -15,6 +15,7 @@ from app.models.stocks_cache import StocksCache
 from app.models.import_task import ImportTask, OCRTask
 from app.services.analytics_service import analytics_service, TimePeriod
 from app.services.currency_service import currency_service
+from app.services.holdings_service import holdings_service
 
 
 @bp.route('/')
@@ -1772,4 +1773,132 @@ def import_csv_api():
         return jsonify({
             'success': False,
             'error': f'Import failed: {str(e)}'
+        }), 500
+
+
+@bp.route('/api/v1/holdings')
+def api_get_holdings():
+    """新的持仓API - 支持灵活的查询参数"""
+    try:
+        # 获取查询参数
+        target = request.args.get('target', 'all')  # 'all', account_id, member_id
+        target_type = request.args.get('target_type', 'account')  # 'account' or 'member'
+        as_of_date_str = request.args.get('as_of_date')  # YYYY-MM-DD format
+        family_id = request.args.get('family_id', type=int)
+        
+        # 解析日期参数
+        as_of_date = None
+        if as_of_date_str:
+            try:
+                from datetime import datetime
+                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        
+        # 解析target参数
+        if target != 'all':
+            try:
+                target = int(target)
+            except ValueError:
+                return jsonify({'error': 'Invalid target parameter'}), 400
+        
+        # 获取持仓信息
+        portfolio_summary = holdings_service.get_portfolio_summary(
+            target=target,
+            target_type=target_type,
+            as_of_date=as_of_date,
+            family_id=family_id
+        )
+        
+        return jsonify({
+            'success': True,
+            'data': portfolio_summary
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in holdings API: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/api/v1/holdings/snapshot/<int:account_id>')
+def api_get_account_holdings_snapshot(account_id):
+    """获取特定账户的持仓快照"""
+    try:
+        as_of_date_str = request.args.get('as_of_date')
+        as_of_date = None
+        
+        if as_of_date_str:
+            try:
+                from datetime import datetime
+                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        
+        # 获取持仓快照
+        snapshot = holdings_service.get_holdings_snapshot(
+            target=account_id,
+            target_type='account',
+            as_of_date=as_of_date
+        )
+        
+        # 获取该账户的所有持仓
+        account_holdings = snapshot.get_account_holdings(account_id)
+        
+        # 转换为API响应格式
+        holdings_data = []
+        for holding in account_holdings:
+            holdings_data.append(holding.to_dict())
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'account_id': account_id,
+                'as_of_date': snapshot.as_of_date.isoformat(),
+                'holdings': holdings_data,
+                'total_holdings': len(holdings_data)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in account holdings snapshot API: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/api/v1/holdings/member/<int:member_id>')
+def api_get_member_holdings(member_id):
+    """获取特定成员的持仓信息"""
+    try:
+        as_of_date_str = request.args.get('as_of_date')
+        as_of_date = None
+        
+        if as_of_date_str:
+            try:
+                from datetime import datetime
+                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        
+        # 获取成员的持仓汇总
+        portfolio_summary = holdings_service.get_portfolio_summary(
+            target=member_id,
+            target_type='member',
+            as_of_date=as_of_date
+        )
+        
+        return jsonify({
+            'success': True,
+            'data': portfolio_summary
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in member holdings API: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500

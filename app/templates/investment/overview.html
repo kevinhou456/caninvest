@@ -156,21 +156,22 @@
         </div>
     </div>
     
-    <!-- Exchange Rate -->
+    <!-- Total Interest -->
     <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
         <div class="card h-100 metric-card">
             <div class="card-body">
                 <div class="d-flex align-items-center mb-2">
                     <div class="metric-icon bg-warning bg-opacity-10">
-                        <i class="fas fa-exchange-alt text-warning"></i>
+                        <i class="fas fa-percentage text-warning"></i>
                     </div>
-                    <h6 class="card-title text-muted mb-0">{{ _('USD/CAD Rate') }}</h6>
+                    <h6 class="card-title text-muted mb-0">{{ _('Total Interest') }}</h6>
                 </div>
-                <h4 class="text-warning mb-1">{{ "{:.4f}".format(exchange_rates['usd_to_cad'] if exchange_rates else 1.35) }}</h4>
-                <small class="text-muted">{{ _('Current Rate') }}</small>
+                <h4 class="text-warning mb-1">${{ "{:,.2f}".format(metrics.total_interest.cad if metrics else 0) }}</h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_interest.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_interest.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
+    
 </div>
 
 <!-- Holdings Table -->
@@ -197,6 +198,7 @@
                                 <th class="text-end">{{ _('Unrealized P&L') }}</th>
                                 <th class="text-end">{{ _('Realized Gains') }}</th>
                                 <th class="text-end">{{ _('Dividends') }}</th>
+                                <th class="text-end">{{ _('Interest') }}</th>
                                 <th class="text-end pe-3">{{ _('Return Percent') }}</th>
                             </tr>
                         </thead>
@@ -263,6 +265,13 @@
                                     </span>
                                 </td>
                                 
+                                <!-- Interest -->
+                                <td class="text-end">
+                                    <span class="fw-medium text-warning">
+                                        ${{ "{:,.0f}".format(holding['interest'] or 0) }}
+                                    </span>
+                                </td>
+                                
                                 <!-- Return Percentage -->
                                 <td class="text-end pe-3">
                                     <span class="badge {{ 'bg-success' if holding['unrealized_gain_percent'] >= 0 else 'bg-danger' }} return-badge">
@@ -314,6 +323,8 @@
                                 <th class="text-end">{{ _('Total Invested') }}</th>
                                 <th class="text-end">{{ _('Total Received') }}</th>
                                 <th class="text-end">{{ _('Realized Gain') }}</th>
+                                <th class="text-end">{{ _('Dividends') }}</th>
+                                <th class="text-end">{{ _('Interest') }}</th>
                                 <th class="text-end pe-3">{{ _('Return Percent') }}</th>
                             </tr>
                         </thead>
@@ -369,6 +380,20 @@
                                     </span>
                                 </td>
                                 
+                                <!-- Dividends -->
+                                <td class="text-end">
+                                    <span class="fw-medium text-info">
+                                        ${{ "{:,.0f}".format(holding['dividends'] or 0) }}
+                                    </span>
+                                </td>
+                                
+                                <!-- Interest -->
+                                <td class="text-end">
+                                    <span class="fw-medium text-warning">
+                                        ${{ "{:,.0f}".format(holding['interest'] or 0) }}
+                                    </span>
+                                </td>
+                                
                                 <!-- Return Percentage -->
                                 <td class="text-end pe-3">
                                     <span class="badge {{ 'bg-success' if holding['realized_gain_percent'] >= 0 else 'bg-danger' }} return-badge">
@@ -397,68 +422,55 @@
 <!-- Additional Information Cards -->
 {% if exchange_rates %}
 <div class="row">
-    <!-- Exchange Rate Details -->
-    <div class="col-md-6 mb-3">
-        <div class="card h-100">
-            <div class="card-header">
-                <h6 class="mb-0">
-                    <i class="fas fa-exchange-alt me-2"></i>{{ _('Exchange Rates') }}
-                </h6>
-            </div>
-            <div class="card-body">
-                <div class="row text-center">
-                    <div class="col-6">
-                        <div class="border-end">
-                            <h4 class="text-primary mb-1">{{ "{:.4f}".format(exchange_rates['cad_to_usd']) }}</h4>
-                            <small class="text-muted">CAD → USD</small>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <h4 class="text-info mb-1">{{ "{:.4f}".format(exchange_rates['usd_to_cad']) }}</h4>
-                        <small class="text-muted">USD → CAD</small>
-                    </div>
-                </div>
-                <hr class="my-3">
-                <div class="text-center">
-                    <small class="text-muted">
-                        <i class="fas fa-clock me-1"></i>
-                        {{ _('Updated') }}: {{ exchange_rates['updated_date'] }}
-                    </small>
-                </div>
-            </div>
-        </div>
-    </div>
     
-    <!-- Portfolio Statistics -->
-    <div class="col-md-6 mb-3">
+    <!-- Portfolio Statistics & Financial Summary -->
+    <div class="col-12 mb-3">
         <div class="card h-100">
             <div class="card-header">
                 <h6 class="mb-0">
-                    <i class="fas fa-chart-bar me-2"></i>{{ _('Portfolio Statistics') }}
+                    <i class="fas fa-chart-bar me-2"></i>{{ _('Portfolio Statistics & Financial Summary') }}
                 </h6>
             </div>
             <div class="card-body">
                 <div class="row g-0">
-                    <div class="col-6 text-center border-end">
+                    <div class="col-md-3 text-center border-end">
                         <h5 class="text-info mb-1">{{ stats.accounts_count }}</h5>
                         <small class="text-muted">{{ _('Active Accounts') }}</small>
                     </div>
-                    <div class="col-6 text-center">
+                    <div class="col-md-3 text-center border-end">
                         <h5 class="text-warning mb-1">{{ stats.transactions_count }}</h5>
                         <small class="text-muted">{{ _('Total Transactions') }}</small>
+                    </div>
+                    <div class="col-md-3 text-center border-end">
+                        <h5 class="text-primary mb-1">{{ "{:.4f}".format(exchange_rates['usd_to_cad'] if exchange_rates else 1.35) }}</h5>
+                        <small class="text-muted">{{ _('USD/CAD Rate') }}</small>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <h5 class="text-secondary mb-1">{{ "{:.4f}".format(exchange_rates['cad_to_usd'] if exchange_rates else 0.74) }}</h5>
+                        <small class="text-muted">{{ _('CAD/USD Rate') }}</small>
                     </div>
                 </div>
                 <hr class="my-3">
                 <div class="row g-0">
-                    <div class="col-6 text-center border-end">
-                        <h5 class="text-success mb-1">{{ stats.pending_imports }}</h5>
-                        <small class="text-muted">{{ _('Pending Imports') }}</small>
+                    <div class="col-md-6 text-center border-end">
+                        <h5 class="text-success mb-1">${{ "{:,.0f}".format(metrics.total_deposits.cad if metrics else 0) }}</h5>
+                        <small class="text-muted">{{ _('Total Deposits') }}</small>
+                        <br><small class="text-muted" style="font-size: 0.7rem;">CAD:${{ "{:,.0f}".format(metrics.total_deposits.cad_only if metrics else 0) }} | USD:${{ "{:,.0f}".format(metrics.total_deposits.usd_only if metrics else 0) }}</small>
                     </div>
-                    <div class="col-6 text-center">
-                        <h5 class="text-danger mb-1">{{ stats.pending_ocr }}</h5>
-                        <small class="text-muted">{{ _('Pending OCR') }}</small>
+                    <div class="col-md-6 text-center">
+                        <h5 class="text-danger mb-1">${{ "{:,.0f}".format(metrics.total_withdrawals.cad if metrics else 0) }}</h5>
+                        <small class="text-muted">{{ _('Total Withdrawals') }}</small>
+                        <br><small class="text-muted" style="font-size: 0.7rem;">CAD:${{ "{:,.0f}".format(metrics.total_withdrawals.cad_only if metrics else 0) }} | USD:${{ "{:,.0f}".format(metrics.total_withdrawals.usd_only if metrics else 0) }}</small>
                     </div>
                 </div>
+                {% if exchange_rates %}
+                <div class="text-center mt-2">
+                    <small class="text-muted" style="font-size: 0.7rem;">
+                        <i class="fas fa-clock me-1"></i>
+                        {{ _('Exchange rates updated') }}: {{ exchange_rates['updated_date'] }}
+                    </small>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
