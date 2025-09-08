@@ -12,10 +12,11 @@ class Transaction(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     trade_date = db.Column(db.Date, nullable=False, comment='交易日期')
-    type = db.Column(db.String(4), nullable=False, comment='交易类型: BUY/SELL')
-    stock = db.Column(db.String(20), nullable=False, comment='股票代码')
+    type = db.Column(db.String(20), nullable=False, comment='交易类型: BUY/SELL/DIVIDEND/INTEREST/DEPOSIT/WITHDRAWAL/FEE')
+    stock = db.Column(db.String(20), nullable=True, comment='股票代码')
     quantity = db.Column(db.Numeric(15, 4), nullable=False, comment='交易数量')
     price = db.Column(db.Numeric(15, 4), nullable=False, comment='单股价格')
+    amount = db.Column(db.Numeric(15, 2), nullable=True, comment='总金额 - 用于存入/取出/分红/利息等非股票交易')
     currency = db.Column(db.String(3), nullable=False, comment='货币类型: USD/CAD')
     fee = db.Column(db.Numeric(10, 2), default=0, comment='交易手续费')
     account_id = db.Column(db.Integer, db.ForeignKey('accounts.id'), nullable=False, comment='账户ID')

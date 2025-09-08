@@ -163,6 +163,7 @@
                         <h6>{{ _('Optional Data:') }}</h6>
                         <ul>
                             <li><strong>{{ _('Currency') }}</strong>: {{ _('currency, ccy, 货币 (defaults to USD)') }}</li>
+                            <li><strong>{{ _('Amount') }}</strong>: {{ _('amount, total, 金额 (for cash transactions like deposits/dividends)') }}</li>
                             <li><strong>{{ _('Fee') }}</strong>: {{ _('fee, commission, 手续费') }}</li>
                             <li><strong>{{ _('Notes') }}</strong>: {{ _('notes, description, 备注') }}</li>
                         </ul>
@@ -424,7 +425,9 @@ function handleCsvUpload(event) {
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('{{ _("Error analyzing CSV. Please try again.") }}');
+        console.error('Error details:', error.message);
+        console.error('Error stack:', error.stack);
+        alert('{{ _("Error analyzing CSV. Please try again.") }}' + ' Debug: ' + error.message);
     })
     .finally(() => {
         // Restore button state
@@ -434,32 +437,100 @@ function handleCsvUpload(event) {
 }
 
 function showMappingModal(data) {
-    // 关闭上传模态框
-    const uploadModal = bootstrap.Modal.getInstance(document.getElementById('importCSVModal'));
-    uploadModal.hide();
+    console.log('showMappingModal called with data:', data);
+    try {
+        // 关闭上传模态框
+        const uploadModalElement = document.getElementById('importCSVModal');
+        console.log('Upload modal element found:', uploadModalElement);
+        
+        const uploadModal = bootstrap.Modal.getInstance(uploadModalElement);
+        console.log('Upload modal instance:', uploadModal);
+        
+        if (uploadModal) {
+            console.log('Hiding upload modal...');
+            uploadModal.hide();
+        }
+        
+        // 等待一小段时间确保模态框DOM完全加载
+        console.log('Setting timeout to show mapping modal...');
+        setTimeout(() => {
+            console.log('Timeout executed, calling showMappingModalInternal...');
+            showMappingModalInternal(data);
+        }, 100);
+        
+    } catch (error) {
+        console.error('Error in showMappingModal:', error);
+        console.error('Error details:', error.message);
+        console.error('Error stack:', error.stack);
+        alert('Error in mapping modal: ' + error.message);
+        throw error; // Re-throw to trigger the outer catch
+    }
+}
+
+function showMappingModalInternal(data) {
+    console.log('showMappingModalInternal called with data:', data);
+    console.log('Data columns:', data.columns);
+    console.log('Data suggested_mapping:', data.suggested_mapping);
+    console.log('Data preview_data:', data.preview_data);
     
-    // 显示文件信息
-    const csvInfoDiv = document.getElementById('csvInfo');
-    const csvInfoText = document.getElementById('csvInfoText');
-    csvInfoText.textContent = `{{ _('Found ') }}${data.columns.length}{{ _(' columns and ') }}${data.total_rows}{{ _(' rows in your CSV file') }}`;
-    csvInfoDiv.style.display = 'block';
+    // 直接构建列映射表格和CSV预览表格
+    buildColumnMappingTable(data.columns, data.suggested_mapping);
+    buildCsvPreviewTable(data.columns, data.preview_data);
     
-    // 显示自动匹配信息
-    const autoMatchDiv = document.getElementById('autoMatchInfo');
-    const autoMatchText = document.getElementById('autoMatchText');
-    if (data.auto_matched_format) {
-        autoMatchText.innerHTML = `<strong>{{ _('🎉 Great! Automatically matched format: ') }}"${data.auto_matched_format.name}"</strong><br>` +
-                                  `{{ _('This format has been used ') }}${data.auto_matched_format.usage_count}{{ _(' times before. Column mappings are pre-filled and ready to import!') }}`;
+    // 显示映射模态框
+    const mappingModalElement = document.getElementById('csvMappingModal');
+    const mappingModal = new bootstrap.Modal(mappingModalElement);
+    
+    // 等待模态框显示完成后再执行后续操作
+    mappingModalElement.addEventListener('shown.bs.modal', function() {
+        console.log('Mapping modal is now fully shown');
+        // 现在模态框完全显示了，更新DOM元素
+        updateModalElements(data);
+    }, { once: true });
+    
+    mappingModal.show();
+}
+
+function updateModalElements(data) {
+    // 显示文件信息 - 使用更具体的选择器，在模态框内查找
+    const csvInfoDiv = document.querySelector('#csvMappingModal #csvInfo');
+    const csvInfoText = document.querySelector('#csvMappingModal #csvInfoText');
+    
+    if (csvInfoText) {
+        csvInfoText.textContent = `Found ${data.columns.length} columns and ${data.total_rows} rows in your CSV file`;
+    } else {
+        console.error('csvInfoText element not found');
+    }
+    
+    if (csvInfoDiv) {
+        csvInfoDiv.style.display = 'block';
+    } else {
+        console.error('csvInfoDiv element not found');
+    }
+    
+    // 显示自动匹配信息 - 使用更具体的选择器
+    const autoMatchDiv = document.querySelector('#csvMappingModal #autoMatchInfo');
+    const autoMatchText = document.querySelector('#csvMappingModal #autoMatchText');
+    
+    if (!autoMatchDiv) {
+        console.error('autoMatchDiv element not found');
+    }
+    if (!autoMatchText) {
+        console.error('autoMatchText element not found');
+    }
+    if (data.auto_matched_format && autoMatchText && autoMatchDiv) {
+        autoMatchText.innerHTML = `<strong>🎉 Great! Automatically matched format: "${data.auto_matched_format.name}"</strong><br>` +
+                                  `This format has been used ${data.auto_matched_format.usage_count} times before. Column mappings are pre-filled and ready to import!`;
         autoMatchDiv.style.display = 'block';
-        autoMatchDiv.className = 'alert alert-success'; // 更显眼的绿色背景
+        autoMatchDiv.className = 'alert alert-success';
         
         // 自动设置格式名称，这样用户不需要重新输入
         const formatNameInput = document.getElementById('formatName');
         if (formatNameInput) {
             formatNameInput.value = data.auto_matched_format.name;
-            formatNameInput.readOnly = true; // 使其只读，因为是自动匹配的
+            formatNameInput.readOnly = true;
         }
-    } else {
+    } else if (autoMatchDiv) {
         autoMatchDiv.style.display = 'none';
         
         // 如果没有自动匹配，确保格式名称输入框可以编辑
@@ -474,10 +545,6 @@ function showMappingModal(data) {
     
     // 构建CSV预览表格
     buildCsvPreviewTable(data.columns, data.preview_data);
-    
-    // 显示映射模态框
-    const mappingModal = new bootstrap.Modal(document.getElementById('csvMappingModal'));
-    mappingModal.show();
 }
 
 function buildColumnMappingTable(csvColumns, suggestedMapping) {
@@ -488,6 +555,7 @@ function buildColumnMappingTable(csvColumns, suggestedMapping) {
         { field: 'quantity', name: '{{ _("Quantity") }}', required: true },
         { field: 'price', name: '{{ _("Price") }}', required: true },
         { field: 'currency', name: '{{ _("Currency") }}', required: false },
+        { field: 'amount', name: '{{ _("Amount") }}', required: false }, // Updated with amount field
         { field: 'fee', name: '{{ _("Fee/Commission") }}', required: false },
         { field: 'notes', name: '{{ _("Notes") }}', required: false }
     ];
@@ -497,14 +565,22 @@ function buildColumnMappingTable(csvColumns, suggestedMapping) {
     const hasAllRequiredMappings = requiredFieldNames.every(field => suggestedMapping && suggestedMapping[field]);
     
     // 显示或隐藏自动映射成功提示
-    const autoMappingSuccessDiv = document.getElementById('autoMappingSuccess');
-    if (hasAllRequiredMappings && Object.keys(suggestedMapping).length > 0) {
-        autoMappingSuccessDiv.style.display = 'block';
+    const autoMappingSuccessDiv = document.querySelector('#csvMappingModal #autoMappingSuccess');
+    if (autoMappingSuccessDiv) {
+        if (hasAllRequiredMappings && Object.keys(suggestedMapping).length > 0) {
+            autoMappingSuccessDiv.style.display = 'block';
+        } else {
+            autoMappingSuccessDiv.style.display = 'none';
+        }
     } else {
-        autoMappingSuccessDiv.style.display = 'none';
+        console.error('autoMappingSuccess element not found');
     }
     
     const tbody = document.getElementById('columnMappingTable');
+    if (!tbody) {
+        console.error('columnMappingTable element not found');
+        return;
+    }
     tbody.innerHTML = '';
     
     requiredFields.forEach(fieldInfo => {
@@ -566,6 +642,10 @@ function buildColumnMappingTable(csvColumns, suggestedMapping) {
 
 function buildCsvPreviewTable(columns, previewData) {
     const table = document.getElementById('csvPreviewTable');
+    if (!table) {
+        console.error('csvPreviewTable element not found');
+        return;
+    }
     
     // 构建表头
     const thead = table.querySelector('thead');
@@ -599,6 +679,7 @@ function buildCsvPreviewTable(columns, previewData) {
 }
 
 function importWithMapping() {
+    console.log('importWithMapping function called');
     // 获取所有映射
     const mappings = {};
     const selects = document.querySelectorAll('#columnMappingTable select');
@@ -623,18 +704,27 @@ function importWithMapping() {
     
     if (!hasRequiredFields) {
         // 显示警告信息
-        const warningDiv = document.getElementById('mappingWarning');
-        const warningText = document.getElementById('warningText');
-        warningText.textContent = '{{ _("Please map all required fields: ") }}' + missingFields.join(', ');
-        warningDiv.style.display = 'block';
+        const warningDiv = document.querySelector('#csvMappingModal #mappingWarning');
+        const warningText = document.querySelector('#csvMappingModal #warningText');
+        if (warningText) {
+            warningText.textContent = 'Please map all required fields: ' + missingFields.join(', ');
+        }
+        if (warningDiv) {
+            warningDiv.style.display = 'block';
+        }
         
         // 滚动到警告位置
-        warningDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (warningDiv) {
+            warningDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
         return;
     }
     
     // 隐藏警告
-    document.getElementById('mappingWarning').style.display = 'none';
+    const warningDiv = document.querySelector('#csvMappingModal #mappingWarning');
+    if (warningDiv) {
+        warningDiv.style.display = 'none';
+    }
     
     // 准备导入数据
     const importData = {

@@ -39,23 +39,14 @@ class CSVTransactionService:
         }
     
     def process_csv_import(self, import_task_id: int):
-        """处理CSV导入任务 - 临时禁用"""
+        """处理CSV导入任务"""
         task = ImportTask.query.get(import_task_id)
         if not task:
             raise ValueError(f"Import task {import_task_id} not found")
         
-        # Temporarily disabled due to deleted models
-        task.status = TaskStatus.FAILED
+        task.status = TaskStatus.PROCESSING
         task.started_at = datetime.now()
-        task.completed_at = datetime.now()
-        task.error_details = "CSV import temporarily disabled during system redesign - Stock model has been deleted"
         db.session.commit()
-        return task
-        
-        # Original code commented out
-        # task.status = TaskStatus.PROCESSING
-        # task.started_at = datetime.now()
-        # db.session.commit()
         
         try:
             # 解析CSV文件
@@ -98,9 +89,20 @@ class CSVTransactionService:
             file.seek(0)
             
             try:
-                dialect = csv.Sniffer().sniff(sample)
+                # 使用csv.Sniffer自动检测方言
+                dialect = csv.Sniffer().sniff(sample, delimiters=',;\t|')
             except csv.Error:
-                dialect = csv.excel
+                # 如果自动检测失败，手动检测最常用的分隔符
+                if ';' in sample and sample.count(';') > sample.count(','):
+                    class SemicolonDialect(csv.excel):
+                        delimiter = ';'
+                    dialect = SemicolonDialect()
+                elif '\t' in sample and sample.count('\t') > sample.count(','):
+                    class TabDialect(csv.excel):
+                        delimiter = '\t'
+                    dialect = TabDialect()
+                else:
+                    dialect = csv.excel
             
             reader = csv.DictReader(file, dialect=dialect)
             return parser(reader)
@@ -283,30 +285,46 @@ class CSVTransactionService:
         
         # 通用格式的列映射
         column_mapping = {
-            'date': ['date', 'trade_date', 'trade_date'],
+            'date': ['date', 'trade_date', 'trade date', 'settlement_date', 'settlement date'],
             'symbol': ['symbol', 'ticker', 'stock_symbol'],
-            'type': ['type', 'transaction_type', 'action'],
+            'type': ['type', 'transaction_type', 'action', 'operation'],
             'quantity': ['quantity', 'shares', 'qty'],
             'price': ['price', 'price_per_share', 'unit_price'],
             'fee': ['fee', 'commission', 'transaction_fee'],
-            'total': ['total', 'amount', 'gross_amount']
+            'total': ['total', 'amount', 'gross_amount', 'net_amount', 'net amount'],
+            'description': ['description', 'name', 'stock_name']
         }
         
         # 检测列名
         fieldnames = reader.fieldnames
         detected_columns = {}
         
+        print(f"CSV fieldnames: {fieldnames}")
+        
         for key, possible_names in column_mapping.items():
             for field in fieldnames:
-                if field.lower().replace('_', '').replace(' ', '') in [name.replace('_', '').replace(' ', '') for name in possible_names]:
+                # 更灵活的匹配 - 转换为小写并移除空格和下划线
+                field_normalized = field.lower().replace('_', '').replace(' ', '')
+                possible_normalized = [name.lower().replace('_', '').replace(' ', '') for name in possible_names]
+                
+                if field_normalized in possible_normalized:
                     detected_columns[key] = field
+                    print(f"Mapped '{key}' to column '{field}'")
                     break
+        
+        print(f"Detected column mapping: {detected_columns}")
         
         for row in reader:
             try:
                 # 解析日期
-                date_str = row.get(detected_columns.get('date', ''))
+                date_field = detected_columns.get('date', '')
+                if not date_field:
+                    print(f"No date field mapped. Available fields: {list(row.keys())}")
+                    continue
+                    
+                date_str = row.get(date_field, '')
                 if not date_str:
+                    print(f"No date value found in field '{date_field}'. Row: {row}")
                     continue
                 
                 # 尝试多种日期格式
@@ -325,13 +343,33 @@ class CSVTransactionService:
                 if not symbol:
                     continue
                 
-                transaction_type = row.get(detected_columns.get('type', '')).upper()
+                transaction_type = row.get(detected_columns.get('type', '')).upper().strip()
+                
+                # 映射常见的操作类型
+                type_mapping = {
+                    'BUY': 'BUY',
+                    'SELL': 'SELL', 
+                    'DIVIDEND': 'DIVIDEND',
+                    'DIV': 'DIVIDEND',
+                    'PURCHASE': 'BUY',
+                    'SALE': 'SELL',
+                    'ACHAT': 'BUY',  # 法语 - 购买
+                    'VENTE': 'SELL',  # 法语 - 出售
+                    'DIVIDENDE': 'DIVIDEND'  # 法语 - 分红
+                }
+                
+                transaction_type = type_mapping.get(transaction_type, transaction_type)
+                
                 if transaction_type not in ['BUY', 'SELL', 'DIVIDEND']:
+                    print(f"Skipping unknown transaction type: {transaction_type}")
                     continue
+                
+                # 获取描述信息
+                description = row.get(detected_columns.get('description', ''), row.get('Description', '')).strip()
                 
                 transactions.append({
                     'symbol': symbol,
-                    'name': row.get('name', row.get('description', '')).strip(),
+                    'name': description,
                     'transaction_type': transaction_type,
                     'quantity': abs(float(row.get(detected_columns.get('quantity', ''), 0))),
                     'price_per_share': float(row.get(detected_columns.get('price', ''), 0)),

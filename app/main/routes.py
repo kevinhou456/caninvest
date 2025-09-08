@@ -2,7 +2,7 @@
 主要路由 - 页面视图
 """
 
-from flask import render_template, request, jsonify, redirect, url_for, flash, session
+from flask import render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_babel import _
 from app.main import bp
 from app import db
@@ -117,10 +117,7 @@ def overview():
         holdings = metrics.holdings
         cleared_holdings = metrics.cleared_holdings
         
-        # 调试信息
-        print(f"Overview debug - Holdings count: {len(holdings)}, Cleared: {len(cleared_holdings)}")
-        if len(holdings) > 0:
-            print(f"First holding: {holdings[0]}")
+        
         
         return render_template('investment/overview.html',
                              title=_('Overview'),
@@ -391,112 +388,191 @@ def transactions():
     except Exception as e:
         current_app.logger.error(f"Error in transactions route: {str(e)}")
         flash(_('Error loading transactions: ') + str(e), 'error')
-        return redirect(url_for('main.dashboard'))
+        return redirect(url_for('main.overview'))
 
 
-@bp.route('/transactions/create', methods=['GET', 'POST'])
-def create_transaction():
-    """创建交易记录"""
-    if request.method == 'POST':
-        try:
-            # 获取表单数据
-            account_id = request.form.get('account_id')
-            stock_symbol = request.form.get('stock_symbol', '').strip().upper()
-            stock_name = request.form.get('stock_name', '').strip()
-            currency = request.form.get('currency')
-            exchange = request.form.get('exchange', '').strip()
-            type = request.form.get('type')
-            quantity = request.form.get('quantity')
-            price = request.form.get('price')
-            fee = request.form.get('fee', 0)
-            trade_date = request.form.get('trade_date')
-            notes = request.form.get('notes', '').strip()
-            
-            # Debug logging
-            print(f"DEBUG: Form data - account_id: {account_id}, stock_symbol: {stock_symbol}, currency: {currency}")
-            print(f"DEBUG: stock_name: {stock_name}, exchange: {exchange}")
-            
-            # 验证必填字段
-            if not all([account_id, stock_symbol, currency, type, quantity, price, trade_date]):
-                flash(_('Please fill in all required fields'), 'error')
-                return redirect(url_for('main.transactions', account_id=account_id))
-            
-            # 转换数据类型
-            from datetime import datetime
-            trade_date = datetime.strptime(trade_date, '%Y-%m-%d').date()
-            quantity = float(quantity)
-            price = float(price)
-            fee = float(fee) if fee else 0
-            
-            # 验证账户是否存在
-            account = Account.query.get(account_id)
-            if not account:
-                flash(_('Selected account does not exist'), 'error')
-                return redirect(url_for('main.transactions', account_id=account_id))
-            
-            # 查找或创建股票缓存记录
-            stock_cache = StocksCache.query.filter_by(symbol=stock_symbol).first()
-            if not stock_cache:
-                # 使用智能推断来创建股票缓存记录
-                from app.services.stock_price_service import StockPriceService
-                price_service = StockPriceService()
+def save_transaction_record(transaction_id=None, account_id=None, transaction_type=None, quantity=None, price=None, currency=None, stock=None, fee=0.0, trade_date=None, notes='', amount=None):
+    """
+    统一的交易记录数据库操作函数
+    - 如果 transaction_id 为 None，则创建新记录
+    - 如果 transaction_id 不为 None，则修改现有记录
+    """
+    
+    try:
+        if transaction_id is None:
+            # 创建新记录 - 如果没有提供交易日期，使用今天
+            if trade_date is None:
+                from datetime import date
+                trade_date = date.today()
                 
-                inferred_name = stock_name if stock_name else price_service._infer_stock_name(stock_symbol)
-                inferred_exchange = exchange if exchange else price_service._infer_exchange(stock_symbol)
-                inferred_currency = price_service._infer_currency(stock_symbol)
-                
-                stock_cache = StocksCache(
-                    symbol=stock_symbol,
-                    name=inferred_name,
-                    exchange=inferred_exchange,
-                    currency=inferred_currency
-                )
-                db.session.add(stock_cache)
-                db.session.flush()  # 获取股票ID
-                
-                print(f"创建新股票缓存: {stock_symbol} -> 名称: {inferred_name}, 交易所: {inferred_exchange}")
+            # 验证必需字段
+            if not account_id:
+                raise ValueError("account_id is required")
+            if not transaction_type:
+                raise ValueError("transaction_type is required")
+            if not currency:
+                raise ValueError("currency is required")
             
-            # 创建交易记录
+            # 对于股票交易，验证quantity和price是必需的
+            if transaction_type in ['BUY', 'SELL']:
+                if not quantity:
+                    raise ValueError("quantity is required for stock transactions")
+                if not price:
+                    raise ValueError("price is required for stock transactions")
+            
             transaction = Transaction(
                 account_id=account_id,
-                stock=stock_symbol,
-                type=type,
+                stock=stock,  # 直接使用stock，可能为None
+                type=transaction_type,
                 quantity=quantity,
                 price=price,
+                amount=amount,  # 新增amount字段
                 fee=fee,
                 trade_date=trade_date,
                 currency=currency,
                 notes=notes
             )
-            
             db.session.add(transaction)
-            db.session.commit()
+        else:
+            # 修改现有记录
+            transaction = Transaction.query.get(transaction_id)
+            if not transaction:
+                raise ValueError(f"Transaction with ID {transaction_id} not found")
             
-            # 持仓记录已移除，现在通过交易记录实时计算
-            db.session.commit()
-            
-            flash(_('Transaction created successfully'), 'success')
-            
-            # 如果有指定账户ID，重定向到该账户的交易页面
-            account_id = request.form.get('account_id')
-            if account_id:
+            # 只更新提供的字段
+            if account_id is not None:
+                transaction.account_id = account_id
+            if transaction_type is not None:
+                transaction.type = transaction_type
+            if quantity is not None:
+                transaction.quantity = quantity
+            if price is not None:
+                transaction.price = price
+            if currency is not None:
+                transaction.currency = currency
+            if stock is not None:
+                transaction.stock = stock
+            if fee is not None:
+                transaction.fee = fee
+            if trade_date is not None:
+                transaction.trade_date = trade_date
+            if notes is not None:
+                transaction.notes = notes
+        
+        db.session.commit()
+        
+        flash(f"成功保存交易记录! ID: {transaction.id}", 'success')
+        return transaction
+        
+    except Exception as e:
+        print(f"DEBUG: ❌ Exception occurred in save_transaction_record: {str(e)}")
+        print(f"DEBUG: Exception type: {type(e)}")
+        import traceback
+        print(f"DEBUG: Full traceback:")
+        traceback.print_exc()
+        
+        db.session.rollback()
+        print(f"DEBUG: Database session rolled back")
+        
+        error_msg = f"数据库保存失败: {str(e)}"
+        flash(error_msg, 'error')
+        raise Exception(error_msg)
+
+@bp.route('/transactions/create', methods=['GET', 'POST'])
+def create_transaction():
+    """创建交易记录"""
+    if request.method == 'POST':
+        # 获取表单数据
+        account_id = request.form.get('account_id')
+        type = request.form.get('type')
+        quantity = request.form.get('quantity')
+        price = request.form.get('price')
+        fee = request.form.get('fee', 0)
+        trade_date = request.form.get('trade_date')
+        currency = request.form.get('currency')
+        notes = request.form.get('notes', '').strip()
+        amount = request.form.get('amount')  # 新增amount参数
+        
+        # 根据交易类型处理股票代码
+        stock_symbol = None
+        if type in ['BUY', 'SELL', 'DIVIDEND', 'INTEREST']:
+            stock_symbol = request.form.get('stock_symbol', '').strip().upper()
+            if not stock_symbol:
+                transaction_type_name = {
+                    'BUY': '买入',
+                    'SELL': '卖出', 
+                    'DIVIDEND': '分红',
+                    'INTEREST': '利息'
+                }.get(type, type)
+                flash(f'{transaction_type_name}交易需要股票代码', 'error')
                 return redirect(url_for('main.transactions', account_id=account_id))
+        # DEPOSIT, WITHDRAWAL, FEE 等现金交易不需要股票代码
+        
+        # 验证必填字段
+        if not all([account_id, type, trade_date, currency]):
+            flash(_('Please fill in all required fields'), 'error')
+            return redirect(url_for('main.transactions', account_id=account_id))
+        
+        # 对于现金交易，验证amount字段
+        if type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST']:
+            if not amount:
+                flash(_('Amount is required for this transaction type'), 'error')
+                return redirect(url_for('main.transactions', account_id=account_id))
+        
+        # 对于股票交易，验证quantity和price字段
+        if type in ['BUY', 'SELL']:
+            if not quantity or not price:
+                flash(_('Quantity and price are required for stock transactions'), 'error')
+                return redirect(url_for('main.transactions', account_id=account_id))
+        
+       
+        try:
+            # 转换数据类型
+            from datetime import datetime
+            trade_date = datetime.strptime(trade_date, '%Y-%m-%d').date()
+            fee = float(fee) if fee else 0
+            
+            # 根据交易类型处理数据
+            if type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST']:
+                # 现金交易使用amount字段
+                amount_value = float(amount) if amount else 0
+                # quantity和price保持原值，如果为空则设为0（因为数据库不允许NULL）
+                quantity = float(quantity) if quantity else 0
+                price = float(price) if price else 0
             else:
-                return redirect(url_for('main.transactions'))
-                
-        except ValueError as e:
-            flash(_('Invalid data format. Please check your inputs.'), 'error')
-            account_id = request.form.get('account_id')
-            if account_id:
-                return redirect(url_for('main.transactions', account_id=account_id))
-            return redirect(url_for('main.transactions'))
+                # 股票交易使用quantity和price
+                quantity = float(quantity) if quantity else 0
+                price = float(price) if price else 0
+                amount_value = None  # 股票交易不使用amount字段
+            
+            print(f"DEBUG: Creating {type} transaction for stock={stock_symbol or 'None'}, amount={amount_value}")
+            
+            # 使用统一函数创建交易记录
+            try:
+                transaction = save_transaction_record(
+                    account_id=int(account_id),
+                    transaction_type=type,
+                    quantity=quantity,
+                    price=price,
+                    amount=amount_value,
+                    currency=currency,
+                    stock=stock_symbol,
+                    fee=fee,
+                    trade_date=trade_date,
+                    notes=notes
+                )
+                print(f"DEBUG: ✅ Transaction saved with ID: {transaction.id}")
+                    
+            except Exception as save_error:
+                print(f"DEBUG: ERROR in save_transaction_record: {save_error}")
+                raise save_error
+            flash(_('Transaction created successfully'), 'success')
+            return redirect(url_for('main.transactions', account_id=account_id))
+            
         except Exception as e:
             db.session.rollback()
-            flash(_('Error creating transaction: {}').format(str(e)), 'error')
-            account_id = request.form.get('account_id')
-            if account_id:
-                return redirect(url_for('main.transactions', account_id=account_id))
-            return redirect(url_for('main.transactions'))
+            flash(f'Error creating transaction: {str(e)}', 'error')
+            return redirect(url_for('main.transactions', account_id=account_id))
     
     # GET request - show form
     accounts = Account.query.all()
@@ -642,6 +718,7 @@ def set_language():
         session['language'] = language
         return jsonify({'success': True, 'language': language})
     return jsonify({'success': False, 'error': 'Invalid language'}), 400
+
 
 
 @bp.route('/api/translations')
@@ -930,7 +1007,7 @@ def stock_categories():
                              current_view='stock_categories')
     except Exception as e:
         flash(_('Error loading stock categories: ') + str(e), 'error')
-        return redirect(url_for('main.dashboard'))
+        return redirect(url_for('main.overview'))
 
 # 股票分类CRUD路由
 @bp.route('/api/stock-categories', methods=['POST'])
@@ -1482,6 +1559,89 @@ def export_transactions():
         return redirect(url_for('main.transactions'))
 
 
+@bp.route('/api/v1/transactions/<int:transaction_id>', methods=['DELETE'])
+def delete_transaction(transaction_id):
+    """删除单个交易记录"""
+    try:
+        # 查找交易记录
+        transaction = Transaction.query.get_or_404(transaction_id)
+        
+        # 删除交易
+        db.session.delete(transaction)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '交易记录删除成功'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@bp.route('/api/v1/transactions/<int:transaction_id>', methods=['GET'])
+def get_transaction(transaction_id):
+    """获取单个交易记录"""
+    try:
+        transaction = Transaction.query.get_or_404(transaction_id)
+        return jsonify({
+            'success': True,
+            'transaction': transaction.to_dict()
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@bp.route('/api/v1/transactions/<int:transaction_id>', methods=['PUT'])
+def update_transaction(transaction_id):
+    """更新单个交易记录"""
+    try:
+        transaction = Transaction.query.get_or_404(transaction_id)
+        data = request.get_json()
+        
+        # 更新字段
+        if 'trade_date' in data:
+            from datetime import datetime
+            transaction.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
+        if 'type' in data:
+            transaction.type = data['type']
+        if 'stock' in data:
+            transaction.stock = data['stock']
+        if 'quantity' in data:
+            transaction.quantity = float(data['quantity']) if data['quantity'] else 0
+        if 'price' in data:
+            transaction.price = float(data['price']) if data['price'] else 0
+        if 'currency' in data:
+            transaction.currency = data['currency']
+        if 'fee' in data:
+            transaction.fee = float(data['fee']) if data['fee'] else 0
+        if 'account_id' in data:
+            transaction.account_id = data['account_id']
+        if 'notes' in data:
+            transaction.notes = data['notes']
+        if 'amount' in data:
+            transaction.amount = float(data['amount']) if data['amount'] else None
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '交易记录更新成功',
+            'transaction': transaction.to_dict()
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @bp.route('/api/accounts/<int:account_id>/transactions', methods=['DELETE'])
 def delete_account_transactions(account_id):
     """删除指定账户的所有交易记录"""
@@ -1576,20 +1736,18 @@ def import_csv_api():
                     db.session.add(stock_cache)
                     db.session.flush()
                 
-                # 创建交易记录
-                transaction = Transaction(
+                # 创建交易记录 - 使用统一函数
+                transaction = save_transaction_record(
                     account_id=account_id,
-                    stock=stock_symbol,
-                    type=transaction_type,
+                    transaction_type=transaction_type,
                     quantity=quantity,
                     price=price,
+                    currency=currency,
+                    stock=stock_symbol,
                     fee=fee,
                     trade_date=trade_date,
-                    currency=currency,
                     notes=notes
                 )
-                
-                db.session.add(transaction)
                 imported_count += 1
                 
             except Exception as e:

@@ -37,8 +37,12 @@ def csv_preview():
         return jsonify({'success': False, 'error': _('Invalid file format. Only CSV files are allowed.')}), 400
     
     try:
+        # 使用通用的分隔符检测
+        from app.utils.csv_utils import detect_csv_delimiter_from_fileobj
+        delimiter = detect_csv_delimiter_from_fileobj(file)
+        
         # 读取CSV文件
-        df = pd.read_csv(file, encoding='utf-8-sig')  # 处理BOM
+        df = pd.read_csv(file, encoding='utf-8-sig', sep=delimiter)
         
         if df.empty:
             return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
@@ -117,6 +121,9 @@ def import_csv_with_mapping():
     import os
     from app.models.transaction import Transaction
     
+    # 重置日期格式检测，确保每次导入都重新检测
+    reset_date_format_detection()
+    
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': _('No data provided')}), 400
@@ -140,7 +147,11 @@ def import_csv_with_mapping():
         if not os.path.exists(temp_file_path):
             return jsonify({'success': False, 'error': _('Session expired, please upload the file again')}), 400
         
-        df = pd.read_csv(temp_file_path, encoding='utf-8-sig')
+        # 使用通用的分隔符检测
+        from app.utils.csv_utils import detect_csv_delimiter_from_file
+        delimiter = detect_csv_delimiter_from_file(temp_file_path)
+        
+        df = pd.read_csv(temp_file_path, encoding='utf-8-sig', sep=delimiter)
         
         # 处理数据
         transactions_data, processing_errors = process_csv_with_mapping(df, column_mappings)
@@ -168,6 +179,7 @@ def import_csv_with_mapping():
                 currency = row_data.get('currency', 'USD')
                 fee = row_data.get('fee', 0)
                 notes = row_data.get('notes', '')
+                amount = row_data.get('amount', None)
                 
                 if Transaction.is_duplicate(
                     account_id=account_id,
@@ -191,6 +203,7 @@ def import_csv_with_mapping():
                     stock=stock,
                     quantity=quantity,
                     price=price,
+                    amount=amount,
                     currency=currency,
                     fee=fee,
                     notes=notes
@@ -208,8 +221,11 @@ def import_csv_with_mapping():
         
         # 保存格式映射以备将来使用
         if created_count > 0:
-            # 重新读取CSV以获取原始headers
-            df_headers = pd.read_csv(temp_file_path, encoding='utf-8-sig', nrows=0)
+            # 重新读取CSV以获取原始headers，使用相同的分隔符检测逻辑
+            from app.utils.csv_utils import detect_csv_delimiter_from_file
+            delimiter = detect_csv_delimiter_from_file(temp_file_path)
+            
+            df_headers = pd.read_csv(temp_file_path, encoding='utf-8-sig', nrows=0, sep=delimiter)
             original_headers = df_headers.columns.tolist()
             
             # 如果用户没有输入格式名称，自动生成一个友好的名称
@@ -248,10 +264,37 @@ def import_csv_with_mapping():
 
 def process_csv_with_mapping(df, column_mappings):
     """使用用户映射处理CSV数据"""
+    global _detected_date_format
+    _detected_date_format = None  # 重置日期格式检测
+    
     transactions = []
     processing_errors = []
     
     print(f"DEBUG: Processing {len(df)} rows with mappings: {column_mappings}")
+    print(f"DEBUG: Available DataFrame columns: {df.columns.tolist()}")
+    
+    # 验证映射的列是否存在于DataFrame中
+    missing_columns = []
+    for field, column_name in column_mappings.items():
+        if column_name and column_name not in df.columns:
+            missing_columns.append(f"'{column_name}' (mapped from {field})")
+    
+    if missing_columns:
+        error_msg = f"Missing columns in CSV: {', '.join(missing_columns)}"
+        print(f"ERROR: {error_msg}")
+        return [], [error_msg]
+    
+    # 预先收集所有日期样本用于格式检测
+    date_samples = []
+    if 'date' in column_mappings and column_mappings['date']:
+        for index, row in df.iterrows():
+            date_str = str(row[column_mappings['date']]).strip()
+            if date_str and date_str.lower() not in ['nan', 'none', '']:
+                date_samples.append(date_str)
+        
+        # 检测日期格式
+        if date_samples:
+            _detected_date_format = detect_date_format(date_samples)
     
     for index, row in df.iterrows():
         row_num = index + 2
@@ -263,7 +306,7 @@ def process_csv_with_mapping(df, column_mappings):
             if 'date' in column_mappings and column_mappings['date']:
                 date_str = str(row[column_mappings['date']]).strip()
                 print(f"DEBUG: Row {row_num} - Date string: '{date_str}'")
-                trade_date = parse_date(date_str)
+                trade_date = parse_date(date_str, date_samples)
                 if not trade_date:
                     processing_errors.append(f"Row {row_num}: Invalid date '{date_str}'")
                     continue
@@ -285,52 +328,159 @@ def process_csv_with_mapping(df, column_mappings):
                 processing_errors.append(f"Row {row_num}: No type mapping")
                 continue
             
-            # 股票代码
+            # 股票代码 - 只对股票交易类型要求股票代码
+            requires_symbol = transaction_type in ['BUY', 'SELL', 'DIVIDEND']
+            
             if 'symbol' in column_mappings and column_mappings['symbol']:
                 symbol = str(row[column_mappings['symbol']]).strip().upper()
                 print(f"DEBUG: Row {row_num} - Symbol: '{symbol}'")
-                if not symbol or symbol == 'NAN':
-                    processing_errors.append(f"Row {row_num}: Invalid symbol '{symbol}'")
+                if symbol and symbol != 'NAN':
+                    row_data['stock'] = symbol
+                elif requires_symbol:
+                    processing_errors.append(f"Row {row_num}: Invalid symbol '{symbol}' for transaction type '{transaction_type}'")
                     continue
-                row_data['stock'] = symbol
+                else:
+                    row_data['stock'] = None  # 对于现金交易不设置股票代码
             else:
-                processing_errors.append(f"Row {row_num}: No symbol mapping")
-                continue
+                if requires_symbol:
+                    processing_errors.append(f"Row {row_num}: No symbol mapping for transaction type '{transaction_type}'")
+                    continue
+                else:
+                    row_data['stock'] = None  # 对于现金交易不设置股票代码
             
-            # 数量和价格
+            # 处理amount字段（现金交易的总金额）
+            amount_value = None
+            if 'amount' in column_mappings and column_mappings['amount']:
+                amount_str = str(row[column_mappings['amount']]).replace(',', '').replace('$', '')
+                print(f"DEBUG: Row {row_num} - Amount string: '{amount_str}'")
+                if amount_str and amount_str.lower() not in ['nan', '', 'none']:
+                    try:
+                        amount_value = abs(float(amount_str))
+                        row_data['amount'] = amount_value
+                    except (ValueError, TypeError):
+                        amount_value = None
+
+            # 数量和价格处理 - 根据交易类型决定逻辑
             try:
-                if 'quantity' in column_mappings and column_mappings['quantity']:
-                    quantity_str = str(row[column_mappings['quantity']]).replace(',', '').replace('$', '')
-                    print(f"DEBUG: Row {row_num} - Quantity string: '{quantity_str}'")
-                    quantity = float(quantity_str)
-                    row_data['quantity'] = quantity
+                if transaction_type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST']:
+                    # 现金交易：优先使用amount值，quantity和price可选
+                    if amount_value is not None:
+                        # 有amount值时，quantity和price可以为0（表示不使用）
+                        if 'quantity' in column_mappings and column_mappings['quantity']:
+                            quantity_str = str(row[column_mappings['quantity']]).replace(',', '').replace('$', '')
+                            if quantity_str and quantity_str.lower() not in ['nan', '', 'none']:
+                                row_data['quantity'] = abs(float(quantity_str))
+                            else:
+                                row_data['quantity'] = 0  # 可以为0
+                        else:
+                            row_data['quantity'] = 0
+                        
+                        if 'price' in column_mappings and column_mappings['price']:
+                            price_str = str(row[column_mappings['price']]).replace(',', '').replace('$', '')
+                            if price_str and price_str.lower() not in ['nan', '', 'none']:
+                                row_data['price'] = abs(float(price_str))
+                            else:
+                                row_data['price'] = 0  # 可以为0
+                        else:
+                            row_data['price'] = 0
+                    else:
+                        # 没有amount值时，使用传统的quantity*price逻辑
+                        if 'quantity' in column_mappings and column_mappings['quantity']:
+                            quantity_str = str(row[column_mappings['quantity']]).replace(',', '').replace('$', '')
+                            if quantity_str and quantity_str.lower() not in ['nan', '', 'none']:
+                                row_data['quantity'] = abs(float(quantity_str))
+                            else:
+                                row_data['quantity'] = 1.0
+                        else:
+                            row_data['quantity'] = 1.0
+                        
+                        if 'price' in column_mappings and column_mappings['price']:
+                            price_str = str(row[column_mappings['price']]).replace(',', '').replace('$', '')
+                            if price_str and price_str.lower() not in ['nan', '', 'none']:
+                                row_data['price'] = abs(float(price_str))
+                            else:
+                                row_data['price'] = 1.0
+                        else:
+                            row_data['price'] = 1.0
                 else:
-                    processing_errors.append(f"Row {row_num}: No quantity mapping")
-                    continue
-                
-                if 'price' in column_mappings and column_mappings['price']:
-                    price_str = str(row[column_mappings['price']]).replace(',', '').replace('$', '')
-                    print(f"DEBUG: Row {row_num} - Price string: '{price_str}'")
-                    price = float(price_str)
-                    row_data['price'] = price
-                else:
-                    processing_errors.append(f"Row {row_num}: No price mapping")
-                    continue
+                    # 股票交易：必须有quantity和price，忽略amount
+                    if 'quantity' in column_mappings and column_mappings['quantity']:
+                        quantity_str = str(row[column_mappings['quantity']]).replace(',', '').replace('$', '')
+                        print(f"DEBUG: Row {row_num} - Quantity string: '{quantity_str}'")
+                        if quantity_str and quantity_str.lower() not in ['nan', '', 'none']:
+                            row_data['quantity'] = abs(float(quantity_str))
+                        else:
+                            processing_errors.append(f"Row {row_num}: Invalid quantity for stock transaction")
+                            continue
+                    else:
+                        processing_errors.append(f"Row {row_num}: Quantity required for stock transaction")
+                        continue
+                    
+                    if 'price' in column_mappings and column_mappings['price']:
+                        price_str = str(row[column_mappings['price']]).replace(',', '').replace('$', '')
+                        print(f"DEBUG: Row {row_num} - Price string: '{price_str}'")
+                        if price_str and price_str.lower() not in ['nan', '', 'none']:
+                            row_data['price'] = abs(float(price_str))
+                        else:
+                            processing_errors.append(f"Row {row_num}: Invalid price for stock transaction")
+                            continue
+                    else:
+                        processing_errors.append(f"Row {row_num}: Price required for stock transaction")
+                        continue
+                    
+                    # 股票交易不使用amount字段
+                    row_data['amount'] = None
                     
             except (ValueError, TypeError) as e:
                 processing_errors.append(f"Row {row_num}: Invalid number format - {str(e)}")
                 continue
             
             # 可选字段
-            # 货币
+            # 货币 - 优先从专门的货币列获取，否则从描述字段中智能提取
+            currency = 'USD'  # 默认值
+            
             if 'currency' in column_mappings and column_mappings['currency']:
                 curr_str = str(row[column_mappings['currency']]).strip().upper()
-                if curr_str and curr_str != 'NAN' and len(curr_str) == 3:
-                    row_data['currency'] = curr_str
+                if curr_str and curr_str != 'NAN':
+                    # 如果是标准的3位货币代码，直接使用
+                    if len(curr_str) == 3 and curr_str.isalpha():
+                        currency = curr_str
+                    else:
+                        # 否则从文本中智能提取货币（如 "CAD RRSP" -> "CAD"）
+                        if 'CAD' in curr_str or 'CANADIAN' in curr_str:
+                            currency = 'CAD'
+                        elif 'USD' in curr_str or 'US ' in curr_str or 'AMERICAN' in curr_str:
+                            currency = 'USD'
+                        elif 'EUR' in curr_str or 'EURO' in curr_str:
+                            currency = 'EUR'
+                        print(f"DEBUG: Row {row_num} - Extracted currency '{currency}' from currency field: '{curr_str[:50]}...'")
                 else:
-                    row_data['currency'] = 'USD'
+                    print(f"DEBUG: Row {row_num} - Empty currency field, using default USD")
             else:
-                row_data['currency'] = 'USD'
+                # 从描述字段中智能提取货币
+                description_text = ''
+                if 'description' in column_mappings and column_mappings['description']:
+                    description_text = str(row[column_mappings['description']]).strip().upper()
+                
+                # 检查账户描述字段
+                account_desc = ''
+                if 'account_desc' in column_mappings and column_mappings['account_desc']:
+                    account_desc = str(row[column_mappings['account_desc']]).strip().upper()
+                
+                # 合并所有可能包含货币信息的文本
+                combined_text = f"{description_text} {account_desc}".strip()
+                
+                # 检测货币代码
+                if 'CAD' in combined_text or 'CANADIAN' in combined_text:
+                    currency = 'CAD'
+                elif 'USD' in combined_text or 'US ' in combined_text or 'AMERICAN' in combined_text:
+                    currency = 'USD'
+                elif 'EUR' in combined_text or 'EURO' in combined_text:
+                    currency = 'EUR'
+                
+                print(f"DEBUG: Row {row_num} - Detected currency '{currency}' from text: '{combined_text[:50]}...'")
+            
+            row_data['currency'] = currency
             
             # 手续费
             if 'fee' in column_mappings and column_mappings['fee']:
@@ -362,6 +512,9 @@ def process_csv_with_mapping(df, column_mappings):
             error_msg = f"Row {row_num}: Unexpected error - {str(e)}"
             processing_errors.append(error_msg)
             print(f"ERROR: {error_msg}")
+            print(f"DEBUG: Exception type: {type(e).__name__}")
+            print(f"DEBUG: Available columns: {df.columns.tolist()}")
+            print(f"DEBUG: Column mappings: {column_mappings}")
             continue
     
     print(f"DEBUG: Processed {len(transactions)} valid transactions out of {len(df)} rows")
@@ -553,6 +706,11 @@ def smart_header_mapping(headers):
             '货币', '币种', 'moneda', 'währung',
             'currency_code', 'ccy_code'
         ],
+        'amount': [
+            'amount', 'total', 'total_amount', 'cash_amount', 'principal',
+            '金额', '总额', '本金', 'cantidad', 'betrag',
+            'gross_amount', 'net_amount', 'transaction_amount'
+        ],
         'fee': [
             'fee', 'commission', 'fees', 'charges', 'cost',
             '手续费', '佣金', '费用', 'comisión', 'gebühr',
@@ -562,6 +720,11 @@ def smart_header_mapping(headers):
             'notes', 'description', 'comment', 'memo', 'remark',
             '备注', '说明', '描述', 'notas', 'notiz',
             'order_description', 'transaction_description'
+        ],
+        'account_desc': [
+            'account_description', 'account_desc', 'account_name', 'account_type',
+            '账户描述', '账户名称', '账户类型', 'descripción_cuenta', 'kontobeschreibung',
+            'account', 'acct_desc', 'acct_name', 'portfolio'
         ]
     }
     
@@ -578,132 +741,128 @@ def smart_header_mapping(headers):
     return mapping
 
 def process_csv_data(df, header_mapping):
-    """处理CSV数据，标准化格式"""
-    transactions = []
-    processing_errors = []
+    """处理CSV数据，标准化格式（委托给统一的处理函数）"""
+    # 将header_mapping格式转换为column_mappings格式
+    column_mappings = {}
     
-    for index, row in df.iterrows():
-        row_num = index + 2
-        try:
-            # 解析日期
-            if 'date' not in header_mapping:
-                processing_errors.append(f"Row {row_num}: No date column mapped")
-                continue
-                
-            date_str = str(row[header_mapping['date']]).strip()
-            trade_date = parse_date(date_str)
-            
-            if not trade_date:
-                processing_errors.append(f"Row {row_num}: Invalid date '{date_str}'")
-                continue  # 跳过无效日期
-            
-            # 解析交易类型
-            if 'type' not in header_mapping:
-                processing_errors.append(f"Row {row_num}: No type column mapped")
-                continue
-                
-            type_str = str(row[header_mapping['type']]).strip().upper()
-            transaction_type = parse_transaction_type(type_str)
-            
-            if not transaction_type:
-                processing_errors.append(f"Row {row_num}: Invalid transaction type '{type_str}'")
-                continue  # 跳过无法识别的交易类型
-            
-            # 解析股票代码
-            if 'symbol' not in header_mapping:
-                processing_errors.append(f"Row {row_num}: No symbol column mapped")
-                continue
-                
-            symbol = str(row[header_mapping['symbol']]).strip().upper()
-            if not symbol or symbol == 'NAN':
-                processing_errors.append(f"Row {row_num}: Invalid symbol '{symbol}'")
-                continue
-            
-            # 解析数量和价格
-            try:
-                if 'quantity' not in header_mapping:
-                    processing_errors.append(f"Row {row_num}: No quantity column mapped")
-                    continue
-                if 'price' not in header_mapping:
-                    processing_errors.append(f"Row {row_num}: No price column mapped")
-                    continue
-                    
-                quantity = float(str(row[header_mapping['quantity']]).replace(',', ''))
-                price = float(str(row[header_mapping['price']]).replace(',', ''))
-            except (ValueError, TypeError) as e:
-                processing_errors.append(f"Row {row_num}: Invalid number format - {str(e)}")
-                continue  # 跳过无效数据
-            
-            # 解析货币（如果有）
-            currency = 'USD'  # 默认货币
-            if 'currency' in header_mapping and header_mapping['currency']:
-                curr_str = str(row[header_mapping['currency']]).strip().upper()
-                if curr_str and curr_str != 'NAN' and len(curr_str) == 3:
-                    currency = curr_str
-            
-            # 解析手续费（如果有）
-            fee = 0
-            if 'fee' in header_mapping and header_mapping['fee']:
-                try:
-                    fee_str = str(row[header_mapping['fee']]).replace(',', '')
-                    if fee_str and fee_str != 'nan' and fee_str != 'NAN':
-                        fee = float(fee_str)
-                except (ValueError, TypeError):
-                    fee = 0
-            
-            # 解析备注（如果有）
-            notes = ''
-            if 'notes' in header_mapping and header_mapping['notes']:
-                notes_str = str(row[header_mapping['notes']])
-                if notes_str and notes_str != 'nan' and notes_str != 'NAN':
-                    notes = notes_str.strip()
-            
-            transactions.append({
-                'row_num': row_num,  # Excel行号（从1开始，加上表头行）
-                'trade_date': trade_date,
-                'type': transaction_type,
-                'stock': symbol,
-                'quantity': quantity,
-                'price': price,
-                'currency': currency,
-                'fee': fee,
-                'notes': notes
-            })
-            
-        except Exception as e:
-            error_msg = f"Row {row_num}: Unexpected error - {str(e)}"
-            processing_errors.append(error_msg)
-            print(f"ERROR: {error_msg}")
-            continue
+    # 映射字段名称
+    field_name_mapping = {
+        'date': 'date',
+        'type': 'type', 
+        'symbol': 'symbol',
+        'quantity': 'quantity',
+        'price': 'price',
+        'currency': 'currency',
+        'fee': 'fee',
+        'notes': 'notes'
+    }
     
-    return transactions, processing_errors
+    for field, column_name in header_mapping.items():
+        if field in field_name_mapping and column_name:
+            column_mappings[field_name_mapping[field]] = column_name
+    
+    # 调用统一的处理函数
+    return process_csv_with_mapping(df, column_mappings)
 
-def parse_date(date_str):
-    """智能解析日期"""
-    if not date_str or date_str.lower() in ['nan', 'none', '']:
+# 全局变量来缓存检测到的日期格式
+_detected_date_format = None
+
+def reset_date_format_detection():
+    """重置日期格式检测"""
+    global _detected_date_format
+    _detected_date_format = None
+
+def detect_date_format(date_samples):
+    """检测CSV文件中的日期格式"""
+    print(f"DEBUG: Detecting date format from samples: {date_samples[:5]}")
+    
+    # 常见日期格式，按优先级排序
+    date_formats = [
+        '%d/%m/%Y',  # 01/11/2024 = 2024年11月1日 (European format)
+        '%m/%d/%Y',  # 01/11/2024 = 2024年1月11日 (US format)
+        '%Y/%m/%d',  # 2024/01/11
+        '%d-%m-%Y',  # 01-11-2024
+        '%m-%d-%Y',  # 01-11-2024
+        '%Y-%m-%d',  # 2024-01-11
+        '%d.%m.%Y',  # 01.11.2024
+        '%m.%d.%Y',  # 01.11.2024
+        '%Y.%m.%d',  # 2024.01.11
+    ]
+    
+    format_scores = {}
+    
+    for fmt in date_formats:
+        successful_parses = 0
+        valid_dates = []
+        
+        for sample in date_samples[:10]:  # 检查前10个样本
+            if not sample or str(sample).lower() in ['nan', 'none', '']:
+                continue
+                
+            try:
+                parsed_date = datetime.strptime(str(sample).strip(), fmt)
+                # 检查日期是否合理（比如在1970-2030年范围内）
+                if 1970 <= parsed_date.year <= 2030:
+                    successful_parses += 1
+                    valid_dates.append(parsed_date)
+            except ValueError:
+                continue
+        
+        if successful_parses > 0:
+            format_scores[fmt] = successful_parses
+            print(f"DEBUG: Format {fmt} successfully parsed {successful_parses} dates")
+    
+    if not format_scores:
+        print("DEBUG: No date format detected")
         return None
     
-    # 常见日期格式
-    date_formats = [
+    # 选择成功解析最多样本的格式
+    best_format = max(format_scores.items(), key=lambda x: x[1])[0]
+    print(f"DEBUG: Best date format detected: {best_format}")
+    return best_format
+
+def parse_date(date_str, all_dates=None):
+    """智能解析日期，支持格式自动检测"""
+    global _detected_date_format
+    
+    if not date_str or str(date_str).lower() in ['nan', 'none', '']:
+        return None
+    
+    date_str = str(date_str).strip()
+    
+    # 如果还没有检测到格式，且提供了所有日期样本，则检测格式
+    if _detected_date_format is None and all_dates:
+        _detected_date_format = detect_date_format(all_dates)
+    
+    # 如果检测到了格式，优先使用
+    if _detected_date_format:
+        try:
+            return datetime.strptime(date_str, _detected_date_format).date()
+        except ValueError:
+            print(f"DEBUG: Failed to parse '{date_str}' with detected format {_detected_date_format}")
+    
+    # 如果检测格式失败，回退到逐个尝试
+    fallback_formats = [
+        '%d/%m/%Y',  # 优先使用欧洲格式
         '%Y-%m-%d',
         '%m/%d/%Y',
-        '%d/%m/%Y',
         '%Y/%m/%d',
-        '%m-%d-%Y',
         '%d-%m-%Y',
-        '%Y.%m.%d',
-        '%m.%d.%Y',
+        '%m-%d-%Y',
         '%d.%m.%Y',
+        '%m.%d.%Y',
+        '%Y.%m.%d',
         '%Y年%m月%d日',
         '%m月%d日%Y年'
     ]
     
-    for fmt in date_formats:
+    for fmt in fallback_formats:
         try:
             return datetime.strptime(date_str, fmt).date()
         except ValueError:
             continue
     
+    print(f"DEBUG: Failed to parse date '{date_str}' with any format")
     return None
 
 def parse_transaction_type(type_str):
@@ -712,15 +871,48 @@ def parse_transaction_type(type_str):
         return None
     
     type_str = type_str.upper().strip()
+    print(f"DEBUG: parse_transaction_type - Input: '{type_str}'")
     
+    # 买入关键词
     buy_keywords = ['BUY', 'BOUGHT', 'PURCHASE', 'LONG', '买入', '买', 'COMPRA', 'KAUF']
+    # 卖出关键词  
     sell_keywords = ['SELL', 'SOLD', 'SALE', 'SHORT', '卖出', '卖', 'VENTA', 'VERKAUF']
+    # 分红关键词
+    dividend_keywords = ['DIVIDEND', 'DIV', 'DIVIDENDE', '分红', '股息', 'DISTRIBUTION', 'DIST']
+    # 利息关键词
+    interest_keywords = ['INTEREST', 'INT', '利息', 'ZINSEN', 'INTERÉS']
+    # 存款/转入关键词 (包括CONTRIBUTION)
+    deposit_keywords = ['DEPOSIT', 'TRANSFER IN', 'CASH RECEIPT', 'CONTRIBUTION', '存入', '转入', 'DEPÓSITO', 'EINZAHLUNG']
+    # 取款/转出关键词
+    withdrawal_keywords = ['WITHDRAWAL', 'TRANSFER OUT', 'CASH PAYMENT', '取出', '转出', 'RETIRO', 'AUSZAHLUNG']
+    # 费用关键词
+    fee_keywords = ['FEE', 'CHARGE', 'COMMISSION', '费用', '手续费', 'GEBÜHR', 'CARGO']
     
-    if any(keyword in type_str for keyword in buy_keywords):
+    # 按优先级检查各种交易类型
+    if any(keyword in type_str for keyword in dividend_keywords):
+        print(f"DEBUG: parse_transaction_type - Matched DIVIDEND for '{type_str}'")
+        return 'DIVIDEND'
+    elif any(keyword in type_str for keyword in interest_keywords):
+        print(f"DEBUG: parse_transaction_type - Matched INTEREST for '{type_str}'")
+        return 'INTEREST'  
+    elif any(keyword in type_str for keyword in deposit_keywords):
+        print(f"DEBUG: parse_transaction_type - Matched DEPOSIT for '{type_str}'")
+        return 'DEPOSIT'
+    elif any(keyword in type_str for keyword in withdrawal_keywords):
+        print(f"DEBUG: parse_transaction_type - Matched WITHDRAWAL for '{type_str}'")
+        return 'WITHDRAWAL'
+    elif any(keyword in type_str for keyword in fee_keywords):
+        print(f"DEBUG: parse_transaction_type - Matched FEE for '{type_str}'")
+        return 'FEE'
+    elif any(keyword in type_str for keyword in buy_keywords):
+        print(f"DEBUG: parse_transaction_type - Matched BUY for '{type_str}'")
         return 'BUY'
     elif any(keyword in type_str for keyword in sell_keywords):
+        print(f"DEBUG: parse_transaction_type - Matched SELL for '{type_str}'")
         return 'SELL'
     
+    # 如果没有匹配到，返回None表示无效类型
+    print(f"DEBUG: parse_transaction_type - Unknown transaction type '{type_str}' - please add mapping")
     return None
 
 @bp.route('/accounts/<int:account_id>/transactions/import-csv', methods=['POST'])
