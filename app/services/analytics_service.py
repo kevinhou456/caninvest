@@ -217,7 +217,6 @@ class AnalyticsService:
             self.exchange_rate = Decimal(str(exchange_rate))
         else:
             self.exchange_rate = exchange_rate
-        self._cache = {}
         
     def get_time_period_dates(self, period: TimePeriod, 
                             start_date: Optional[date] = None,
@@ -274,11 +273,7 @@ class AnalyticsService:
         Returns:
             PortfolioMetrics对象
         """
-        # 生成缓存键
-        cache_key = f"portfolio_metrics_{family_id}_{member_id}_{account_id}_{period.value}_{start_date}_{end_date}"
-        
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        # 直接计算，不使用缓存
         
         # 获取时间范围
         period_start, period_end = self.get_time_period_dates(period, start_date, end_date)
@@ -291,7 +286,6 @@ class AnalyticsService:
         metrics.exchange_rate = self.exchange_rate
         
         if not accounts:
-            self._cache[cache_key] = metrics
             return metrics
         
         # 计算各项指标（注意：_calculate_assets需要在_calculate_holdings之后调用）
@@ -305,7 +299,6 @@ class AnalyticsService:
         self._calculate_fees(metrics, accounts, period_start, period_end)
         self._calculate_account_stats(metrics, accounts)
         
-        self._cache[cache_key] = metrics
         return metrics
     
     def _get_filtered_accounts(self, family_id: int, member_id: Optional[int], account_id: Optional[int]) -> list:
@@ -706,33 +699,16 @@ class AnalyticsService:
         
         metrics.account_stats = account_stats
     
-    def _get_current_stock_price(self, symbol: str) -> Optional[Decimal]:
-        """获取股票当前价格"""
-        # 首先尝试从股票缓存获取当前价格
-        stock_cache = StocksCache.query.filter_by(symbol=symbol).first()
-        if stock_cache and stock_cache.current_price:
-            return Decimal(str(stock_cache.current_price))
-        
-        # 然后尝试通过stock_id查找价格缓存
-        if stock_cache:
-            price_cache = StockPriceCache.query.filter_by(
-                stock_id=stock_cache.id,
-                price_type='current'
-            ).order_by(StockPriceCache.last_updated.desc()).first()
-            
-            if price_cache and not price_cache.is_expired:
-                return Decimal(str(price_cache.price))
-        
-        # 最后从最近的交易记录中获取价格作为fallback
-        recent_transaction = Transaction.query.filter_by(stock=symbol).order_by(
-            Transaction.trade_date.desc()
-        ).first()
-        
-        if recent_transaction and recent_transaction.price:
-            return Decimal(str(recent_transaction.price))
-        
-        # 如果都没有找到，返回None
-        return None
+    def _get_current_stock_price(self, symbol: str, currency: str) -> Optional[Decimal]:
+        """获取股票当前价格 - 使用统一的缓存机制"""
+        try:
+            from app.services.stock_price_service import StockPriceService
+            price_service = StockPriceService()
+            price = price_service.get_cached_stock_price(symbol, currency)
+            return price if price > 0 else None
+        except Exception as e:
+            print(f"Failed to get stock price for {symbol}: {e}")
+            return None
     
     def get_performance_summary(self, family_id: int, periods: list = None) -> Dict:
         """
@@ -818,8 +794,7 @@ class AnalyticsService:
         return 'Unknown'
     
     def clear_cache(self):
-        """清除缓存"""
-        self._cache.clear()
+        """清空持仓服务缓存（analytics不再使用缓存）"""
         # 同时清除HoldingsService的缓存
         holdings_service.clear_cache()
 

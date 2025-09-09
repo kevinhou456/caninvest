@@ -136,12 +136,95 @@ def overview():
                              current_view='overview')
         
     except Exception as e:
-        # 如果新服务出错，回退到基本仪表板
+        # 如果新服务出错，尝试直接使用portfolio service获取数据
         import logging
         import traceback
         logging.error(f"Dashboard analytics error: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         
+        # 尝试直接调用portfolio service获取holdings
+        try:
+            from app.services.portfolio_service import PortfolioService
+            portfolio_service = PortfolioService()
+            
+            # 获取账户
+            if account_id:
+                accounts = Account.query.filter_by(id=account_id, family_id=family.id).all()
+                filter_description = f"账户: {accounts[0].name}" if accounts else "未找到账户"
+            elif member_id:
+                from app.models.account import AccountMember
+                member_accounts = AccountMember.query.filter_by(member_id=member_id).all()
+                account_ids = [am.account_id for am in member_accounts]
+                accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
+                
+                from app.models.member import Member
+                member = Member.query.get(member_id)
+                filter_description = f"成员: {member.name}" if member else "未找到成员"
+            else:
+                accounts = Account.query.filter_by(family_id=family.id).all()
+                filter_description = "全部成员"
+            
+            if accounts:
+                account_ids = [acc.id for acc in accounts]
+                
+                # 直接调用portfolio service获取summary
+                portfolio_summary = portfolio_service.get_portfolio_summary(account_ids)
+                holdings = portfolio_summary.get('holdings', [])
+                cleared_holdings = portfolio_summary.get('cleared_holdings', [])
+                
+                logging.info(f"Portfolio service fallback succeeded: {len(holdings)} holdings, {len(cleared_holdings)} cleared holdings")
+                
+                # 创建简单metrics对象
+                class SimpleMetrics:
+                    def __init__(self):
+                        self.total_assets = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                        self.total_return = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                        self.realized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                        self.unrealized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                        self.total_dividends = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                        self.total_interest = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                        self.total_deposits = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                        self.total_withdrawals = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                
+                simple_metrics = SimpleMetrics()
+                
+                # 获取统计数据
+                from app.models.member import Member
+                members_count = Member.query.filter_by(family_id=family.id).count()
+                transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count()
+                
+                stats = {
+                    'members_count': members_count,
+                    'accounts_count': len(accounts),
+                    'transactions_count': transactions_count,
+                    'stocks_count': StocksCache.query.count(),
+                    'pending_imports': 0,
+                    'pending_ocr': 0
+                }
+                
+                recent_transactions = Transaction.query.filter(
+                    Transaction.account_id.in_(account_ids)
+                ).order_by(Transaction.trade_date.desc()).limit(8).all()
+                
+                return render_template('investment/overview.html',
+                                     title=_('Overview'),
+                                     family=family,
+                                     stats=stats,
+                                     metrics=simple_metrics,
+                                     holdings=holdings,
+                                     cleared_holdings=cleared_holdings,
+                                     exchange_rates=None,
+                                     recent_transactions=recent_transactions,
+                                     filter_description=filter_description,
+                                     current_period=time_period,
+                                     member_id=member_id,
+                                     account_id=account_id,
+                                     current_view='overview')
+            
+        except Exception as e2:
+            logging.error(f"Portfolio service fallback failed: {e2}")
+            
+        # 最终回退
         # 基本统计信息  
         from app.models.member import Member
         from app.models.account import AccountMember
@@ -171,6 +254,7 @@ def overview():
                              stats=stats,
                              metrics=None,
                              holdings=[],
+                             cleared_holdings=[],
                              exchange_rates=None,
                              recent_transactions=recent_transactions,
                              filter_description="全部成员",
@@ -364,14 +448,31 @@ def transactions():
     try:
         page = request.args.get('page', 1, type=int)
         account_id = request.args.get('account_id', type=int)
+        member_id = request.args.get('member_id', type=int)  # 新增成员筛选
         type_filter = request.args.get('type')
+        stock_symbol = request.args.get('stock')  # 股票筛选
         
         # 构建查询
         query = Transaction.query
-        if account_id:
+        
+        # 如果指定了成员ID，获取该成员的所有账户
+        if member_id:
+            member_accounts = db.session.query(Account.id).join(AccountMember).filter(
+                AccountMember.member_id == member_id
+            ).all()
+            account_ids = [acc.id for acc in member_accounts]
+            if account_ids:
+                query = query.filter(Transaction.account_id.in_(account_ids))
+            else:
+                # 如果成员没有账户，返回空结果
+                query = query.filter(Transaction.id == -1)
+        elif account_id:
             query = query.filter(Transaction.account_id == account_id)
+            
         if type_filter:
             query = query.filter(Transaction.type == type_filter)
+        if stock_symbol:
+            query = query.filter(Transaction.stock == stock_symbol)
         
         # 执行分页查询
         transactions = query.order_by(Transaction.trade_date.desc()).paginate(

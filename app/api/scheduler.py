@@ -36,14 +36,25 @@ def trigger_price_update():
         price_service = StockPriceService()
         
         if symbols:
-            # 更新指定股票
-            results = price_service.update_stock_prices(symbols)
+            # 更新指定股票 - 需要查找对应的currency信息
+            symbol_currency_pairs = []
+            for symbol in symbols:
+                # 查找该symbol的所有可能的currency组合
+                stocks = StocksCache.query.filter_by(symbol=symbol).all()
+                if stocks:
+                    for stock in stocks:
+                        symbol_currency_pairs.append((stock.symbol, stock.currency))
+                else:
+                    # 如果没有找到，尝试用默认货币USD
+                    symbol_currency_pairs.append((symbol, 'USD'))
+            
+            results = price_service.update_prices_for_symbols(symbol_currency_pairs)
         else:
             # 更新需要更新的股票
             stocks_needing_update = StocksCache.get_stocks_needing_update()
             if stocks_needing_update:
-                symbols_to_update = [stock.symbol for stock in stocks_needing_update[:20]]
-                results = price_service.update_stock_prices(symbols_to_update)
+                symbol_currency_pairs = [(stock.symbol, stock.currency) for stock in stocks_needing_update[:20]]
+                results = price_service.update_prices_for_symbols(symbol_currency_pairs)
             else:
                 results = {
                     'updated': 0,

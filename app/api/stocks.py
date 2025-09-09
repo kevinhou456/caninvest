@@ -10,6 +10,7 @@ from app import db
 # from app.models.stock import Stock, StockCategory
 from app.models.stocks_cache import StocksCache
 from app.models.price_cache import StockPriceCache
+from app.models.transaction import Transaction
 from . import bp
 
 @bp.route('/stocks/search', methods=['GET'])
@@ -45,11 +46,120 @@ def create_stock():
     # Temporarily disabled - Stock model has been deleted
     return jsonify({'error': _('Stock creation temporarily disabled during system redesign')}), 503
 
-@bp.route('/stocks/<symbol>', methods=['PUT'])
-def update_stock(symbol):
-    """更新股票信息 - 临时禁用"""
-    # Temporarily disabled - Stock model has been deleted
-    return jsonify({'error': _('Stock updates temporarily disabled during system redesign')}), 503
+@bp.route('/stocks/<int:stock_id>', methods=['PUT'])
+def update_stock(stock_id):
+    """更新股票信息"""
+    try:
+        # 获取请求数据
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': _('No data provided')}), 400
+        
+        # 查找股票缓存记录
+        stock = StocksCache.query.get(stock_id)
+        if not stock:
+            return jsonify({'success': False, 'error': _('Stock not found')}), 404
+        
+        # 获取新的股票代码和旧的股票代码
+        old_symbol = stock.symbol
+        new_symbol = data.get('symbol', '').upper().strip()
+        
+        if not new_symbol:
+            return jsonify({'success': False, 'error': _('Stock symbol is required')}), 400
+        
+        # 只有当股票代码或货币发生变化时才检查重复
+        new_currency = data.get('currency', stock.currency)
+        if new_symbol != old_symbol or new_currency != stock.currency:
+            existing_stock = StocksCache.query.filter(
+                StocksCache.symbol == new_symbol,
+                StocksCache.currency == new_currency,
+                StocksCache.id != stock_id
+            ).first()
+            
+            if existing_stock:
+                return jsonify({'success': False, 'error': _('Stock symbol already exists for this currency')}), 400
+        
+        # 更新股票缓存记录
+        stock.symbol = new_symbol
+        stock.name = data.get('name', stock.name)
+        stock.exchange = data.get('exchange', stock.exchange)
+        stock.currency = new_currency
+        
+        # 如果股票代码发生变化，更新所有相关的交易记录
+        updated_transactions_count = 0
+        if old_symbol != new_symbol:
+            transactions = Transaction.query.filter_by(stock=old_symbol).all()
+            for transaction in transactions:
+                transaction.stock = new_symbol
+            updated_transactions_count = len(transactions)
+            print(f"Updated {updated_transactions_count} transaction records from {old_symbol} to {new_symbol}")
+        
+        # 强制刷新股票价格和信息
+        from app.services.stock_price_service import StockPriceService
+        price_service = StockPriceService()
+        
+        # 如果名称或交易所为空，或者股票代码发生变化，强制从Yahoo Finance获取最新信息
+        should_refresh_info = (not stock.name or not stock.exchange or old_symbol != new_symbol)
+        
+        if should_refresh_info:
+            print(f"强制刷新{new_symbol}({stock.currency})的价格和信息...")
+            # 强制更新价格，这会同时更新名称和交易所信息（如果当前为空）
+            price_updated = price_service.update_stock_price(new_symbol, stock.currency)
+            
+            # 重新查询更新后的股票信息
+            db.session.refresh(stock)
+            
+            if price_updated:
+                print(f"成功刷新{new_symbol}的信息: 名称={stock.name}, 交易所={stock.exchange}, 价格={stock.current_price}")
+            else:
+                print(f"无法从Yahoo Finance获取{new_symbol}的信息")
+        
+        # 重置价格更新时间，强制下次访问时重新获取价格
+        stock.price_updated_at = None
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Stock updated successfully'),
+            'updated_transactions': updated_transactions_count,
+            'refreshed_info': should_refresh_info,
+            'stock_info': {
+                'symbol': stock.symbol,
+                'name': stock.name,
+                'exchange': stock.exchange,
+                'currency': stock.currency,
+                'current_price': float(stock.current_price) if stock.current_price else None
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating stock: {str(e)}")
+        return jsonify({'success': False, 'error': _('Failed to update stock')}), 500
+
+@bp.route('/stocks/<int:stock_id>', methods=['DELETE'])
+def delete_stock(stock_id):
+    """删除股票缓存记录"""
+    try:
+        # 查找股票缓存记录
+        stock = StocksCache.query.get(stock_id)
+        if not stock:
+            return jsonify({'success': False, 'error': _('Stock not found')}), 404
+        
+        # 删除股票缓存记录（不影响交易记录）
+        db.session.delete(stock)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': _('Stock cache record deleted successfully')
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting stock: {str(e)}")
+        return jsonify({'success': False, 'error': _('Failed to delete stock')}), 500
 
 @bp.route('/stocks/<symbol>/categories', methods=['POST'])
 def add_stock_category(symbol):
@@ -74,3 +184,45 @@ def get_category_suggestions(symbol):
     """获取股票分类建议 - 临时禁用"""
     # Temporarily disabled - Stock model has been deleted
     return jsonify({'error': _('Category suggestions temporarily disabled during system redesign')}), 503
+
+@bp.route('/stocks/refresh-info', methods=['POST'])
+def refresh_stock_info():
+    """临时获取股票信息用于表单自动填充"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': _('No data provided')}), 400
+        
+        symbol = data.get('symbol', '').upper().strip()
+        currency = data.get('currency', 'USD')
+        
+        if not symbol:
+            return jsonify({'success': False, 'error': _('Stock symbol is required')}), 400
+        
+        # 使用股票价格服务获取信息
+        from app.services.stock_price_service import StockPriceService
+        price_service = StockPriceService()
+        
+        # 直接从Yahoo Finance获取信息
+        stock_data = price_service.get_stock_price(symbol)
+        
+        if stock_data:
+            return jsonify({
+                'success': True,
+                'stock_info': {
+                    'symbol': symbol,
+                    'name': stock_data.get('name', ''),
+                    'exchange': stock_data.get('exchange', ''),
+                    'currency': stock_data.get('currency', currency),
+                    'current_price': stock_data.get('price', 0)
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': _('Unable to get stock information from Yahoo Finance')
+            })
+        
+    except Exception as e:
+        print(f"Error refreshing stock info: {str(e)}")
+        return jsonify({'success': False, 'error': _('Failed to get stock information')}), 500

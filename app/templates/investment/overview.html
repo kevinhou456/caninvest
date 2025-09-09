@@ -213,7 +213,9 @@
                                             {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
                                         </div>
                                         <div>
-                                            <strong>{{ holding['symbol'] }}</strong>
+                                            <a href="{{ url_for('main.transactions', stock=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
+                                                <strong>{{ holding['symbol'] }}</strong>
+                                            </a>
                                             <br><small class="text-muted">{{ holding['sector'] or 'Unknown' }}</small>
                                         </div>
                                     </div>
@@ -274,9 +276,9 @@
                                 
                                 <!-- Return Percentage -->
                                 <td class="text-end pe-3">
-                                    <span class="badge {{ 'bg-success' if holding['unrealized_gain_percent'] >= 0 else 'bg-danger' }} return-badge">
-                                        {% if holding['unrealized_gain_percent'] >= 0 %}+{% endif %}
-                                        {{ "{:.1f}".format(holding['unrealized_gain_percent'] or 0) }}%
+                                    <span class="badge {{ 'bg-success' if holding.get('unrealized_gain_percent', 0) >= 0 else 'bg-danger' }} return-badge">
+                                        {% if holding.get('unrealized_gain_percent', 0) >= 0 %}+{% endif %}
+                                        {{ "{:.1f}".format(holding.get('unrealized_gain_percent', 0)) }}%
                                     </span>
                                 </td>
                             </tr>
@@ -338,7 +340,9 @@
                                              style="color: {{ 'black' if holding['currency'] == 'CAD' else 'white' }};">
                                             {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
                                         </div>
-                                        <strong>{{ holding['symbol'] }}</strong>
+                                        <a href="{{ url_for('main.transactions', stock=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
+                                            <strong>{{ holding['symbol'] }}</strong>
+                                        </a>
                                     </div>
                                 </td>
                                 
@@ -396,9 +400,9 @@
                                 
                                 <!-- Return Percentage -->
                                 <td class="text-end pe-3">
-                                    <span class="badge {{ 'bg-success' if holding['realized_gain_percent'] >= 0 else 'bg-danger' }} return-badge">
-                                        {% if holding['realized_gain_percent'] >= 0 %}+{% endif %}
-                                        {{ "{:.1f}".format(holding['realized_gain_percent'] or 0) }}%
+                                    <span class="badge {{ 'bg-success' if holding.get('realized_gain_percent', 0) >= 0 else 'bg-danger' }} return-badge">
+                                        {% if holding.get('realized_gain_percent', 0) >= 0 %}+{% endif %}
+                                        {{ "{:.1f}".format(holding.get('realized_gain_percent', 0)) }}%
                                     </span>
                                 </td>
                             </tr>

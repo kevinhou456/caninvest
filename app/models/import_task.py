@@ -336,21 +336,27 @@ class OCRTransactionPending(db.Model):
             return None
         
         from app.models.transaction import Transaction
-        from app.models.stock import Stock
+        from app.models.stocks_cache import StocksCache
         
-        # 获取或创建股票记录
-        stock = Stock.get_or_create(symbol=self.symbol)
+        # 确保股票缓存记录存在（用于后续价格更新）
+        currency = getattr(self, 'currency', 'CAD')  # 默认CAD，根据实际需要调整
+        stock_cache = StocksCache.get_or_create(
+            symbol=self.symbol,
+            currency=currency,
+            name=getattr(self, 'name', self.symbol)
+        )
         
-        # 创建交易记录
+        # 创建交易记录（使用新架构，直接存储stock symbol）
         transaction = Transaction(
             account_id=account_id,
-            stock_id=stock.id,
             member_id=member_id,
+            stock=self.symbol,  # 直接存储股票代码
             transaction_type=self.transaction_type,
             quantity=self.quantity,
-            price_per_share=self.price_per_share,
-            transaction_fee=self.transaction_fee or 0,
-            trade_date=self.trade_date,
+            price=self.price_per_share,
+            fee=self.transaction_fee or 0,
+            currency=currency,
+            date=self.trade_date,
             notes=f'Imported from OCR task {self.ocr_task_id}' + 
                   (f'. Review notes: {self.notes}' if self.notes else '')
         )

@@ -215,12 +215,13 @@ class PortfolioService:
             return PositionSnapshot(symbol, account_id, as_of_date)
         
         # 创建快照对象
+        # 初始化时使用默认货币，实际货币将从交易记录中获取
         snapshot = PositionSnapshot(
             symbol=symbol,
             account_id=account_id,
             as_of_date=as_of_date,
             account_name=account.name,
-            currency=account.currency
+            currency='USD'  # 默认值，将在处理交易时被实际货币覆盖
         )
         
         # 获取截止日期前的所有交易记录
@@ -243,6 +244,10 @@ class PortfolioService:
 
     def _process_transaction_fifo(self, snapshot: PositionSnapshot, tx: Transaction):
         """使用严格的FIFO原则处理交易"""
+        # 从交易记录中获取真实的货币信息
+        if tx.currency:
+            snapshot.currency = tx.currency
+            
         if tx.type == 'BUY':
             # 买入：创建新的FIFO批次
             lot = FIFOLot(
@@ -376,7 +381,7 @@ class PortfolioService:
 
     def _update_market_data(self, snapshot: PositionSnapshot):
         """更新市场数据"""
-        current_price = self._get_current_price(snapshot.symbol)
+        current_price = self._get_current_price(snapshot.symbol, snapshot.currency)
         if current_price:
             snapshot.current_price = current_price
             snapshot.current_value = snapshot.current_shares * current_price
@@ -387,24 +392,27 @@ class PortfolioService:
     
     def _update_stock_info(self, snapshot: PositionSnapshot):
         """更新股票信息"""
-        stock_info = StocksCache.query.filter_by(symbol=snapshot.symbol).first()
+        stock_info = StocksCache.query.filter_by(symbol=snapshot.symbol, currency=snapshot.currency).first()
         if stock_info:
             snapshot.company_name = stock_info.name or snapshot.symbol
             snapshot.sector = self._get_sector(stock_info)
+            # 货币信息只从交易记录中获取，不从stocks_cache中获取
     
-    def _get_current_price(self, symbol: str) -> Optional[Decimal]:
-        """获取当前价格"""
-        if symbol in self._price_cache:
-            return self._price_cache[symbol]
+    def _get_current_price(self, symbol: str, currency: str) -> Optional[Decimal]:
+        """获取当前价格 - 使用统一的缓存机制"""
+        cache_key = f"{symbol}_{currency}"
+        if cache_key in self._price_cache:
+            return self._price_cache[cache_key]
         
-        # 从股票缓存获取
-        stock_cache = StocksCache.query.filter_by(symbol=symbol).first()
-        if stock_cache and stock_cache.current_price:
-            price = Decimal(str(stock_cache.current_price))
-            self._price_cache[symbol] = price
+        try:
+            from app.services.stock_price_service import StockPriceService
+            price_service = StockPriceService()
+            price = price_service.get_cached_stock_price(symbol, currency)
+            self._price_cache[cache_key] = price
             return price
-        
-        return None
+        except Exception as e:
+            logger.error(f"Failed to get stock price for {symbol} ({currency}): {e}")
+            return Decimal('0')
     
     def _get_sector(self, stock_info) -> str:
         """获取股票行业"""

@@ -104,10 +104,11 @@ class TaskScheduler:
                 
                 # 限制同时更新的股票数量以避免API限制
                 max_updates = 20
-                symbols_to_update = [stock.symbol for stock in stocks_needing_update[:max_updates]]
+                # 获取需要更新的股票的(symbol, currency)对
+                symbol_currency_pairs = [(stock.symbol, stock.currency) for stock in stocks_needing_update[:max_updates]]
                 
                 price_service = StockPriceService()
-                results = price_service.update_stock_prices(symbols_to_update)
+                results = price_service.update_prices_for_symbols(symbol_currency_pairs)
                 
                 logger.info(f"Stock price update completed: {results}")
                 
@@ -135,10 +136,11 @@ class TaskScheduler:
                 
                 # 非交易时间可以更新更多股票
                 max_updates = 50
-                symbols_to_update = [stock.symbol for stock in stocks_needing_update[:max_updates]]
+                # 获取需要更新的股票的(symbol, currency)对
+                symbol_currency_pairs = [(stock.symbol, stock.currency) for stock in stocks_needing_update[:max_updates]]
                 
                 price_service = StockPriceService()
-                results = price_service.update_stock_prices(symbols_to_update)
+                results = price_service.update_prices_for_symbols(symbol_currency_pairs)
                 
                 logger.info(f"Stock price update completed: {results}")
                 

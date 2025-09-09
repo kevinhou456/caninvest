@@ -11,10 +11,15 @@ class StocksCache(db.Model):
     __tablename__ = 'stocks_cache'
     
     id = db.Column(db.Integer, primary_key=True)
-    symbol = db.Column(db.String(20), unique=True, nullable=False, comment='股票代码')
+    symbol = db.Column(db.String(20), nullable=False, comment='股票代码')
     name = db.Column(db.String(255), comment='股票名称')
     exchange = db.Column(db.String(50), comment='交易所')
-    currency = db.Column(db.String(10), default='USD', comment='交易货币')
+    currency = db.Column(db.String(10), nullable=False, default='USD', comment='交易货币')
+    
+    # 设置(symbol, currency)联合唯一约束
+    __table_args__ = (
+        db.UniqueConstraint('symbol', 'currency', name='unique_symbol_currency'),
+    )
     category_id = db.Column(db.Integer, db.ForeignKey('stock_categories.id'), comment='分类ID')
     current_price = db.Column(db.Numeric(15, 4), comment='当前价格')
     price_updated_at = db.Column(db.DateTime, comment='价格更新时间')
@@ -82,13 +87,14 @@ class StocksCache(db.Model):
         return True
     
     @classmethod
-    def get_or_create(cls, symbol, name=None, exchange=None):
+    def get_or_create(cls, symbol, currency='USD', name=None, exchange=None):
         """获取或创建股票缓存记录"""
-        stock = cls.query.filter_by(symbol=symbol.upper()).first()
+        stock = cls.query.filter_by(symbol=symbol.upper(), currency=currency).first()
         
         if not stock:
             stock = cls(
                 symbol=symbol.upper(),
+                currency=currency,
                 name=name,
                 exchange=exchange
             )
@@ -98,9 +104,9 @@ class StocksCache(db.Model):
         return stock
     
     @classmethod
-    def update_price(cls, symbol, price):
+    def update_price(cls, symbol, currency, price):
         """更新股票价格"""
-        stock = cls.query.filter_by(symbol=symbol.upper()).first()
+        stock = cls.query.filter_by(symbol=symbol.upper(), currency=currency).first()
         if stock:
             stock.current_price = price
             stock.price_updated_at = datetime.utcnow()

@@ -450,9 +450,10 @@ class CSVTransactionService:
     def _find_or_create_stock(self, txn_data: Dict) -> StocksCache:
         """查找或创建股票记录"""
         symbol = txn_data['symbol']
+        currency = txn_data.get('currency', 'CAD')
         
-        # 首先查找现有股票
-        stock = StocksCache.query.filter_by(symbol=symbol).first()
+        # 使用联合主键查找现有股票记录
+        stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
         
         if stock:
             return stock
@@ -460,26 +461,26 @@ class CSVTransactionService:
         # 创建新股票记录
         # 根据交易所推断市场
         exchange = txn_data.get('exchange', '')
-        currency = txn_data.get('currency', 'CAD')
         
         if not exchange:
             # 根据股票符号推断交易所
             if symbol.endswith('.TO'):
                 exchange = 'TSX'
-                currency = 'CAD'
+                currency = 'CAD'  # 确保货币一致性
             elif symbol.endswith('.V'):
                 exchange = 'TSXV'
-                currency = 'CAD'
+                currency = 'CAD'  # 确保货币一致性
             elif '.' not in symbol:
                 exchange = 'NASDAQ'
-                currency = 'USD'
+                # 保持传入的currency，不强制改为USD
             else:
                 exchange = 'UNKNOWN'
         
         stock = StocksCache(
             symbol=symbol,
             name=txn_data.get('name', symbol),
-            exchange=exchange
+            exchange=exchange,
+            currency=currency  # 重要：设置currency字段
         )
         
         # 跳过自动分类（StockCategory已删除）

@@ -351,9 +351,8 @@ class HoldingsService:
         
         for tx in transactions:
             if tx.stock not in holdings:
-                # 获取账户信息来确定币种
-                account = Account.query.get(account_id)
-                currency = account.currency if account else 'USD'
+                # 使用交易记录中的实际货币信息
+                currency = tx.currency if tx.currency else 'USD'
                 holdings[tx.stock] = AccountHolding(account_id, tx.stock, currency)
             
             holding = holdings[tx.stock]
@@ -379,7 +378,7 @@ class HoldingsService:
         
         # 设置当前价格
         for symbol, holding in holdings.items():
-            current_price = self._get_current_stock_price(symbol)
+            current_price = self._get_current_stock_price(symbol, holding.currency)
             if current_price:
                 holding.set_current_price(current_price)
         
@@ -387,22 +386,16 @@ class HoldingsService:
         return {symbol: holding for symbol, holding in holdings.items() 
                 if holding.current_shares > 0}
     
-    def _get_current_stock_price(self, symbol: str) -> Optional[Decimal]:
-        """获取股票当前价格"""
-        # 首先从股票缓存获取
-        stock_cache = StocksCache.query.filter_by(symbol=symbol).first()
-        if stock_cache and stock_cache.current_price:
-            return Decimal(str(stock_cache.current_price))
-        
-        # 从最近交易记录获取
-        recent_tx = Transaction.query.filter_by(stock=symbol).order_by(
-            Transaction.trade_date.desc()
-        ).first()
-        
-        if recent_tx and recent_tx.price:
-            return Decimal(str(recent_tx.price))
-        
-        return None
+    def _get_current_stock_price(self, symbol: str, currency: str) -> Optional[Decimal]:
+        """获取股票当前价格 - 使用统一的缓存机制"""
+        try:
+            from app.services.stock_price_service import StockPriceService
+            price_service = StockPriceService()
+            price = price_service.get_cached_stock_price(symbol, currency)
+            return price if price > 0 else None
+        except Exception as e:
+            print(f"Failed to get stock price for {symbol} ({currency}): {e}")
+            return None
     
     def get_portfolio_summary(self, 
                             target: Union[int, List[int], str] = 'all',
@@ -440,11 +433,11 @@ class HoldingsService:
                 total_unrealized_gain += Decimal(str(stock_total['unrealized_gain']))
                 total_dividends += Decimal(str(stock_total['total_dividends']))
         
-        # 获取清仓股票信息
-        # TODO: 实现清仓股票的查询逻辑
+        # 获取清仓股票信息 - 查找已经完全卖出的股票
+        cleared_holdings = self._get_cleared_holdings(target, target_type, as_of_date, family_id)
         
         return {
-            'as_of_date': as_of_date.isoformat(),
+            'as_of_date': as_of_date.isoformat() if as_of_date else date.today().isoformat(),
             'total_summary': {
                 'total_current_value': float(total_current_value),
                 'total_cost': float(total_cost),
@@ -458,6 +451,126 @@ class HoldingsService:
             'cleared_holdings': cleared_holdings,
             'account_count': len(snapshot.account_ids)
         }
+    
+    def _get_cleared_holdings(self, target: Union[int, List[int], str], 
+                             target_type: str, as_of_date: Optional[date],
+                             family_id: Optional[int]) -> List[Dict]:
+        """获取清仓股票信息"""
+        try:
+            # 获取目标账户列表
+            account_ids = self._resolve_target_accounts(target, target_type, family_id)
+            
+            if not account_ids:
+                return []
+            
+            # 查找所有历史交易过的股票
+            historical_stocks = db.session.query(Transaction.stock).filter(
+                Transaction.account_id.in_(account_ids),
+                Transaction.trade_date <= as_of_date,
+                Transaction.stock.isnot(None),
+                Transaction.type.in_(['BUY', 'SELL'])
+            ).distinct().all()
+            
+            cleared_holdings = []
+            
+            for (stock_symbol,) in historical_stocks:
+                # 计算该股票的持仓
+                stock_holdings = {}
+                for account_id in account_ids:
+                    account_holding = self._calculate_single_stock_holding(
+                        account_id, stock_symbol, as_of_date
+                    )
+                    if account_holding:
+                        stock_holdings[account_id] = account_holding
+                
+                # 检查是否已清仓（当前持股为0但有交易历史）
+                total_current_shares = sum(
+                    holding.current_shares for holding in stock_holdings.values()
+                )
+                
+                if total_current_shares == 0:  # 已清仓
+                    total_realized_gain = sum(
+                        holding.realized_gain for holding in stock_holdings.values()
+                    )
+                    total_dividends = sum(
+                        holding.total_dividends for holding in stock_holdings.values()
+                    )
+                    
+                    # 计算总收益率
+                    total_bought_value = sum(
+                        holding.total_bought_value for holding in stock_holdings.values()
+                    )
+                    total_sold_value = sum(
+                        holding.total_sold_value for holding in stock_holdings.values()
+                    )
+                    
+                    realized_gain_percent = 0
+                    if total_bought_value > 0:
+                        realized_gain_percent = (total_realized_gain / total_bought_value) * 100
+                    
+                    # 获取币种信息
+                    currency = 'USD'  # 默认值
+                    if stock_holdings:
+                        currency = list(stock_holdings.values())[0].currency
+                    
+                    cleared_holdings.append({
+                        'symbol': stock_symbol,
+                        'currency': currency,
+                        'total_bought_value': float(total_bought_value),
+                        'total_sold_value': float(total_sold_value),
+                        'realized_gain': float(total_realized_gain),
+                        'realized_gain_percent': float(realized_gain_percent),
+                        'total_dividends': float(total_dividends),
+                        'total_return': float(total_realized_gain + total_dividends)
+                    })
+            
+            return cleared_holdings
+            
+        except Exception as e:
+            logger.error(f"Error getting cleared holdings: {e}")
+            return []
+    
+    def _calculate_single_stock_holding(self, account_id: int, stock_symbol: str, 
+                                       as_of_date: date) -> Optional[AccountHolding]:
+        """计算单个账户单只股票的持仓"""
+        try:
+            transactions = Transaction.query.filter(
+                Transaction.account_id == account_id,
+                Transaction.stock == stock_symbol,
+                Transaction.trade_date <= as_of_date
+            ).order_by(Transaction.trade_date.asc()).all()
+            
+            if not transactions:
+                return None
+            
+            # 使用交易记录中的实际货币信息
+            currency = transactions[0].currency if transactions[0].currency else 'USD'
+            holding = AccountHolding(account_id, stock_symbol, currency)
+            
+            for tx in transactions:
+                if tx.type == 'BUY':
+                    holding.add_buy_transaction(
+                        quantity=Decimal(str(tx.quantity)),
+                        price=Decimal(str(tx.price)),
+                        fee=Decimal(str(tx.fee or 0)),
+                        trade_date=tx.trade_date
+                    )
+                elif tx.type == 'SELL':
+                    holding.add_sell_transaction(
+                        quantity=Decimal(str(tx.quantity)),
+                        price=Decimal(str(tx.price)),
+                        fee=Decimal(str(tx.fee or 0)),
+                        trade_date=tx.trade_date
+                    )
+                elif tx.type == 'DIVIDEND':
+                    dividend_amount = Decimal(str(tx.quantity * tx.price))
+                    holding.add_dividend(dividend_amount)
+            
+            return holding
+            
+        except Exception as e:
+            logger.error(f"Error calculating single stock holding for {stock_symbol}: {e}")
+            return None
     
     def clear_cache(self):
         """清除缓存"""
