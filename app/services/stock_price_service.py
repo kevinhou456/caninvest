@@ -190,3 +190,77 @@ class StockPriceService:
         except Exception as e:
             print(f"获取{symbol}缓存价格失败: {str(e)}")
             return Decimal('0')
+    
+    def get_stock_history(self, symbol: str, start_date, end_date) -> Dict:
+        """
+        获取股票历史价格数据
+        参数:
+            symbol: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+        返回:
+            Dict: 日期和价格的字典，格式为 {'YYYY-MM-DD': {'close': price}}
+        """
+        try:
+            # 转换日期为Unix时间戳
+            import time
+            start_timestamp = int(time.mktime(start_date.timetuple()))
+            end_timestamp = int(time.mktime(end_date.timetuple()))
+            
+            # Yahoo Finance API URL for historical data
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+            params = {
+                'period1': start_timestamp,
+                'period2': end_timestamp,
+                'interval': '1d',
+                'includePrePost': 'false'
+            }
+            
+            response = requests.get(url, headers=self.headers, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'chart' not in data or not data['chart']['result']:
+                print(f"无法获取{symbol}的历史价格数据")
+                return {}
+            
+            result = data['chart']['result'][0]
+            
+            # 调试输出：查看实际的数据结构
+            print(f"调试: {symbol} Yahoo Finance数据结构:")
+            print(f"  - result keys: {list(result.keys())}")
+            if 'meta' in result:
+                print(f"  - meta keys: {list(result['meta'].keys())}")
+            
+            # 检查是否有价格数据
+            if 'indicators' not in result or 'quote' not in result['indicators'] or not result['indicators']['quote']:
+                print(f"{symbol}历史数据中无价格信息")
+                return {}
+            
+            # 检查timestamp数据是否存在
+            if 'timestamp' not in result:
+                print(f"{symbol}历史数据中无时间戳信息")
+                return {}
+                
+            timestamps = result['timestamp']
+            prices = result['indicators']['quote'][0]['close']
+            
+            # 构建历史价格字典
+            history = {}
+            for i, timestamp in enumerate(timestamps):
+                if i < len(prices) and prices[i] is not None:
+                    date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+                    history[date_str] = {
+                        'close': float(prices[i])
+                    }
+            
+            print(f"成功获取{symbol}的{len(history)}天历史价格数据")
+            return history
+            
+        except requests.RequestException as e:
+            print(f"获取{symbol}历史价格失败: {str(e)}")
+            return {}
+        except Exception as e:
+            print(f"解析{symbol}历史价格数据失败: {str(e)}")
+            return {}

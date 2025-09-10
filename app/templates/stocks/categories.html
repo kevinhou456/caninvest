@@ -181,7 +181,7 @@
                         <div class="input-group">
                             <input type="text" class="form-control" id="stockSymbol" name="symbol" required>
                             <button type="button" class="btn btn-outline-info" onclick="refreshStockInfo()">
-                                <i class="fas fa-sync"></i> {{ _('Get Info') }}
+                                <i class="fas fa-sync"></i> {{ _('验证') }}
                             </button>
                         </div>
                         <div class="form-text">{{ _('This will update all related transaction records') }}</div>
@@ -189,12 +189,14 @@
                     
                     <div class="mb-3">
                         <label for="stockName" class="form-label">{{ _('Stock Name') }}</label>
-                        <input type="text" class="form-control" id="stockName" name="name">
+                        <input type="text" class="form-control" id="stockName" name="name" readonly>
+                        <div class="form-text">{{ _('Used for stock code verification only') }}</div>
                     </div>
                     
                     <div class="mb-3">
                         <label for="stockExchange" class="form-label">{{ _('Exchange') }}</label>
-                        <input type="text" class="form-control" id="stockExchange" name="exchange">
+                        <input type="text" class="form-control" id="stockExchange" name="exchange" readonly>
+                        <div class="form-text">{{ _('Used for stock code verification only') }}</div>
                     </div>
                     
                     <div class="mb-3">
@@ -513,6 +515,10 @@ document.getElementById('stockForm').addEventListener('submit', function(e) {
             
             if (data.updated_transactions > 0) {
                 message += `\n{{ _("Updated") }} ${data.updated_transactions} {{ _("transaction records") }}`;
+            }
+            
+            if (data.merged_duplicate) {
+                message += `\n{{ _("Merged duplicate stock and updated") }} ${data.merged_transactions} {{ _("additional transaction records") }}`;
             }
             
             if (data.refreshed_info) {

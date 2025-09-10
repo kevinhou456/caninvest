@@ -140,34 +140,38 @@
         </div>
     </div>
     
-    <!-- Total Dividends -->
+    <!-- Total Income (Dividends + Interest) -->
     <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
         <div class="card h-100 metric-card">
             <div class="card-body">
                 <div class="d-flex align-items-center mb-2">
                     <div class="metric-icon bg-info bg-opacity-10">
-                        <i class="fas fa-hand-holding-usd text-info"></i>
+                        <i class="fas fa-coins text-info"></i>
                     </div>
-                    <h6 class="card-title text-muted mb-0">{{ _('Total Dividends') }}</h6>
+                    <h6 class="card-title text-muted mb-0">{{ _('Total Income') }}</h6>
                 </div>
-                <h4 class="text-info mb-1">${{ "{:,.2f}".format(metrics.total_dividends.cad if metrics else 0) }}</h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_dividends.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_dividends.usd_only if metrics else 0) }}</small>
+                <h4 class="text-info mb-1">${{ "{:,.2f}".format((metrics.total_dividends.cad + metrics.total_interest.cad) if metrics else 0) }}</h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format((metrics.total_dividends.cad_only + metrics.total_interest.cad_only) if metrics else 0) }}|USD:${{ "{:,.2f}".format((metrics.total_dividends.usd_only + metrics.total_interest.usd_only) if metrics else 0) }}</small>
             </div>
         </div>
     </div>
     
-    <!-- Total Interest -->
+    <!-- Cash Balance -->
     <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
-        <div class="card h-100 metric-card">
+        <div class="card h-100 metric-card cash-card" onclick="openCashModal()" style="cursor: pointer; position: relative;">
             <div class="card-body">
                 <div class="d-flex align-items-center mb-2">
-                    <div class="metric-icon bg-warning bg-opacity-10">
-                        <i class="fas fa-percentage text-warning"></i>
+                    <div class="metric-icon bg-success bg-opacity-10">
+                        <i class="fas fa-money-bill-wave text-success"></i>
                     </div>
-                    <h6 class="card-title text-muted mb-0">{{ _('Total Interest') }}</h6>
+                    <h6 class="card-title text-muted mb-0">{{ _('Cash Balance') }}</h6>
                 </div>
-                <h4 class="text-warning mb-1">${{ "{:,.2f}".format(metrics.total_interest.cad if metrics else 0) }}</h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_interest.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_interest.usd_only if metrics else 0) }}</small>
+                <h4 class="text-success mb-1">${{ "{:,.2f}".format(cash_data.total_cad if cash_data else 0) }}</h4>
+                <small class="text-muted">CAD:${{ "{:,.0f}".format(cash_data.cad if cash_data else 0) }}|USD:${{ "{:,.0f}".format(cash_data.usd if cash_data else 0) }}</small>
+            </div>
+            <!-- Edit Icon -->
+            <div class="position-absolute top-0 end-0 m-2">
+                <i class="fas fa-edit text-muted" style="font-size: 14px; opacity: 0.7;"></i>
             </div>
         </div>
     </div>
@@ -213,7 +217,7 @@
                                             {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
                                         </div>
                                         <div>
-                                            <a href="{{ url_for('main.transactions', stock=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
+                                            <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
                                                 <strong>{{ holding['symbol'] }}</strong>
                                             </a>
                                             <br><small class="text-muted">{{ holding['sector'] or 'Unknown' }}</small>
@@ -340,7 +344,7 @@
                                              style="color: {{ 'black' if holding['currency'] == 'CAD' else 'white' }};">
                                             {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
                                         </div>
-                                        <a href="{{ url_for('main.transactions', stock=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
+                                        <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
                                             <strong>{{ holding['symbol'] }}</strong>
                                         </a>
                                     </div>
@@ -480,6 +484,92 @@
     </div>
 </div>
 {% endif %}
+
+<!-- Cash Management Modal -->
+<div class="modal fade" id="cashModal" tabindex="-1" aria-labelledby="cashModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cashModalLabel">
+                    <i class="fas fa-edit me-2"></i>{{ _('Cash Adjustment') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    {{ _('Select an account to adjust its cash balance.') }}
+                </div>
+                
+                <!-- Account Selection -->
+                <div class="mb-4">
+                    <label for="accountSelect" class="form-label">
+                        <i class="fas fa-university me-2"></i>{{ _('Select Account') }}
+                    </label>
+                    <select class="form-select" id="accountSelect" onchange="onAccountSelected()">
+                        <option value="">{{ _('Please select an account...') }}</option>
+                    </select>
+                </div>
+                
+                <!-- Cash Input Forms -->
+                <div id="cashInputSection" style="display: none;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0" id="selectedAccountInfo">
+                                <i class="fas fa-edit me-2"></i>{{ _('Cash Balance Adjustment') }}
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label for="cadInput" class="form-label">
+                                        <i class="fas fa-dollar-sign me-1"></i>{{ _('CAD Amount') }}
+                                    </label>
+                                    <div class="input-group">
+                                        <span class="input-group-text text-dark" style="background-color: #fff3cd;">
+                                            <i class="fas fa-dollar-sign"></i>
+                                        </span>
+                                        <input type="number" 
+                                               class="form-control" 
+                                               id="cadInput" 
+                                               step="0.01"
+                                               min="0"
+                                               placeholder="0.00">
+                                        <span class="input-group-text text-muted">CAD</span>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="usdInput" class="form-label">
+                                        <i class="fas fa-dollar-sign me-1"></i>{{ _('USD Amount') }}
+                                    </label>
+                                    <div class="input-group">
+                                        <span class="input-group-text text-white" style="background-color: #28a745;">
+                                            <i class="fas fa-dollar-sign"></i>
+                                        </span>
+                                        <input type="number" 
+                                               class="form-control" 
+                                               id="usdInput" 
+                                               step="0.01"
+                                               min="0"
+                                               placeholder="0.00">
+                                        <span class="input-group-text text-muted">USD</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                <button type="button" class="btn btn-primary" onclick="saveCashForAccount()" id="saveCashBtn" style="display: none;">
+                    <i class="fas fa-save me-2"></i>{{ _('Save Changes') }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -636,5 +726,139 @@ function formatPercent(value) {
     const sign = value >= 0 ? '+' : '';
     return `${sign}${value.toFixed(1)}%`;
 }
+
+// Cash Management Functions
+let accountsData = [];
+let exchangeRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.35 }};
+
+function openCashModal() {
+    // Load accounts data
+    loadAccountsCashData();
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('cashModal'));
+    modal.show();
+}
+
+function loadAccountsCashData() {
+    fetch('/api/accounts/cash-data')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                accountsData = data.accounts;
+                populateAccountSelect();
+            } else {
+                alert('{{ _("Error loading accounts data: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('{{ _("Error loading accounts data. Please try again.") }}');
+        });
+}
+
+function populateAccountSelect() {
+    const accountSelect = document.getElementById('accountSelect');
+    accountSelect.innerHTML = '<option value="">{{ _("Please select an account...") }}</option>';
+    
+    accountsData.forEach(account => {
+        const option = document.createElement('option');
+        option.value = account.id;
+        option.textContent = `${account.name} (${account.owners}) - ${account.type}`;
+        accountSelect.appendChild(option);
+    });
+    
+    // 如果当前页面有选中的账户，默认选择它
+    const currentAccountId = {{ account_id if account_id else 'null' }};
+    if (currentAccountId) {
+        accountSelect.value = currentAccountId;
+        // 触发选择事件以显示该账户的现金输入表单
+        onAccountSelected();
+    }
+}
+
+function onAccountSelected() {
+    const accountSelect = document.getElementById('accountSelect');
+    const selectedAccountId = accountSelect.value;
+    const cashInputSection = document.getElementById('cashInputSection');
+    
+    if (selectedAccountId) {
+        // Find the selected account data
+        const selectedAccount = accountsData.find(account => account.id == selectedAccountId);
+        
+        if (selectedAccount) {
+            // Update the account info display
+            const accountInfo = document.getElementById('selectedAccountInfo');
+            accountInfo.innerHTML = `
+                <i class="fas fa-edit me-2"></i>{{ _('Cash Balance for') }} ${selectedAccount.name} (${selectedAccount.owners})
+            `;
+            
+            // Populate current cash values
+            document.getElementById('cadInput').value = selectedAccount.cash.cad || 0;
+            document.getElementById('usdInput').value = selectedAccount.cash.usd || 0;
+            
+            // Show the input section and save button
+            cashInputSection.style.display = 'block';
+            document.getElementById('saveCashBtn').style.display = 'inline-block';
+        }
+    } else {
+        // Hide the input section and save button
+        cashInputSection.style.display = 'none';
+        document.getElementById('saveCashBtn').style.display = 'none';
+    }
+}
+
+function saveCashForAccount() {
+    const accountSelect = document.getElementById('accountSelect');
+    const selectedAccountId = accountSelect.value;
+    
+    if (!selectedAccountId) {
+        alert('{{ _("Please select an account first.") }}');
+        return;
+    }
+    
+    const cadValue = parseFloat(document.getElementById('cadInput').value) || 0;
+    const usdValue = parseFloat(document.getElementById('usdInput').value) || 0;
+    
+    const updates = [{
+        account_id: parseInt(selectedAccountId),
+        cad: cadValue,
+        usd: usdValue
+    }];
+    
+    // Save to server
+    fetch('/api/cash/batch-update', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ updates: updates })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('{{ _("Cash balance updated successfully!") }}');
+            
+            // Update local data
+            const selectedAccount = accountsData.find(account => account.id == selectedAccountId);
+            if (selectedAccount) {
+                selectedAccount.cash.cad = cadValue;
+                selectedAccount.cash.usd = usdValue;
+            }
+            
+            // Close modal and refresh page
+            bootstrap.Modal.getInstance(document.getElementById('cashModal')).hide();
+            location.reload();
+        } else {
+            alert('{{ _("Error updating cash balance: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Error updating cash balance. Please try again.") }}');
+    });
+}
+
+
 </script>
 {% endblock %}

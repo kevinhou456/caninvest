@@ -69,6 +69,7 @@ def update_stock(stock_id):
         
         # 只有当股票代码或货币发生变化时才检查重复
         new_currency = data.get('currency', stock.currency)
+        existing_stock_transactions_updated = 0
         if new_symbol != old_symbol or new_currency != stock.currency:
             existing_stock = StocksCache.query.filter(
                 StocksCache.symbol == new_symbol,
@@ -77,7 +78,18 @@ def update_stock(stock_id):
             ).first()
             
             if existing_stock:
-                return jsonify({'success': False, 'error': _('Stock symbol already exists for this currency')}), 400
+                # 当发现重复的股票代码时，不返回错误，而是进行以下操作：
+                # 1. 将现有重复股票的所有交易记录更新为当前正在编辑的股票代码
+                existing_transactions = Transaction.query.filter_by(stock=existing_stock.symbol).all()
+                for transaction in existing_transactions:
+                    transaction.stock = old_symbol  # 暂时设置为旧代码，稍后会一起更新为新代码
+                existing_stock_transactions_updated = len(existing_transactions)
+                
+                # 2. 删除重复的stock_cache记录
+                print(f"删除重复的股票缓存记录: {existing_stock.symbol} ({existing_stock.currency})")
+                print(f"将 {existing_stock_transactions_updated} 条交易记录从 {existing_stock.symbol} 更新为 {old_symbol}")
+                db.session.delete(existing_stock)
+                db.session.flush()  # 确保删除操作立即生效
         
         # 更新股票缓存记录
         stock.symbol = new_symbol
@@ -93,6 +105,9 @@ def update_stock(stock_id):
                 transaction.stock = new_symbol
             updated_transactions_count = len(transactions)
             print(f"Updated {updated_transactions_count} transaction records from {old_symbol} to {new_symbol}")
+        
+        # 总的更新交易记录数量（包括原有的和从重复股票合并过来的）
+        total_updated_transactions = updated_transactions_count + existing_stock_transactions_updated
         
         # 强制刷新股票价格和信息
         from app.services.stock_price_service import StockPriceService
@@ -119,10 +134,11 @@ def update_stock(stock_id):
         
         db.session.commit()
         
-        return jsonify({
+        # 构建响应消息
+        response_data = {
             'success': True,
             'message': _('Stock updated successfully'),
-            'updated_transactions': updated_transactions_count,
+            'updated_transactions': total_updated_transactions,
             'refreshed_info': should_refresh_info,
             'stock_info': {
                 'symbol': stock.symbol,
@@ -131,7 +147,15 @@ def update_stock(stock_id):
                 'currency': stock.currency,
                 'current_price': float(stock.current_price) if stock.current_price else None
             }
-        })
+        }
+        
+        # 如果有合并重复股票的操作，添加额外信息
+        if existing_stock_transactions_updated > 0:
+            response_data['merged_duplicate'] = True
+            response_data['merged_transactions'] = existing_stock_transactions_updated
+            print(f"成功合并重复股票，更新了 {existing_stock_transactions_updated} 条来自重复股票的交易记录")
+        
+        return jsonify(response_data)
         
     except Exception as e:
         db.session.rollback()

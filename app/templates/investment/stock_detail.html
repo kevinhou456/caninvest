@@ -1,0 +1,486 @@
+{% extends "base/investment_base.html" %}
+
+{% block extra_head %}
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header Section -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div>
+                <!-- Header with Stock Info and Summary -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="flex-grow-1">
+                        <h2 class="mb-1">
+                            <i class="fas fa-chart-line me-2 text-primary"></i>
+                            {{ stock_symbol }}
+                            {% if stock_info and stock_info.name %}
+                                <small class="text-muted">- {{ stock_info.name }}</small>
+                            {% endif %}
+                            
+                            <!-- Display current filter next to stock symbol -->
+                            {% if member_id or account_id %}
+                                {% set filter_info = get_current_filter_display(family, member_id, account_id, true, account_members) %}
+                                {% if filter_info %}
+                                    <span class="badge bg-info ms-3" style="font-size: 0.6em;">
+                                        <i class="{{ filter_info.icon_class }} me-1"></i>{{ filter_info.display_text }}
+                                    </span>
+                                {% endif %}
+                            {% endif %}
+                        </h2>
+                        <div class="d-flex align-items-center gap-3">
+                            <nav aria-label="breadcrumb" class="mb-0">
+                                <ol class="breadcrumb mb-0">
+                                    <li class="breadcrumb-item"><a href="{{ url_for('main.overview', member_id=member_id, account_id=account_id) }}">{{ _('Overview') }}</a></li>
+                                    <li class="breadcrumb-item active" aria-current="page">{{ stock_symbol }}</li>
+                                </ol>
+                            </nav>
+                            
+                            <!-- Inline Stock Summary -->
+                            {% if stock_stats and stock_stats.current_shares > 0 %}
+                            <div class="d-flex flex-wrap gap-4" style="font-size: 1rem;">
+                                <span>shares: <strong class="text-dark">{{ "{:,.0f}".format(stock_stats.current_shares) }}</strong></span>
+                                <span>price: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.current_price) if stock_stats.current_price > 0 else 'N/A' }}</strong></span>
+                                <span>value: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.market_value) if stock_stats.market_value > 0 else 'N/A' }}</strong></span>
+                                <span>unrealized: <strong class="{{ 'text-success' if stock_stats.unrealized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.unrealized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.unrealized_pnl) }}</strong></span>
+                                <span>realized: <strong class="{{ 'text-success' if stock_stats.realized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.realized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.realized_pnl) }}</strong></span>
+                                <span>div: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.total_dividends) }}</strong></span>
+                                <span>int: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.total_interest) }}</strong></span>
+                            </div>
+                            {% elif current_holding %}
+                            <div class="d-flex gap-4" style="font-size: 1rem;">
+                                <span>shares: <strong class="text-dark">{{ "{:,.0f}".format(current_holding.shares) }}</strong></span>
+                                <span>avg cost: <strong class="text-dark">{{ current_holding.currency }}${{ "{:,.2f}".format(current_holding.avg_cost) }}</strong></span>
+                                <span>total cost: <strong class="text-dark">{{ current_holding.currency }}${{ "{:,.2f}".format(current_holding.total_cost) }}</strong></span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <!-- Show All button for filtered views -->
+                        {% if member_id or account_id %}
+                        <div class="ms-auto">
+                            <a href="{{ url_for('main.stock_detail', stock_symbol=stock_symbol) }}" class="btn btn-sm btn-outline-secondary">
+                                {{ _('Show All') }}
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Combined Chart Section -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-mixed me-2"></i>{{ _('Stock Price & Holdings Analysis') }}
+                    </h5>
+                    <small class="text-muted">{{ _('Price (line) & Quantity (bars)') }}</small>
+                </div>
+                <div class="card-body">
+                    <div style="position: relative; width: 100%; height: 600px;">
+                        <canvas id="combinedChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transactions Table Section -->
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-list me-2"></i>{{ _('Transaction History') }}
+                    </h5>
+                    <span class="badge bg-primary">{{ transactions|length }} {{ _('transactions') }}</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>{{ _('Date') }}</th>
+                                    <th>{{ _('Account') }}</th>
+                                    <th>{{ _('Type') }}</th>
+                                    <th class="text-end">{{ _('Quantity') }}</th>
+                                    <th class="text-end">{{ _('Price') }}</th>
+                                    <th class="text-end">{{ _('Amount') }}</th>
+                                    <th class="text-end">{{ _('Fee') }}</th>
+                                    <th>{{ _('Currency') }}</th>
+                                    <th>{{ _('Notes') }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for transaction in transactions %}
+                                <tr>
+                                    <td>
+                                        <span class="fw-medium">{{ transaction.trade_date.strftime('%Y-%m-%d') }}</span>
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">{{ transaction.account.name }}</small>
+                                    </td>
+                                    <td>
+                                        {% if transaction.type == 'BUY' %}
+                                            <span class="badge bg-success">{{ _('Buy') }}</span>
+                                        {% elif transaction.type == 'SELL' %}
+                                            <span class="badge bg-danger">{{ _('Sell') }}</span>
+                                        {% elif transaction.type == 'DIVIDEND' %}
+                                            <span class="badge bg-info">{{ _('Dividend') }}</span>
+                                        {% elif transaction.type == 'INTEREST' %}
+                                            <span class="badge bg-warning">{{ _('Interest') }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ transaction.type }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if transaction.quantity %}
+                                            {{ "{:,.2f}".format(transaction.quantity) }}
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if transaction.price %}
+                                            ${{ "{:,.2f}".format(transaction.price) }}
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if transaction.amount %}
+                                            <span class="{{ 'text-danger' if transaction.amount < 0 else 'text-success' }}">
+                                                ${{ "{:,.2f}".format(transaction.amount|abs) }}
+                                            </span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if transaction.fee %}
+                                            <span class="text-warning">${{ "{:,.2f}".format(transaction.fee) }}</span>
+                                        {% else %}
+                                            <span class="text-muted">$0.00</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-light text-dark">{{ transaction.currency or 'CAD' }}</span>
+                                    </td>
+                                    <td>
+                                        {% if transaction.notes %}
+                                            <small class="text-muted">{{ transaction.notes }}</small>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.1/dist/chartjs-adapter-moment.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+
+<script>
+console.log('=== Chart initialization starting ===');
+
+// Update debug status immediately
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, initializing chart...');
+    
+    // Get data from backend
+    const priceDataRaw = {{ price_data | tojson | safe }};
+    const quantityDataRaw = {{ quantity_data | tojson | safe }};
+    const transactionMarkersRaw = {{ transaction_markers | tojson | safe }};
+    const showAccountNumbers = {{ show_account_numbers | tojson }};
+    
+    console.log('Initializing chart with', priceDataRaw ? priceDataRaw.length : 0, 'price points,', quantityDataRaw ? quantityDataRaw.length : 0, 'quantity points and', transactionMarkersRaw ? transactionMarkersRaw.length : 0, 'transaction markers');
+    
+    // Validate Chart.js is available
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js not loaded');
+        const chartContainer = document.querySelector('#combinedChart').parentElement;
+        chartContainer.innerHTML = '<div class="text-center text-danger py-5">Chart.js library failed to load</div>';
+        return;
+    }
+    
+    // Get chart canvas
+    const canvas = document.getElementById('combinedChart');
+    if (!canvas) {
+        console.error('Canvas element not found');
+        return;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Process data if available
+    if (!priceDataRaw || priceDataRaw.length === 0) {
+        console.log('No price data available');
+        const chartContainer = document.querySelector('#combinedChart').parentElement;
+        chartContainer.innerHTML = '<div class="text-center text-muted py-5"><i class="fas fa-chart-mixed fa-3x mb-3"></i><p>No price data available for chart</p></div>';
+        return;
+    }
+    
+    // Prepare labels from all dates
+    const allDates = new Set();
+    priceDataRaw.forEach(item => allDates.add(item.date));
+    if (quantityDataRaw) {
+        quantityDataRaw.forEach(item => allDates.add(item.date));
+    }
+    const labels = Array.from(allDates).sort();
+    
+    // Prepare price data
+    const priceMap = {};
+    priceDataRaw.forEach(item => {
+        priceMap[item.date] = item.price;
+    });
+    const alignedPrices = labels.map(date => priceMap[date] || null);
+    
+    // Prepare quantity data  
+    const quantityMap = {};
+    if (quantityDataRaw) {
+        quantityDataRaw.forEach(item => {
+            quantityMap[item.date] = item.quantity;
+        });
+    }
+    const alignedQuantities = labels.map(date => quantityMap[date] || 0);
+    
+    // Create datasets
+    const datasets = [];
+    
+    // Price line chart
+    datasets.push({
+        type: 'line',
+        label: 'Stock Price ({% if transactions %}{{ transactions[0].currency }}{% else %}CAD{% endif %})',
+        data: alignedPrices,
+        borderColor: 'rgb(75, 192, 192)',
+        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+        borderWidth: 2,
+        fill: false,
+        tension: 0.1,
+        yAxisID: 'y'
+    });
+    
+    // Quantity bar chart (if data available)
+    if (quantityDataRaw && quantityDataRaw.length > 0) {
+        datasets.push({
+            type: 'bar',
+            label: 'Holdings Quantity',
+            data: alignedQuantities,
+            backgroundColor: 'rgba(54, 162, 235, 0.6)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1,
+            yAxisID: 'y1'
+        });
+    }
+    
+    // Add transaction markers as scatter points
+    if (transactionMarkersRaw && transactionMarkersRaw.length > 0) {
+        const buyPoints = [];
+        const sellPoints = [];
+        
+        transactionMarkersRaw.forEach(marker => {
+            const point = {
+                x: marker.date,
+                y: marker.price
+            };
+            
+            if (marker.type === 'BUY') {
+                buyPoints.push(point);
+            } else if (marker.type === 'SELL') {
+                sellPoints.push(point);
+            }
+        });
+        
+        // Buy markers (green triangles pointing up)
+        if (buyPoints.length > 0) {
+            datasets.push({
+                type: 'scatter',
+                label: 'Buy Transactions',
+                data: buyPoints,
+                backgroundColor: 'rgba(34, 197, 94, 0.8)',
+                borderColor: 'rgb(34, 197, 94)',
+                borderWidth: 2,
+                pointStyle: 'triangle',
+                pointRadius: 8,
+                yAxisID: 'y'
+            });
+        }
+        
+        // Sell markers (red triangles pointing down)
+        if (sellPoints.length > 0) {
+            datasets.push({
+                type: 'scatter',
+                label: 'Sell Transactions',
+                data: sellPoints,
+                backgroundColor: 'rgba(239, 68, 68, 0.8)',
+                borderColor: 'rgb(239, 68, 68)',
+                borderWidth: 2,
+                pointStyle: 'triangle',
+                pointRadius: 8,
+                pointRotation: 180,
+                yAxisID: 'y'
+            });
+        }
+    }
+    
+    console.log('Creating chart with datasets:', datasets);
+    
+    console.log('Transaction markers data:', transactionMarkersRaw);
+    
+    try {
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: datasets
+            },
+            plugins: [{
+                id: 'accountNumberCircles',
+                afterDraw: function(chart, args, options) {
+                    const ctx = chart.ctx;
+                    const chartArea = chart.chartArea;
+                    
+                    // Draw account number circles for transaction markers (only for multiple accounts)
+                    if (showAccountNumbers && transactionMarkersRaw && transactionMarkersRaw.length > 0) {
+                        transactionMarkersRaw.forEach(marker => {
+                            const xScale = chart.scales.x;
+                            const yScale = chart.scales.y;
+                            
+                            // Get pixel coordinates for the transaction point
+                            const xPixel = xScale.getPixelForValue(marker.date);
+                            const yPixel = yScale.getPixelForValue(marker.price);
+                            
+                            // Position circle above the triangle (offset by 25 pixels up)
+                            const circleY = yPixel - 25;
+                            
+                            // Only draw if within chart area
+                            if (xPixel >= chartArea.left && xPixel <= chartArea.right && 
+                                circleY >= chartArea.top && circleY <= chartArea.bottom) {
+                                
+                                ctx.save();
+                                
+                                // Draw black circle
+                                ctx.beginPath();
+                                ctx.arc(xPixel, circleY, 12, 0, 2 * Math.PI);
+                                ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+                                ctx.fill();
+                                ctx.strokeStyle = 'white';
+                                ctx.lineWidth = 2;
+                                ctx.stroke();
+                                
+                                // Draw white account number
+                                ctx.fillStyle = 'white';
+                                ctx.font = 'bold 10px Arial';
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'middle';
+                                ctx.fillText(marker.account_number.toString(), xPixel, circleY);
+                                
+                                ctx.restore();
+                            }
+                        });
+                    }
+                }
+            }],
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                height: 600,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Price ({% if transactions %}{{ transactions[0].currency }}{% else %}CAD{% endif %})'
+                        },
+                        beginAtZero: false
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Quantity'
+                        },
+                        beginAtZero: true,
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                if (context.dataset.type === 'line') {
+                                    return context.dataset.label + ': $' + (context.parsed.y ? context.parsed.y.toFixed(2) : 'N/A');
+                                } else if (context.dataset.type === 'scatter') {
+                                    // For transaction markers, show detailed info
+                                    const marker = transactionMarkersRaw.find(m => 
+                                        m.date === context.parsed.x && Math.abs(m.price - context.parsed.y) < 0.01
+                                    );
+                                    if (marker) {
+                                        return [
+                                            context.dataset.label + ': $' + context.parsed.y.toFixed(2),
+                                            `Account ${marker.account_number} (${marker.account_name})`,
+                                            `Quantity: ${marker.quantity}`
+                                        ];
+                                    }
+                                    return context.dataset.label + ': $' + context.parsed.y.toFixed(2);
+                                } else {
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(0);
+                                }
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+        
+        console.log('Chart created successfully!');
+        
+    } catch (error) {
+        console.error('Chart creation failed:', error);
+        const chartContainer = document.querySelector('#combinedChart').parentElement;
+        chartContainer.innerHTML = '<div class="text-center text-danger py-5"><i class="fas fa-exclamation-triangle fa-3x mb-3"></i><p>Chart error: ' + error.message + '</p></div>';
+    }
+});
+</script>
+
+{% endblock %}

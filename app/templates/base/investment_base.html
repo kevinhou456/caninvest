@@ -12,6 +12,9 @@
     <!-- Chart.js - 使用UMD版本避免ES6模块问题 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.js"></script>
     
+    <!-- Additional scripts for child templates -->
+    {% block extra_head %}{% endblock %}
+    
     <!-- Custom CSS for Investment Layout -->
     <style>
         body {

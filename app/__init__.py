@@ -60,6 +60,77 @@ def create_app(config_name=None):
     def get_current_language():
         return get_locale()
     
+    @app.template_global()
+    def get_current_filter_display(family, member_id=None, account_id=None, include_members=False, account_members=None):
+        """获取当前选择的成员或账户显示信息
+        
+        Args:
+            family: 家庭对象
+            member_id: 成员ID（可选）
+            account_id: 账户ID（可选）
+            include_members: 是否包含成员名字（默认False）
+            account_members: 账户成员列表（当include_members=True且account_id存在时需要）
+            
+        Returns:
+            dict: 包含display_text, icon_class, type等信息的字典
+        """
+        if member_id and family and hasattr(family, 'members'):
+            # 查找成员
+            target_member = None
+            for member in family.members:
+                if member.id == member_id:
+                    target_member = member
+                    break
+                    
+            if target_member:
+                return {
+                    'display_text': target_member.name,
+                    'icon_class': 'fas fa-user',
+                    'type': 'member',
+                    'id': member_id
+                }
+            else:
+                return {
+                    'display_text': f'Member {member_id}',
+                    'icon_class': 'fas fa-user',
+                    'type': 'member',
+                    'id': member_id
+                }
+                
+        elif account_id and family and hasattr(family, 'accounts'):
+            # 查找账户
+            target_account = None
+            for account in family.accounts:
+                if account.id == account_id:
+                    target_account = account
+                    break
+                    
+            if target_account:
+                display_text = target_account.name
+                
+                # 如果需要包含成员名字且提供了account_members
+                if include_members and account_members:
+                    current_account_members = [am for am in account_members if am.account_id == account_id]
+                    if current_account_members:
+                        member_names = [am.member.name for am in current_account_members]
+                        display_text += f" ({', '.join(member_names)})"
+                
+                return {
+                    'display_text': display_text,
+                    'icon_class': 'fas fa-piggy-bank',
+                    'type': 'account',
+                    'id': account_id
+                }
+            else:
+                return {
+                    'display_text': f'Account {account_id}',
+                    'icon_class': 'fas fa-piggy-bank',
+                    'type': 'account',
+                    'id': account_id
+                }
+                
+        return None
+    
     # 投资界面上下文处理器
     @app.context_processor
     def inject_investment_context():

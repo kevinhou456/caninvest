@@ -82,6 +82,17 @@ def overview():
         
         accounts_count = len(accounts)
         
+        # 获取现金数据
+        from app.models.cash import Cash
+        account_ids = [acc.id for acc in accounts] if accounts else []
+        if account_ids:
+            cash_data = Cash.get_total_cash_by_accounts(
+                account_ids, 
+                exchange_rates['usd_to_cad'] if exchange_rates else 1.35
+            )
+        else:
+            cash_data = {'usd': 0, 'cad': 0, 'total_cad': 0}
+        
         # 计算交易数量
         if accounts:
             account_ids = [acc.id for acc in accounts]
@@ -130,6 +141,7 @@ def overview():
                              exchange_rates=exchange_rates,
                              recent_transactions=recent_transactions,
                              filter_description=filter_description,
+                             cash_data=cash_data,
                              current_period=time_period,
                              member_id=member_id,
                              account_id=account_id,
@@ -216,6 +228,7 @@ def overview():
                                      exchange_rates=None,
                                      recent_transactions=recent_transactions,
                                      filter_description=filter_description,
+                                     cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
                                      current_period=time_period,
                                      member_id=member_id,
                                      account_id=account_id,
@@ -258,11 +271,91 @@ def overview():
                              exchange_rates=None,
                              recent_transactions=recent_transactions,
                              filter_description="全部成员",
+                             cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
                              current_period='all_time',
                              member_id=None,
                              account_id=None,
                              current_view='overview')
 
+
+@bp.route('/api/accounts/cash-data', methods=['GET'])
+def get_accounts_cash_data():
+    """获取账户现金数据API"""
+    try:
+        # 获取默认家庭
+        family = Family.query.first()
+        if not family:
+            return jsonify({'success': False, 'error': _('No family found')}), 404
+        
+        # 总是显示所有账户，不受过滤参数限制
+        accounts = Account.query.filter_by(family_id=family.id).all()
+        
+        # 获取每个账户的现金数据
+        from app.models.cash import Cash
+        accounts_data = []
+        
+        for account in accounts:
+            cash_record = Cash.get_account_cash(account.id)
+            
+            # 获取账户拥有者信息
+            owners = []
+            for account_member in account.account_members:
+                owners.append(account_member.member.name)
+            owner_names = ', '.join(owners) if owners else 'Unknown'
+            
+            accounts_data.append({
+                'id': account.id,
+                'name': account.name,
+                'type': account.account_type.name if account.account_type else 'Unknown',
+                'owners': owner_names,
+                'cash': {
+                    'cad': float(cash_record.cad) if cash_record else 0,
+                    'usd': float(cash_record.usd) if cash_record else 0
+                }
+            })
+        
+        return jsonify({
+            'success': True,
+            'accounts': accounts_data
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': _('Failed to load accounts cash data')}), 500
+
+@bp.route('/api/cash/batch-update', methods=['POST'])
+def batch_update_cash():
+    """批量更新账户现金API"""
+    try:
+        data = request.get_json()
+        if not data or 'updates' not in data:
+            return jsonify({'success': False, 'error': _('No update data provided')}), 400
+        
+        updates = data['updates']
+        from app.models.cash import Cash
+        
+        # 批量更新每个账户的现金
+        updated_count = 0
+        for update in updates:
+            account_id = update.get('account_id')
+            cad_amount = update.get('cad', 0)
+            usd_amount = update.get('usd', 0)
+            
+            if account_id:
+                # 验证账户存在
+                account = Account.query.get(account_id)
+                if account:
+                    Cash.update_cash(account_id, usd=usd_amount, cad=cad_amount)
+                    updated_count += 1
+        
+        return jsonify({
+            'success': True,
+            'message': _('Cash balances updated successfully'),
+            'updated_accounts': updated_count
+        })
+        
+    except Exception as e:
+        print(f"Error updating cash: {str(e)}")
+        return jsonify({'success': False, 'error': _('Failed to update cash balances')}), 500
 
 @bp.route('/family-members')
 def family_members():
@@ -717,8 +810,8 @@ def stocks():
 
 
 @bp.route('/stocks/<symbol>')
-def stock_detail(symbol):
-    """股票详情页面"""
+def stock_info(symbol):
+    """股票信息页面"""
     stock = StocksCache.query.filter_by(symbol=symbol).first_or_404()
     return render_template('stocks/detail.html',
                          title=f"{stock.symbol} - {stock.name}",
@@ -2003,3 +2096,273 @@ def api_get_member_holdings(member_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@bp.route('/stock/<stock_symbol>')
+def stock_detail(stock_symbol):
+    """股票详情页面 - 显示价格图表和交易记录"""
+    # 获取默认家庭
+    family = Family.query.first()
+    if not family:
+        flash(_('No family found'), 'error')
+        return redirect(url_for('main.overview'))
+    
+    # 获取过滤参数
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    
+    try:
+        # 获取所有该股票的交易记录
+        all_transactions = Transaction.query.filter_by(stock=stock_symbol.upper()).all()
+        
+        # 如果有过滤条件，应用过滤
+        transactions = []
+        if member_id:
+            from app.models.account import AccountMember
+            account_ids = [am.account_id for am in AccountMember.query.filter_by(member_id=member_id).all()]
+            transactions = [t for t in all_transactions if t.account_id in account_ids]
+        elif account_id:
+            transactions = [t for t in all_transactions if t.account_id == account_id]
+        else:
+            transactions = all_transactions
+        
+        if not transactions:
+            # 如果有过滤条件但没找到记录，显示提示信息但不重定向
+            if member_id or account_id:
+                filter_name = ""
+                if member_id:
+                    from app.models.member import Member
+                    member = Member.query.get(member_id)
+                    filter_name = f"成员 {member.name}" if member else f"成员 ID {member_id}"
+                elif account_id:
+                    from app.models.account import Account
+                    account = Account.query.get(account_id)
+                    filter_name = f"账户 {account.name}" if account else f"账户 ID {account_id}"
+                
+                flash(_('No transactions found for stock {} in {}').format(stock_symbol.upper(), filter_name), 'info')
+            else:
+                flash(_('No transactions found for stock {}').format(stock_symbol.upper()), 'warning')
+                return redirect(url_for('main.overview'))
+        
+        # 获取股票信息
+        from app.models.stocks_cache import StocksCache
+        stock_info = StocksCache.query.filter_by(symbol=stock_symbol.upper()).first()
+        
+        # 1. 智能获取股票历史价格数据（基于实际交易历史）
+        price_data = []
+        try:
+            from app.services.smart_history_manager import SmartHistoryManager
+            history_manager = SmartHistoryManager()
+            
+            # 智能获取历史数据：根据所有交易历史动态确定日期范围
+            cached_history = history_manager.get_historical_data_for_stock(
+                stock_symbol, all_transactions, family.id, None, None
+            )
+            
+            if cached_history:
+                print(f"缓存原始数据样本: {cached_history[:2] if cached_history else 'Empty'}")
+                for data in cached_history:
+                    price_data.append({
+                        'date': data['date'],
+                        'price': round(data['close'], 2)
+                    })
+                print(f"智能历史管理器: 成功获取 {stock_symbol} 的 {len(price_data)} 条价格数据")
+                print(f"处理后的价格数据样本: {price_data[:2] if price_data else 'Empty'}")
+                
+                # 输出日期范围优化摘要
+                range_summary = history_manager.get_date_range_summary(
+                    stock_symbol, transactions, family_id=family.id, member_id=member_id, account_id=account_id
+                )
+                print(f"日期范围优化: {range_summary['optimization']}")
+            else:
+                print(f"智能历史管理器: 未获取到历史数据")
+            
+        except Exception as e:
+            print(f"智能历史数据获取失败: {e}")
+            
+        # 如果智能获取失败或数据不足，回退到使用交易价格
+        if len(price_data) < 10:
+            print(f"缓存数据不足({len(price_data)}条)，回退到交易价格数据")
+            from collections import defaultdict
+            daily_prices = defaultdict(list)
+            
+            for transaction in reversed(transactions):
+                if transaction.type in ['BUY', 'SELL'] and transaction.price:
+                    date_str = transaction.trade_date.strftime('%Y-%m-%d')
+                    daily_prices[date_str].append(float(transaction.price))
+            
+            # 清空缓存数据，使用交易数据
+            price_data = []
+            for date_str, prices in sorted(daily_prices.items()):
+                avg_price = sum(prices) / len(prices)
+                price_data.append({
+                    'date': date_str,
+                    'price': round(avg_price, 2)
+                })
+        
+        # 2. 准备持有数量随时间变化的数据（柱状图）
+        quantity_data = []
+        from collections import defaultdict
+        from decimal import Decimal
+        
+        # 按日期排序交易并计算累计持有量
+        sorted_transactions = sorted(transactions, key=lambda t: t.trade_date)
+        cumulative_quantity = Decimal('0')
+        daily_quantities = {}
+        
+        for transaction in sorted_transactions:
+            if transaction.type in ['BUY', 'SELL'] and transaction.quantity:
+                date_str = transaction.trade_date.strftime('%Y-%m-%d')
+                
+                if transaction.type == 'BUY':
+                    cumulative_quantity += Decimal(str(transaction.quantity))
+                elif transaction.type == 'SELL':
+                    cumulative_quantity -= Decimal(str(transaction.quantity))
+                
+                daily_quantities[date_str] = float(cumulative_quantity)
+        
+        # 转换为图表数据格式
+        for date_str, quantity in sorted(daily_quantities.items()):
+            quantity_data.append({
+                'date': date_str,
+                'quantity': round(quantity, 2)
+            })
+        
+        # 计算详细的股票统计信息
+        stock_stats = {
+            'current_shares': 0,
+            'avg_cost': 0,
+            'total_cost': 0,
+            'current_price': 0,
+            'market_value': 0,
+            'unrealized_pnl': 0,
+            'realized_pnl': 0,
+            'total_dividends': 0,
+            'total_interest': 0,
+            'currency': 'CAD'
+        }
+        
+        # 计算当前持仓
+        current_holding = None
+        if cumulative_quantity > 0:
+            # 计算平均成本
+            total_cost = Decimal('0')
+            total_shares = Decimal('0')
+            
+            for transaction in transactions:
+                if transaction.type == 'BUY' and transaction.quantity and transaction.price:
+                    shares = Decimal(str(transaction.quantity))
+                    price = Decimal(str(transaction.price))
+                    total_cost += shares * price
+                    total_shares += shares
+            
+            if total_shares > 0:
+                avg_cost = total_cost / total_shares
+                currency = transactions[0].currency if transactions else 'CAD'
+                
+                # 获取当前价格（从最新的价格数据或stock_info）
+                current_price = 0
+                if price_data:
+                    current_price = price_data[-1]['price']
+                elif stock_info and stock_info.current_price:
+                    current_price = float(stock_info.current_price)
+                
+                market_value = float(cumulative_quantity) * current_price
+                unrealized_pnl = market_value - float(total_cost)
+                
+                current_holding = {
+                    'shares': float(cumulative_quantity),
+                    'avg_cost': float(avg_cost),
+                    'total_cost': float(total_cost),
+                    'currency': currency
+                }
+                
+                stock_stats.update({
+                    'current_shares': float(cumulative_quantity),
+                    'avg_cost': float(avg_cost),
+                    'total_cost': float(total_cost),
+                    'current_price': current_price,
+                    'market_value': market_value,
+                    'unrealized_pnl': unrealized_pnl,
+                    'currency': currency
+                })
+        
+        # 计算已实现收益
+        realized_gains = Decimal('0')
+        for transaction in transactions:
+            if transaction.type == 'SELL' and transaction.quantity and transaction.price:
+                # 简化计算：卖出价格 - 平均成本 (需要改进为FIFO计算)
+                sell_amount = Decimal(str(transaction.quantity)) * Decimal(str(transaction.price))
+                if stock_stats['avg_cost'] > 0:
+                    cost_basis = Decimal(str(transaction.quantity)) * Decimal(str(stock_stats['avg_cost']))
+                    realized_gains += sell_amount - cost_basis
+        
+        # 计算分红和利息总额
+        total_dividends = Decimal('0')
+        total_interest = Decimal('0')
+        for transaction in transactions:
+            if transaction.type == 'DIVIDEND' and transaction.amount:
+                total_dividends += Decimal(str(abs(transaction.amount)))
+            elif transaction.type == 'INTEREST' and transaction.amount:
+                total_interest += Decimal(str(abs(transaction.amount)))
+        
+        stock_stats.update({
+            'realized_pnl': float(realized_gains),
+            'total_dividends': float(total_dividends),
+            'total_interest': float(total_interest)
+        })
+        
+        # 准备交易标记数据（买卖点）- 支持多账户
+        transaction_markers = []
+        account_id_map = {}  # 映射账户ID到编号
+        account_counter = 0
+        
+        # 计算涉及的账户数量
+        unique_accounts = set(t.account_id for t in transactions if t.type in ['BUY', 'SELL'])
+        show_account_numbers = len(unique_accounts) > 1
+        
+        for transaction in transactions:
+            if transaction.type in ['BUY', 'SELL'] and transaction.price and transaction.trade_date:
+                # 为每个账户分配一个连续编号
+                if transaction.account_id not in account_id_map:
+                    account_counter += 1
+                    account_id_map[transaction.account_id] = account_counter
+                
+                transaction_markers.append({
+                    'date': transaction.trade_date.strftime('%Y-%m-%d'),
+                    'price': float(transaction.price),
+                    'type': transaction.type,
+                    'quantity': float(transaction.quantity) if transaction.quantity else 0,
+                    'account_id': transaction.account_id,
+                    'account_number': account_id_map[transaction.account_id],
+                    'account_name': transaction.account.name if transaction.account else f'Account {transaction.account_id}'
+                })
+        
+        print(f"DEBUG: Passing to template - price_data count: {len(price_data)}, quantity_data count: {len(quantity_data)}")
+        print(f"DEBUG: Price data sample: {price_data[:2] if price_data else 'Empty'}")
+        print(f"DEBUG: Quantity data sample: {quantity_data[:2] if quantity_data else 'Empty'}")
+        print(f"DEBUG: Transaction markers count: {len(transaction_markers)}")
+        
+        # Get account members for display
+        from app.models.account import AccountMember
+        account_members = AccountMember.query.all()
+        
+        return render_template('investment/stock_detail.html',
+                             title=f'{stock_symbol.upper()} - Stock Detail',
+                             stock_symbol=stock_symbol.upper(),
+                             stock_info=stock_info,
+                             transactions=transactions,
+                             price_data=price_data,
+                             quantity_data=quantity_data,
+                             transaction_markers=transaction_markers,
+                             current_holding=current_holding,
+                             stock_stats=stock_stats,
+                             member_id=member_id,
+                             account_id=account_id,
+                             family=family,
+                             account_members=account_members,
+                             show_account_numbers=show_account_numbers)
+    
+    except Exception as e:
+        flash(_('Error loading stock details: {}').format(str(e)), 'error')
+        return redirect(url_for('main.overview'))

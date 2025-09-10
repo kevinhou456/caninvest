@@ -10,11 +10,13 @@ from .stocks_cache import StocksCache
 from .stock_category import StockCategory
 from .contribution import Contribution
 from .price_cache import StockPriceCache, PriceUpdateLog
+from .stock_price_history import StockPriceHistory
 from .import_task import ImportTask, OCRTask
+from .cash import Cash
 
 __all__ = [
     'Family', 'Member', 'Account', 'AccountType', 
     'Transaction', 'StocksCache', 'StockCategory',
     'Contribution', 'StockPriceCache', 'PriceUpdateLog',
-    'ImportTask', 'OCRTask'
+    'StockPriceHistory', 'ImportTask', 'OCRTask', 'Cash'
 ]
