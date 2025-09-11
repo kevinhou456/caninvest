@@ -84,7 +84,7 @@
                                 <tr>
                                     <td>{{ account.name }}</td>
                                     <td>{{ account.account_type.name if account.account_type else '-' }}</td>
-                                    <td>{{ account.currency }}</td>
+                                    <td>Multi-currency</td>
                                     <td>
                                         <a href="{{ url_for('main.account_detail', account_id=account.id) }}" 
                                            class="btn btn-sm btn-outline-primary">{{ _('View') }}</a>

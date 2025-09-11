@@ -245,7 +245,7 @@ class HoldingsService:
     """持仓计算服务"""
     
     def __init__(self):
-        self._cache = {}
+        pass
     
     def get_holdings_snapshot(self, 
                             target: Union[int, List[int], str] = 'all',
@@ -270,10 +270,7 @@ class HoldingsService:
         if as_of_date is None:
             as_of_date = date.today()
         
-        # 生成缓存键
-        cache_key = f"holdings_{target}_{target_type}_{as_of_date}_{family_id}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        # 直接计算，不使用缓存
         
         # 获取目标账户列表
         account_ids = self._resolve_target_accounts(target, target_type, family_id)
@@ -290,7 +287,6 @@ class HoldingsService:
             for holding in account_holdings.values():
                 snapshot.add_holding(holding)
         
-        self._cache[cache_key] = snapshot
         return snapshot
     
     def _resolve_target_accounts(self, target: Union[int, List[int], str], 
@@ -573,8 +569,8 @@ class HoldingsService:
             return None
     
     def clear_cache(self):
-        """清除缓存"""
-        self._cache.clear()
+        """清除缓存（无操作 - 不再使用缓存）"""
+        pass
 
 
 # 全局服务实例

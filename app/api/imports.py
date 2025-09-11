@@ -166,10 +166,22 @@ def import_csv_with_mapping():
         created_count = 0
         failed_count = 0
         skipped_count = 0
+        corrected_count = 0
         errors = []
         
         for row_data in transactions_data:
             try:
+                # 检查股票代码是否需要矫正
+                original_stock = row_data['stock']
+                if original_stock:
+                    from app.models.stock_symbol_correction import StockSymbolCorrection
+                    currency = row_data.get('currency', 'USD')
+                    corrected_stock = StockSymbolCorrection.get_corrected_symbol(original_stock, currency)
+                    if corrected_stock != original_stock.upper():
+                        print(f"股票代码矫正: {original_stock}({currency}) -> {corrected_stock}")
+                        row_data['stock'] = corrected_stock
+                        corrected_count += 1
+                
                 # 检查是否为重复记录
                 trade_date = row_data['trade_date']
                 type = row_data['type']
@@ -255,6 +267,7 @@ def import_csv_with_mapping():
             'created_count': created_count,
             'failed_count': failed_count,
             'skipped_count': skipped_count,  # 添加跳过的重复记录数量
+            'corrected_count': corrected_count,  # 添加矫正的股票代码数量
             'errors': errors[:10],  # 最多返回10个错误
             'redirect_url': f'/transactions?account_id={account_id}'  # 添加重定向URL
         })

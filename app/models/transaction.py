@@ -95,8 +95,7 @@ class Transaction(db.Model):
             'account_id': self.account_id,
             'account': {
                 'id': self.account.id,
-                'name': self.account.name,
-                'currency': self.account.currency
+                'name': self.account.name
             } if self.account else None,
             'notes': self.notes,
             'total_amount': self.total_amount,

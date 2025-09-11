@@ -61,6 +61,12 @@ def create_app(config_name=None):
         return get_locale()
     
     @app.template_global()
+    def get_current_date():
+        """获取当前日期 - 与持仓计算使用相同的方式"""
+        from datetime import date
+        return date.today()
+    
+    @app.template_global()
     def get_current_filter_display(family, member_id=None, account_id=None, include_members=False, account_members=None):
         """获取当前选择的成员或账户显示信息
         
@@ -242,3 +248,4 @@ from app.models.member import Member
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction
 from app.models.stocks_cache import StocksCache
+from app.models.csv_format import CsvFormat

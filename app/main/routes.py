@@ -1731,7 +1731,7 @@ def export_transactions():
                 float(txn.quantity),
                 float(txn.price),
                 float(txn.fee) if txn.fee else 0,
-                txn.account.currency if txn.account else '',
+                txn.currency,
                 txn.account.name if txn.account else '',
                 '',  # member信息暂时不可用
                 '',  # exchange_rate字段已移除
@@ -2101,19 +2101,29 @@ def api_get_member_holdings(member_id):
 @bp.route('/stock/<stock_symbol>')
 def stock_detail(stock_symbol):
     """股票详情页面 - 显示价格图表和交易记录"""
+    print(f"DEBUG: ============ STOCK DETAIL ROUTE HIT FOR {stock_symbol} ============")
+    
     # 获取默认家庭
+    from app.models.family import Family
     family = Family.query.first()
     if not family:
+        print(f"DEBUG: No family found, redirecting to overview")
         flash(_('No family found'), 'error')
         return redirect(url_for('main.overview'))
     
-    # 获取过滤参数
+    print(f"DEBUG: Family found: {family.name if family else 'None'}")
+    
+    # Get query parameters - do this early to avoid issues
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
     
+    print(f"DEBUG: Query params - member_id: {member_id}, account_id: {account_id}")
+    
     try:
         # 获取所有该股票的交易记录
+        from app.models.transaction import Transaction
         all_transactions = Transaction.query.filter_by(stock=stock_symbol.upper()).all()
+        print(f"DEBUG: Found {len(all_transactions)} transactions for {stock_symbol.upper()}")
         
         # 如果有过滤条件，应用过滤
         transactions = []
@@ -2142,11 +2152,31 @@ def stock_detail(stock_symbol):
                 flash(_('No transactions found for stock {} in {}').format(stock_symbol.upper(), filter_name), 'info')
             else:
                 flash(_('No transactions found for stock {}').format(stock_symbol.upper()), 'warning')
-                return redirect(url_for('main.overview'))
+                # 不重定向，继续显示股票详情页面，让用户可以使用股票修正功能
         
         # 获取股票信息
         from app.models.stocks_cache import StocksCache
         stock_info = StocksCache.query.filter_by(symbol=stock_symbol.upper()).first()
+        
+        # 如果股票缓存记录不存在但有交易记录，创建一个基础的股票缓存记录用于修正功能
+        if not stock_info and all_transactions:
+            # 从第一笔交易中推测货币
+            first_transaction = all_transactions[0]
+            inferred_currency = first_transaction.currency or 'CAD'
+            
+            # 创建基础股票缓存记录
+            stock_info = StocksCache(
+                symbol=stock_symbol.upper(),
+                name='',  # 空名称，等待用户修正
+                exchange='',  # 空交易所，等待用户修正
+                currency=inferred_currency
+            )
+            db.session.add(stock_info)
+            db.session.commit()
+            print(f"Created basic stock cache record for {stock_symbol.upper()} with currency {inferred_currency}")
+        
+        # 初始化数据获取失败标志
+        price_data_fetch_failed = False
         
         # 1. 智能获取股票历史价格数据（基于实际交易历史）
         price_data = []
@@ -2176,9 +2206,11 @@ def stock_detail(stock_symbol):
                 print(f"日期范围优化: {range_summary['optimization']}")
             else:
                 print(f"智能历史管理器: 未获取到历史数据")
+                price_data_fetch_failed = True
             
         except Exception as e:
             print(f"智能历史数据获取失败: {e}")
+            price_data_fetch_failed = True
             
         # 如果智能获取失败或数据不足，回退到使用交易价格
         if len(price_data) < 10:
@@ -2347,10 +2379,24 @@ def stock_detail(stock_symbol):
         from app.models.account import AccountMember
         account_members = AccountMember.query.all()
         
+        # Convert stock_info to dictionary to avoid JSON serialization issues
+        if stock_info:
+            stock_info_dict = {
+                'id': stock_info.id,
+                'symbol': stock_info.symbol,
+                'name': stock_info.name,
+                'exchange': stock_info.exchange,
+                'currency': stock_info.currency,
+                'current_price': float(stock_info.current_price) if stock_info.current_price else None,
+                'price_updated_at': stock_info.price_updated_at
+            }
+        else:
+            stock_info_dict = None
+        
         return render_template('investment/stock_detail.html',
                              title=f'{stock_symbol.upper()} - Stock Detail',
                              stock_symbol=stock_symbol.upper(),
-                             stock_info=stock_info,
+                             stock_info=stock_info_dict,
                              transactions=transactions,
                              price_data=price_data,
                              quantity_data=quantity_data,
@@ -2361,8 +2407,231 @@ def stock_detail(stock_symbol):
                              account_id=account_id,
                              family=family,
                              account_members=account_members,
-                             show_account_numbers=show_account_numbers)
+                             show_account_numbers=show_account_numbers,
+                             price_data_fetch_failed=price_data_fetch_failed,
+                             needs_symbol_correction=stock_info_dict and (not stock_info_dict.get('name') or not stock_info_dict.get('exchange')))
+    
+        
+        print(f"DEBUG: After filtering: {len(transactions)} transactions")
+        
+        if not transactions:
+            flash(_('No transactions found for this stock symbol'), 'info')
+            
+            # 获取股票信息以正确判断是否需要修正按钮
+            from app.models.stocks_cache import StocksCache
+            stock_info = StocksCache.query.filter_by(symbol=stock_symbol.upper()).first()
+            
+            # 转换为字典格式
+            if stock_info:
+                stock_info_dict = {
+                    'id': stock_info.id,
+                    'symbol': stock_info.symbol,
+                    'name': stock_info.name,
+                    'exchange': stock_info.exchange,
+                    'currency': stock_info.currency,
+                    'current_price': float(stock_info.current_price) if stock_info.current_price else None,
+                    'price_updated_at': stock_info.price_updated_at
+                }
+            else:
+                stock_info_dict = None
+            
+            return render_template('investment/stock_detail.html',
+                                 title=f"{stock_symbol.upper()} - No Data",
+                                 stock_symbol=stock_symbol.upper(),
+                                 stock_info=stock_info_dict,
+                                 price_data=[],
+                                 quantity_data=[],
+                                 transactions=[],
+                                 all_transactions=[],
+                                 transaction_markers=[],
+                                 current_holding=None,
+                                 stock_stats={},
+                                 accounts=[],
+                                 members=[],
+                                 account_members=[],
+                                 show_account_numbers=False,
+                                 price_data_fetch_failed=True,
+                                 needs_symbol_correction=stock_info_dict and (not stock_info_dict.get('name') or not stock_info_dict.get('exchange')),
+                                 error_message="No transactions found")
+        
+        # 使用完整的原始实现
+        # 获取股票信息
+        from app.models.stocks_cache import StocksCache
+        stock_info = StocksCache.query.filter_by(symbol=stock_symbol.upper()).first()
+        
+        # 获取账户和成员信息
+        from app.models.account import Account, AccountMember
+        from app.models.member import Member
+        
+        accounts = []
+        members = []
+        account_members = []
+        if current_user.current_family:
+            accounts = Account.query.filter_by(family_id=current_user.current_family.id).all()
+            members = Member.query.filter_by(family_id=current_user.current_family.id).all()
+            account_members = AccountMember.query.join(Account).filter(Account.family_id == current_user.current_family.id).all()
+        
+        # 获取历史数据和计算持仓等完整逻辑
+        try:
+            from app.services.smart_history_manager import SmartHistoryManager
+            history_manager = SmartHistoryManager()
+            
+            # 获取股票历史数据
+            price_data, _ = history_manager.get_stock_history(
+                stock_symbol.upper(), 
+                transactions, 
+                currency=stock_info.currency if stock_info else 'USD'
+            )
+            
+            price_data_fetch_failed = False
+            if not price_data or len(price_data) < 10:
+                price_data_fetch_failed = True
+                print(f"Price data insufficient or missing for {stock_symbol}")
+            
+        except Exception as e:
+            print(f"智能历史数据获取失败: {e}")
+            price_data_fetch_failed = True
+            price_data = []
+        
+        # 如果历史数据获取失败，使用交易价格生成图表数据
+        if price_data_fetch_failed or not price_data:
+            price_data = []
+            for transaction in transactions:
+                price_data.append({
+                    'date': transaction.trade_date.strftime('%Y-%m-%d'),
+                    'price': float(transaction.unit_price)
+                })
+        
+        # 计算累计持仓量数据
+        quantity_data = []
+        cumulative_quantity = 0.0
+        for transaction in sorted(transactions, key=lambda x: x.trade_date):
+            if transaction.transaction_type == 'BUY':
+                cumulative_quantity += float(transaction.quantity)
+            elif transaction.transaction_type == 'SELL':
+                cumulative_quantity -= float(transaction.quantity)
+            
+            quantity_data.append({
+                'date': transaction.trade_date.strftime('%Y-%m-%d'),
+                'quantity': cumulative_quantity
+            })
+        
+        # 生成交易标记数据
+        account_counter = {}
+        transaction_markers = []
+        for transaction in transactions:
+            if transaction.account_id not in account_counter:
+                account_counter[transaction.account_id] = len(account_counter) + 1
+            
+            transaction_markers.append({
+                'date': transaction.trade_date.strftime('%Y-%m-%d'),
+                'type': transaction.transaction_type,
+                'price': float(transaction.unit_price),
+                'quantity': float(transaction.quantity),
+                'account_id': transaction.account_id,
+                'account_number': account_counter[transaction.account_id],
+                'account_name': next((acc.account_name for acc in accounts if acc.id == transaction.account_id), 'Unknown')
+            })
+        
+        # 判断是否需要显示账户编号
+        unique_accounts = len(set(t.account_id for t in transactions))
+        show_account_numbers = unique_accounts > 1
+        
+        # 计算当前持仓
+        current_holding = cumulative_quantity
+        
+        # 计算股票统计
+        total_cost = sum(float(t.unit_price) * float(t.quantity) for t in transactions if t.transaction_type == 'BUY')
+        total_sold_value = sum(float(t.unit_price) * float(t.quantity) for t in transactions if t.transaction_type == 'SELL')
+        
+        stock_stats = {
+            'total_transactions': len(transactions),
+            'total_cost': total_cost,
+            'total_sold_value': total_sold_value,
+            'current_holding': current_holding,
+            'unique_accounts': unique_accounts
+        }
+        
+        print(f"DEBUG: Passing to template - price_data count: {len(price_data)}, quantity_data count: {len(quantity_data)}")
+        print(f"DEBUG: Price data sample: {price_data[:2] if price_data else []}")
+        print(f"DEBUG: Quantity data sample: {quantity_data[:2] if quantity_data else []}")
+        print(f"DEBUG: Transaction markers count: {len(transaction_markers)}")
+        
+        # 渲染模板 - 转换stock_info为字典以避免JSON序列化错误
+        stock_info_dict = None
+        if stock_info:
+            stock_info_dict = {
+                'id': stock_info.id,
+                'symbol': stock_info.symbol,
+                'name': stock_info.name,
+                'exchange': stock_info.exchange,
+                'currency': stock_info.currency,
+                'current_price': float(stock_info.current_price) if stock_info.current_price else None
+            }
+        
+        return render_template('investment/stock_detail.html',
+                             title=f"{stock_symbol.upper()} - Stock Details",
+                             stock_symbol=stock_symbol.upper(),
+                             stock_info=stock_info_dict,
+                             price_data=price_data,
+                             quantity_data=quantity_data,
+                             transactions=transactions,
+                             all_transactions=all_transactions,
+                             transaction_markers=transaction_markers,
+                             current_holding=current_holding,
+                             stock_stats=stock_stats,
+                             accounts=accounts,
+                             members=members,
+                             account_members=account_members,
+                             show_account_numbers=show_account_numbers,
+                             price_data_fetch_failed=price_data_fetch_failed,
+                             needs_symbol_correction=stock_info_dict and (not stock_info_dict.get('name') or not stock_info_dict.get('exchange')))
     
     except Exception as e:
+        print(f"DEBUG: Exception in stock_detail route: {str(e)}")
+        print(f"DEBUG: Exception type: {type(e)}")
+        import traceback
+        print(f"DEBUG: Traceback: {traceback.format_exc()}")
+        from flask_babel import _
         flash(_('Error loading stock details: {}').format(str(e)), 'error')
-        return redirect(url_for('main.overview'))
+        
+        # 获取股票信息以正确判断是否需要修正按钮
+        try:
+            from app.models.stocks_cache import StocksCache
+            stock_info = StocksCache.query.filter_by(symbol=stock_symbol.upper()).first()
+            
+            # 转换为字典格式
+            if stock_info:
+                stock_info_dict = {
+                    'id': stock_info.id,
+                    'symbol': stock_info.symbol,
+                    'name': stock_info.name,
+                    'exchange': stock_info.exchange,
+                    'currency': stock_info.currency,
+                    'current_price': float(stock_info.current_price) if stock_info.current_price else None,
+                    'price_updated_at': stock_info.price_updated_at
+                }
+            else:
+                stock_info_dict = None
+        except:
+            stock_info_dict = None
+        
+        # 不要重定向到overview，而是显示错误页面让用户可以使用修正功能
+        return render_template('investment/stock_detail.html',
+                             title=f"{stock_symbol.upper()} - Error",
+                             stock_symbol=stock_symbol.upper(),
+                             stock_info=stock_info_dict,
+                             price_data=[],
+                             quantity_data=[],
+                             transactions=[],
+                             all_transactions=[],
+                             transaction_markers=[],
+                             current_holding=None,
+                             stock_stats={},
+                             accounts=[],
+                             members=[],
+                             account_members=[],
+                             show_account_numbers=False,
+                             price_data_fetch_failed=True,
+                             needs_symbol_correction=stock_info_dict and (not stock_info_dict.get('name') or not stock_info_dict.get('exchange')),
+                             error_message=str(e))

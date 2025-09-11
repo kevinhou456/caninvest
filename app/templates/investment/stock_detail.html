@@ -1,6 +1,8 @@
 {% extends "base/investment_base.html" %}
 
 {% block extra_head %}
+<!-- Stock Symbol Correction Component -->
+<script src="{{ url_for('static', filename='js/stock-symbol-correction.js') }}"></script>
 {% endblock %}
 
 {% block content %}
@@ -12,23 +14,32 @@
                 <!-- Header with Stock Info and Summary -->
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <div class="flex-grow-1">
-                        <h2 class="mb-1">
-                            <i class="fas fa-chart-line me-2 text-primary"></i>
-                            {{ stock_symbol }}
-                            {% if stock_info and stock_info.name %}
-                                <small class="text-muted">- {{ stock_info.name }}</small>
-                            {% endif %}
-                            
-                            <!-- Display current filter next to stock symbol -->
-                            {% if member_id or account_id %}
-                                {% set filter_info = get_current_filter_display(family, member_id, account_id, true, account_members) %}
-                                {% if filter_info %}
-                                    <span class="badge bg-info ms-3" style="font-size: 0.6em;">
-                                        <i class="{{ filter_info.icon_class }} me-1"></i>{{ filter_info.display_text }}
-                                    </span>
+                        <div class="d-flex align-items-center flex-wrap gap-3">
+                            <h2 class="mb-0">
+                                <i class="fas fa-chart-line me-2 text-primary"></i>
+                                {{ stock_symbol }}
+                                {% if stock_info and stock_info.name %}
+                                    <small class="text-muted">- {{ stock_info.name }}</small>
                                 {% endif %}
+                                
+                                <!-- Display current filter next to stock symbol -->
+                                {% if member_id or account_id %}
+                                    {% set filter_info = get_current_filter_display(family, member_id, account_id, true, account_members) %}
+                                    {% if filter_info %}
+                                        <span class="badge bg-info ms-3" style="font-size: 0.6em;">
+                                            <i class="{{ filter_info.icon_class }} me-1"></i>{{ filter_info.display_text }}
+                                        </span>
+                                    {% endif %}
+                                {% endif %}
+                            </h2>
+                            
+                            <!-- Stock Symbol Correction Button -->
+                            {% if needs_symbol_correction %}
+                            <button type="button" class="btn btn-warning btn-sm" id="stockCorrectionBtn" onclick="testModal()">
+                                <i class="fas fa-edit me-1"></i>修正股票代码
+                            </button>
                             {% endif %}
-                        </h2>
+                        </div>
                         <div class="d-flex align-items-center gap-3">
                             <nav aria-label="breadcrumb" class="mb-0">
                                 <ol class="breadcrumb mb-0">
@@ -198,6 +209,62 @@
 console.log('=== Chart initialization starting ===');
 
 // Update debug status immediately
+// 全局测试函数 - 移到外部避免作用域问题
+window.testModal = function() {
+    console.log('测试模态框函数被调用');
+    
+    // 检查StockSymbolCorrection是否已加载
+    if (typeof StockSymbolCorrection === 'undefined') {
+        console.error('StockSymbolCorrection 组件未加载');
+        alert('股票修正组件未加载，请检查JavaScript文件');
+        return;
+    }
+    
+    try {
+        const correction = new StockSymbolCorrection({
+            onSuccess: (result) => {
+                console.log('修正成功:', result);
+                alert('修正成功，将跳转到新页面');
+                // 跳转逻辑
+                if (result.stock_info && result.stock_info.symbol) {
+                    const newSymbol = result.stock_info.symbol;
+                    const currentParams = new URLSearchParams(window.location.search);
+                    let newUrl = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__') }}`.replace('__SYMBOL__', newSymbol);
+                    
+                    if (currentParams.toString()) {
+                        newUrl += '?' + currentParams.toString();
+                    }
+                    
+                    console.log('跳转到:', newUrl);
+                    window.location.href = newUrl;
+                } else {
+                    window.location.reload();
+                }
+            },
+            onError: (error) => {
+                console.error('修正失败:', error);
+                alert('修正失败: ' + error);
+            }
+        });
+        
+        console.log('显示修正对话框，传入数据:', {
+            stockId: {{ stock_info.id if stock_info else 'null' }},
+            symbol: {{ stock_symbol | tojson }},
+            currency: {{ (stock_info.currency if stock_info else 'CAD') | tojson }}
+        });
+        
+        correction.show({
+            stockId: {{ stock_info.id if stock_info else 'null' }},
+            symbol: {{ stock_symbol | tojson }},
+            currency: {{ (stock_info.currency if stock_info else 'CAD') | tojson }}
+        });
+        
+    } catch (error) {
+        console.error('创建修正组件失败:', error);
+        alert('创建修正组件失败: ' + error.message);
+    }
+};
+
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, initializing chart...');
     
@@ -479,6 +546,70 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error('Chart creation failed:', error);
         const chartContainer = document.querySelector('#combinedChart').parentElement;
         chartContainer.innerHTML = '<div class="text-center text-danger py-5"><i class="fas fa-exclamation-triangle fa-3x mb-3"></i><p>Chart error: ' + error.message + '</p></div>';
+    }
+
+    // 初始化股票代码修正功能
+    console.log('检查修正按钮初始化条件:', {
+        needs_symbol_correction: {{ needs_symbol_correction | tojson }},
+        stock_info: {{ stock_info | tojson if stock_info else 'null' }}
+    });
+    
+    const correctionBtn = document.getElementById('stockCorrectionBtn');
+    console.log('修正按钮元素:', correctionBtn);
+    
+    if (correctionBtn) {
+        console.log('添加点击事件监听器');
+        correctionBtn.addEventListener('click', (e) => {
+            console.log('修正按钮被点击');
+            e.preventDefault();
+            
+            // 检查StockSymbolCorrection是否已加载
+            if (typeof StockSymbolCorrection === 'undefined') {
+                console.error('StockSymbolCorrection 组件未加载');
+                alert('股票修正组件未加载，请刷新页面重试');
+                return;
+            }
+            
+            try {
+                const correction = new StockSymbolCorrection({
+                    onSuccess: (result) => {
+                        console.log('修正成功:', result);
+                        // 跳转到新的股票代码页面（保持当前过滤条件）
+                        if (result.stock_info && result.stock_info.symbol) {
+                            const newSymbol = result.stock_info.symbol;
+                            const currentParams = new URLSearchParams(window.location.search);
+                            let newUrl = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__') }}`.replace('__SYMBOL__', newSymbol);
+                            
+                            // 保持当前的过滤参数
+                            if (currentParams.toString()) {
+                                newUrl += '?' + currentParams.toString();
+                            }
+                            
+                            console.log('跳转到:', newUrl);
+                            window.location.href = newUrl;
+                        } else {
+                            // 如果没有返回新的股票代码，则刷新当前页面
+                            window.location.reload();
+                        }
+                    },
+                    onError: (error) => {
+                        console.error('修正失败:', error);
+                    }
+                });
+                
+                console.log('显示修正对话框');
+                correction.show({
+                    stockId: {{ stock_info.id if stock_info else 'null' }},
+                    symbol: {{ stock_symbol | tojson }},
+                    currency: {{ (stock_info.currency if stock_info else 'CAD') | tojson }}
+                });
+            } catch (error) {
+                console.error('创建修正组件失败:', error);
+                alert('创建修正组件失败: ' + error.message);
+            }
+        });
+    } else {
+        console.log('修正按钮未找到');
     }
 });
 </script>

@@ -80,8 +80,6 @@ class Family(db.Model):
             summary['accounts_by_type'][account_type]['count'] += 1
             summary['accounts_by_type'][account_type]['total_value'] += account.current_value or 0
             
-            # 按货币统计
-            if account.currency in summary['currency_breakdown']:
-                summary['currency_breakdown'][account.currency] += account.current_value or 0
+            # 按货币统计(跳过，因为账户可以包含多种货币)
         
         return summary

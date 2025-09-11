@@ -43,7 +43,6 @@ class Account(db.Model):
     account_type_id = db.Column(db.Integer, db.ForeignKey('account_types.id'), comment='账户类型ID')
     family_id = db.Column(db.Integer, db.ForeignKey('families.id'), nullable=False, comment='家庭ID')
     is_joint = db.Column(db.Boolean, default=False, comment='是否联名账户')
-    currency = db.Column(db.String(3), default='CAD', comment='货币类型')
     account_number = db.Column(db.String(50), comment='账户号码')
     broker_name = db.Column(db.String(100), comment='券商名称')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
@@ -66,7 +65,6 @@ class Account(db.Model):
             'account_type': self.account_type.to_dict() if self.account_type else None,
             'family_id': self.family_id,
             'is_joint': self.is_joint,
-            'currency': self.currency,
             'account_number': self.account_number,
             'broker_name': self.broker_name,
             'created_at': self.created_at.isoformat(),

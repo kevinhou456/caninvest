@@ -171,8 +171,6 @@ def update_account(account_id):
             account.account_type_id = data['account_type_id']
         else:
             account.account_type_id = None
-    if 'currency' in data:
-        account.currency = data['currency']
     if 'account_number' in data:
         account.account_number = data['account_number']
     if 'broker_name' in data:

@@ -1,5 +1,10 @@
 {% extends "base/investment_base.html" %}
 
+{% block extra_head %}
+<!-- Stock Symbol Correction Component -->
+<script src="{{ url_for('static', filename='js/stock-symbol-correction.js') }}"></script>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
@@ -164,60 +169,6 @@
     </div>
 </div>
 
-<!-- Edit Stock Modal -->
-<div class="modal fade" id="stockModal" tabindex="-1" aria-labelledby="stockModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="stockModalLabel">{{ _('Edit Stock') }}</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
-            </div>
-            <form id="stockForm">
-                <div class="modal-body">
-                    <input type="hidden" id="stockId" name="stockId">
-                    
-                    <div class="mb-3">
-                        <label for="stockSymbol" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger">*</span></label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="stockSymbol" name="symbol" required>
-                            <button type="button" class="btn btn-outline-info" onclick="refreshStockInfo()">
-                                <i class="fas fa-sync"></i> {{ _('验证') }}
-                            </button>
-                        </div>
-                        <div class="form-text">{{ _('This will update all related transaction records') }}</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="stockName" class="form-label">{{ _('Stock Name') }}</label>
-                        <input type="text" class="form-control" id="stockName" name="name" readonly>
-                        <div class="form-text">{{ _('Used for stock code verification only') }}</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="stockExchange" class="form-label">{{ _('Exchange') }}</label>
-                        <input type="text" class="form-control" id="stockExchange" name="exchange" readonly>
-                        <div class="form-text">{{ _('Used for stock code verification only') }}</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="stockCurrency" class="form-label">{{ _('Currency') }} <span class="text-danger">*</span></label>
-                        <select class="form-select" id="stockCurrency" name="currency" required>
-                            <option value="USD">USD</option>
-                            <option value="CAD">CAD</option>
-                            <option value="EUR">EUR</option>
-                            <option value="GBP">GBP</option>
-                            <option value="CNY">CNY</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
-                    <button type="submit" class="btn btn-primary">{{ _('Update') }}</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 
 <!-- Add/Edit Category Modal -->
 <div class="modal fade" id="categoryModal" tabindex="-1" aria-labelledby="categoryModalLabel" aria-hidden="true">
@@ -321,76 +272,19 @@ function categorizeAllStocks() {
 }
 
 function editStock(stockId, symbol, name, exchange, currency) {
-    document.getElementById('stockId').value = stockId;
-    document.getElementById('stockSymbol').value = symbol;
-    document.getElementById('stockName').value = name;
-    document.getElementById('stockExchange').value = exchange;
-    document.getElementById('stockCurrency').value = currency;
-    const modal = new bootstrap.Modal(document.getElementById('stockModal'));
-    modal.show();
-}
-
-function refreshStockInfo() {
-    const symbol = document.getElementById('stockSymbol').value.trim().toUpperCase();
-    const currency = document.getElementById('stockCurrency').value;
-    
-    if (!symbol) {
-        alert('{{ _("Please enter a stock symbol first") }}');
-        return;
-    }
-    
-    // 显示加载状态
-    const refreshBtn = event.target.closest('button');
-    const originalText = refreshBtn.innerHTML;
-    refreshBtn.disabled = true;
-    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> {{ _("Loading...") }}';
-    
-    // 创建临时股票记录来获取信息
-    fetch('/api/v1/stocks/refresh-info', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: JSON.stringify({
-            symbol: symbol,
-            currency: currency
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success && data.stock_info) {
-            const info = data.stock_info;
-            
-            // 自动填充表单
-            if (info.name) {
-                document.getElementById('stockName').value = info.name;
-            }
-            if (info.exchange) {
-                document.getElementById('stockExchange').value = info.exchange;
-            }
-            
-            // 显示获取到的信息
-            let message = '{{ _("Stock information retrieved successfully") }}:';
-            if (info.name) message += `\n{{ _("Name") }}: ${info.name}`;
-            if (info.exchange) message += `\n{{ _("Exchange") }}: ${info.exchange}`;
-            if (info.current_price) message += `\n{{ _("Current price") }}: ${currency} $${info.current_price}`;
-            
-            alert(message);
-        } else {
-            alert('{{ _("Unable to get stock information from Yahoo Finance") }}: ' + (data.error || '{{ _("Unknown error") }}'));
+    const correction = new StockSymbolCorrection({
+        onSuccess: () => {
+            location.reload();
         }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('{{ _("Error getting stock information. Please try again.") }}');
-    })
-    .finally(() => {
-        // 恢复按钮状态
-        refreshBtn.disabled = false;
-        refreshBtn.innerHTML = originalText;
+    });
+    
+    correction.show({
+        stockId: stockId,
+        symbol: symbol,
+        currency: currency
     });
 }
+
 
 function deleteStock(stockId, symbol) {
     if (confirm('{{ _("Are you sure you want to delete stock") }} "' + symbol + '"? {{ _("This will remove the stock from cache but not affect transaction records.") }}')) {
@@ -486,68 +380,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-// Stock form submission handler
-document.getElementById('stockForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const formData = new FormData(this);
-    const data = {
-        symbol: formData.get('symbol'),
-        name: formData.get('name'),
-        exchange: formData.get('exchange'),
-        currency: formData.get('currency')
-    };
-    
-    const stockId = formData.get('stockId');
-    
-    fetch(`/api/v1/stocks/${stockId}`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // 构建成功消息
-            let message = '{{ _("Stock updated successfully") }}';
-            
-            if (data.updated_transactions > 0) {
-                message += `\n{{ _("Updated") }} ${data.updated_transactions} {{ _("transaction records") }}`;
-            }
-            
-            if (data.merged_duplicate) {
-                message += `\n{{ _("Merged duplicate stock and updated") }} ${data.merged_transactions} {{ _("additional transaction records") }}`;
-            }
-            
-            if (data.refreshed_info) {
-                message += '\n{{ _("Stock information has been refreshed from Yahoo Finance") }}';
-                
-                if (data.stock_info && data.stock_info.current_price) {
-                    message += `\n{{ _("Current price") }}: ${data.stock_info.currency} $${data.stock_info.current_price}`;
-                }
-                
-                if (data.stock_info && data.stock_info.name) {
-                    message += `\n{{ _("Name") }}: ${data.stock_info.name}`;
-                }
-                
-                if (data.stock_info && data.stock_info.exchange) {
-                    message += `\n{{ _("Exchange") }}: ${data.stock_info.exchange}`;
-                }
-            }
-            
-            alert(message);
-            location.reload();
-        } else {
-            alert('{{ _("Error: ") }}' + (data.error || '{{ _("Unknown error") }}'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('{{ _("Error updating stock. Please try again.") }}');
-    });
-});
 
 // Form submission handlers
 document.getElementById('categoryForm').addEventListener('submit', function(e) {

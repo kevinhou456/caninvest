@@ -11,6 +11,7 @@ from app import db
 from app.models.stocks_cache import StocksCache
 from app.models.price_cache import StockPriceCache
 from app.models.transaction import Transaction
+from app.models.stock_symbol_correction import StockSymbolCorrection
 from . import bp
 
 @bp.route('/stocks/search', methods=['GET'])
@@ -97,7 +98,7 @@ def update_stock(stock_id):
         stock.exchange = data.get('exchange', stock.exchange)
         stock.currency = new_currency
         
-        # 如果股票代码发生变化，更新所有相关的交易记录
+        # 如果股票代码发生变化，更新所有相关的交易记录，并保存矫正记录
         updated_transactions_count = 0
         if old_symbol != new_symbol:
             transactions = Transaction.query.filter_by(stock=old_symbol).all()
@@ -105,6 +106,20 @@ def update_stock(stock_id):
                 transaction.stock = new_symbol
             updated_transactions_count = len(transactions)
             print(f"Updated {updated_transactions_count} transaction records from {old_symbol} to {new_symbol}")
+            
+            # 保存股票代码矫正记录
+            try:
+                correction_note = f"通过股票详情页面修正，更新了 {updated_transactions_count + existing_stock_transactions_updated} 条交易记录"
+                StockSymbolCorrection.add_correction(
+                    original_symbol=old_symbol,
+                    currency=stock.currency,
+                    corrected_symbol=new_symbol,
+                    note=correction_note
+                )
+                print(f"保存股票代码矫正记录: {old_symbol}({stock.currency}) -> {new_symbol}")
+            except Exception as e:
+                print(f"保存股票代码矫正记录失败: {str(e)}")
+                # 不影响主要功能，继续执行
         
         # 总的更新交易记录数量（包括原有的和从重复股票合并过来的）
         total_updated_transactions = updated_transactions_count + existing_stock_transactions_updated

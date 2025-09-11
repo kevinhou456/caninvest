@@ -16,7 +16,7 @@
                             <select class="form-select" id="modal_account_id" name="account_id" required>
                                 <option value="">{{ _('Select Account') }}</option>
                                 {% for account in accounts %}
-                                <option value="{{ account.id }}" data-currency="{{ account.currency }}">
+                                <option value="{{ account.id }}">
                                     {% if account.account_members %}
                                         {% set member_names = [] %}
                                         {% for am in account.account_members %}
@@ -439,9 +439,8 @@ function handleTransactionTypeChange() {
 
 // Initialize modal functionality
 document.addEventListener('DOMContentLoaded', function() {
-    // Set today's date as default
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('modal_trade_date').value = today;
+    // Set today's date as default - use server's current date
+    document.getElementById('modal_trade_date').value = '{{ get_current_date().isoformat() }}';
     
     // Add event listeners for summary calculation
     const modalInputs = ['modal_quantity', 'modal_price_per_share', 'modal_transaction_fee', 'modal_transaction_type', 'modal_currency', 'modal_amount'];
@@ -528,9 +527,8 @@ function resetTransactionForm() {
     document.getElementById('quantity_required').style.display = 'inline';
     document.getElementById('price_required').style.display = 'inline';
     
-    // Set today's date
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('modal_trade_date').value = today;
+    // Set today's date - use server's current date
+    document.getElementById('modal_trade_date').value = '{{ get_current_date().isoformat() }}';
     
     // Reset summary
     document.getElementById('modal-summary-content').innerHTML = '<p class="text-muted">{{ _("Fill in the form to see transaction summary") }}</p>';

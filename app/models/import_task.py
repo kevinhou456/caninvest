@@ -32,6 +32,7 @@ class ImportTask(db.Model):
     imported_count = db.Column(db.Integer, default=0, comment='成功导入数')
     failed_count = db.Column(db.Integer, default=0, comment='失败数')
     skipped_count = db.Column(db.Integer, default=0, comment='跳过数')
+    corrected_count = db.Column(db.Integer, default=0, comment='股票代码矫正数')
     error_details = db.Column(db.Text, comment='错误详情')
     processing_log = db.Column(db.Text, comment='处理日志')
     created_by = db.Column(db.Integer, db.ForeignKey('members.id'), comment='创建者')
@@ -63,6 +64,7 @@ class ImportTask(db.Model):
             'imported_count': self.imported_count,
             'failed_count': self.failed_count,
             'skipped_count': self.skipped_count,
+            'corrected_count': self.corrected_count,
             'progress_percentage': self.progress_percentage,
             'error_details': self.error_details,
             'created_by': self.created_by,

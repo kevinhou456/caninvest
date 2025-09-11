@@ -366,16 +366,23 @@ class AnalyticsService:
         
         for account in accounts:
             account_transactions = [t for t in transactions if t.account_id == account.id]
-            realized_gain = self._calculate_realized_gain(account_transactions)
             
-            if account.currency == 'CAD':
-                metrics.realized_gain_cad += realized_gain
-                metrics.realized_gain_usd += realized_gain / self.exchange_rate
-                cad_realized += realized_gain
-            else:
-                metrics.realized_gain_usd += realized_gain
-                metrics.realized_gain_cad += realized_gain * self.exchange_rate
-                usd_realized += realized_gain
+            # Separate transactions by currency
+            cad_transactions = [t for t in account_transactions if t.currency == 'CAD']
+            usd_transactions = [t for t in account_transactions if t.currency == 'USD']
+            
+            cad_realized_gain = self._calculate_realized_gain(cad_transactions)
+            usd_realized_gain = self._calculate_realized_gain(usd_transactions)
+            
+            # Add CAD gains
+            metrics.realized_gain_cad += cad_realized_gain
+            metrics.realized_gain_usd += cad_realized_gain / self.exchange_rate
+            cad_realized += cad_realized_gain
+            
+            # Add USD gains
+            metrics.realized_gain_usd += usd_realized_gain
+            metrics.realized_gain_cad += usd_realized_gain * self.exchange_rate
+            usd_realized += usd_realized_gain
         
         # 存储分币种已实现收益
         metrics.cad_realized_only = cad_realized
@@ -688,7 +695,7 @@ class AnalyticsService:
                 'id': account.id,
                 'name': account.name,
                 'type': account.account_type,
-                'currency': account.currency,
+                'currencies': list(set([t.currency for t in account.transactions if t.currency])),
                 'current_value': float(current_value),
                 'total_cost': float(total_cost),
                 'unrealized_gain': float(current_value - total_cost),

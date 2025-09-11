@@ -757,6 +757,11 @@ function importWithMapping() {
                 message += `\n{{ _("Skipped (duplicates): ") }}${data.skipped_count}`;
             }
             
+            // 如果有矫正的股票代码，显示矫正数量
+            if (data.corrected_count && data.corrected_count > 0) {
+                message += `\n{{ _("Stock symbols corrected: ") }}${data.corrected_count}`;
+            }
+            
             alert(message);
             
             // 如果返回了重定向URL，则跳转到对应账户的交易记录页面

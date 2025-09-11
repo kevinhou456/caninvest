@@ -157,8 +157,7 @@ class PortfolioService:
     """统一投资组合服务"""
     
     def __init__(self):
-        self._snapshot_cache = {}
-        self._price_cache = {}
+        pass
     
     def get_time_period_dates(self, period: TimePeriod, 
                             start_date: Optional[date] = None,
@@ -204,10 +203,6 @@ class PortfolioService:
                             account_id: int, 
                             as_of_date: date) -> PositionSnapshot:
         """获取特定时间点的持仓快照"""
-        cache_key = f"{symbol}_{account_id}_{as_of_date}"
-        
-        if cache_key in self._snapshot_cache:
-            return self._snapshot_cache[cache_key]
         
         # 获取账户信息
         account = Account.query.get(account_id)
@@ -239,7 +234,6 @@ class PortfolioService:
         self._update_market_data(snapshot)
         self._update_stock_info(snapshot)
         
-        self._snapshot_cache[cache_key] = snapshot
         return snapshot
 
     def _process_transaction_fifo(self, snapshot: PositionSnapshot, tx: Transaction):
@@ -399,16 +393,11 @@ class PortfolioService:
             # 货币信息只从交易记录中获取，不从stocks_cache中获取
     
     def _get_current_price(self, symbol: str, currency: str) -> Optional[Decimal]:
-        """获取当前价格 - 使用统一的缓存机制"""
-        cache_key = f"{symbol}_{currency}"
-        if cache_key in self._price_cache:
-            return self._price_cache[cache_key]
-        
+        """获取当前价格 - 直接调用外部API服务（保持API缓存）"""
         try:
             from app.services.stock_price_service import StockPriceService
             price_service = StockPriceService()
             price = price_service.get_cached_stock_price(symbol, currency)
-            self._price_cache[cache_key] = price
             return price
         except Exception as e:
             logger.error(f"Failed to get stock price for {symbol} ({currency}): {e}")
@@ -421,8 +410,7 @@ class PortfolioService:
         return 'Unknown'
     
     def clear_cache(self):
-        """清除缓存"""
-        self._snapshot_cache.clear()
-        self._price_cache.clear()
+        """清除缓存（无操作 - 不再使用本地缓存）"""
+        pass
 # 全局服务实例
 portfolio_service = PortfolioService()

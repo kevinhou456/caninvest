@@ -16,6 +16,7 @@ from app.models.transaction import Transaction
 from app.models.stocks_cache import StocksCache
 from app.models.account import Account
 from app.models.import_task import ImportTask, TaskStatus
+from app.models.stock_symbol_correction import StockSymbolCorrection
 
 
 class CSVTransactionService:
@@ -54,9 +55,12 @@ class CSVTransactionService:
             task.processed_rows = len(transactions_data)
             
             # 导入交易记录
-            imported_count, failed_count, errors = self._import_transactions(
+            imported_count, failed_count, errors, corrected_count = self._import_transactions(
                 transactions_data, task.account_id
             )
+            
+            # 保存矫正统计信息到任务结果中
+            task.corrected_count = corrected_count
             
             task.imported_count = imported_count
             task.failed_count = failed_count
@@ -292,7 +296,8 @@ class CSVTransactionService:
             'price': ['price', 'price_per_share', 'unit_price'],
             'fee': ['fee', 'commission', 'transaction_fee'],
             'total': ['total', 'amount', 'gross_amount', 'net_amount', 'net amount'],
-            'description': ['description', 'name', 'stock_name']
+            'description': ['description', 'name', 'stock_name'],
+            'currency': ['currency', 'curr']
         }
         
         # 检测列名
@@ -306,6 +311,13 @@ class CSVTransactionService:
                 # 更灵活的匹配 - 转换为小写并移除空格和下划线
                 field_normalized = field.lower().replace('_', '').replace(' ', '')
                 possible_normalized = [name.lower().replace('_', '').replace(' ', '') for name in possible_names]
+                
+                # 对于货币字段，排除可能的余额相关列
+                if key == 'currency':
+                    # 排除包含balance, current, total等的列名
+                    excluded_terms = ['balance', 'current', 'total', 'amount', 'value', 'cash']
+                    if any(term in field_normalized for term in excluded_terms):
+                        continue
                 
                 if field_normalized in possible_normalized:
                     detected_columns[key] = field
@@ -376,7 +388,7 @@ class CSVTransactionService:
                     'transaction_fee': abs(float(row.get(detected_columns.get('fee', ''), 0))),
                     'total_amount': abs(float(row.get(detected_columns.get('total', ''), 0))),
                     'trade_date': trade_date,
-                    'currency': row.get('currency', 'CAD').upper(),
+                    'currency': row.get(detected_columns.get('currency', ''), 'CAD').upper() if detected_columns.get('currency') else 'CAD',
                     'notes': f'Imported from Generic CSV',
                     'broker_reference': f"CSV-{date_str}-{symbol}"
                 })
@@ -387,11 +399,12 @@ class CSVTransactionService:
         
         return transactions
     
-    def _import_transactions(self, transactions_data: List[Dict], account_id: int) -> Tuple[int, int, List[str]]:
+    def _import_transactions(self, transactions_data: List[Dict], account_id: int) -> Tuple[int, int, List[str], int]:
         """导入交易记录到数据库"""
         imported_count = 0
         failed_count = 0
         errors = []
+        corrected_count = 0  # 记录矫正的交易数量
         
         account = Account.query.get(account_id)
         if not account:
@@ -399,8 +412,10 @@ class CSVTransactionService:
         
         for txn_data in transactions_data:
             try:
-                # 查找或创建股票记录
-                stock = self._find_or_create_stock(txn_data)
+                # 查找或创建股票记录，并检查是否发生了矫正
+                stock, was_corrected = self._find_or_create_stock(txn_data)
+                if was_corrected:
+                    corrected_count += 1
                 
                 # 检查是否已存在相同的交易（根据broker_reference）
                 existing = Transaction.query.filter_by(
@@ -411,29 +426,22 @@ class CSVTransactionService:
                 if existing:
                     continue  # 跳过重复交易
                 
-                # 创建交易记录
+                # 创建交易记录  
                 transaction = Transaction(
                     account_id=account_id,
-                    stock_id=stock.id,
-                    member_id=account.primary_member.id if account.primary_member else None,
-                    transaction_type=txn_data['transaction_type'],
+                    stock=txn_data['symbol'],  # 使用矫正后的symbol
+                    type=txn_data['transaction_type'],
                     quantity=Decimal(str(txn_data['quantity'])),
-                    price_per_share=Decimal(str(txn_data['price_per_share'])),
-                    transaction_fee=Decimal(str(txn_data['transaction_fee'])),
-                    total_amount=Decimal(str(txn_data['total_amount'])),
+                    price=Decimal(str(txn_data['price_per_share'])),
+                    fee=Decimal(str(txn_data['transaction_fee'])),
+                    amount=Decimal(str(txn_data['total_amount'])),
                     trade_date=txn_data['trade_date'],
-                    settlement_date=txn_data.get('settlement_date'),
-                    currency=txn_data.get('currency', account.currency),
-                    exchange_rate=txn_data.get('exchange_rate'),
-                    notes=txn_data.get('notes'),
-                    broker_reference=txn_data.get('broker_reference')
+                    currency=txn_data.get('currency', 'CAD'),
+                    notes=txn_data.get('notes')
                 )
                 
                 db.session.add(transaction)
                 db.session.flush()
-                
-                # 更新持仓
-                transaction.update_holdings()
                 
                 imported_count += 1
                 
@@ -445,18 +453,33 @@ class CSVTransactionService:
                 continue
         
         db.session.commit()
-        return imported_count, failed_count, errors
+        return imported_count, failed_count, errors, corrected_count
     
-    def _find_or_create_stock(self, txn_data: Dict) -> StocksCache:
-        """查找或创建股票记录"""
-        symbol = txn_data['symbol']
+    def _find_or_create_stock(self, txn_data: Dict) -> Tuple[StocksCache, bool]:
+        """查找或创建股票记录，返回股票对象和是否发生了矫正"""
+        original_symbol = txn_data['symbol']
         currency = txn_data.get('currency', 'CAD')
+        
+        # 检查是否有股票代码矫正记录
+        corrected_symbol = StockSymbolCorrection.get_corrected_symbol(original_symbol, currency)
+        
+        # 检查是否发生了矫正
+        was_corrected = corrected_symbol != original_symbol.upper()
+        
+        # 如果股票代码被矫正了，使用矫正后的代码并更新交易记录中的symbol
+        if was_corrected:
+            print(f"股票代码矫正: {original_symbol}({currency}) -> {corrected_symbol}")
+            symbol = corrected_symbol
+            # 更新交易数据中的symbol，这样后续创建Transaction时会使用矫正后的代码
+            txn_data['symbol'] = corrected_symbol
+        else:
+            symbol = original_symbol
         
         # 使用联合主键查找现有股票记录
         stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
         
         if stock:
-            return stock
+            return stock, was_corrected
         
         # 创建新股票记录
         # 根据交易所推断市场
@@ -492,7 +515,7 @@ class CSVTransactionService:
         db.session.add(stock)
         db.session.flush()
         
-        return stock
+        return stock, was_corrected
     
     def _suggest_stock_category(self, symbol: str, name: str) -> Optional[int]:
         """根据股票符号和名称建议分类"""
