@@ -244,7 +244,7 @@
                                 
                                 <!-- Market Value -->
                                 <td class="text-end">
-                                    <span class="fw-bold">${{ "{:,.0f}".format(holding['current_value'] or 0) }}</span>
+                                    <span class="fw-bold">${{ "{:,.2f}".format(holding['current_value'] or 0) }}</span>
                                     <br><small class="text-muted">{{ holding['currency'] }}</small>
                                 </td>
                                 
@@ -252,7 +252,7 @@
                                 <td class="text-end">
                                     <span class="fw-bold {{ 'text-success' if holding['unrealized_gain'] >= 0 else 'text-danger' }}">
                                         {% if holding['unrealized_gain'] >= 0 %}+{% endif %}
-                                        ${{ "{:,.0f}".format(holding['unrealized_gain'] or 0) }}
+                                        ${{ "{:,.2f}".format(holding['unrealized_gain'] or 0) }}
                                     </span>
                                 </td>
                                 
@@ -260,21 +260,21 @@
                                 <td class="text-end">
                                     <span class="fw-medium {{ 'text-success' if holding['realized_gain'] >= 0 else 'text-danger' }}">
                                         {% if holding['realized_gain'] >= 0 %}+{% endif %}
-                                        ${{ "{:,.0f}".format(holding['realized_gain'] or 0) }}
+                                        ${{ "{:,.2f}".format(holding['realized_gain'] or 0) }}
                                     </span>
                                 </td>
                                 
                                 <!-- Dividends -->
                                 <td class="text-end">
                                     <span class="fw-medium text-info">
-                                        ${{ "{:,.0f}".format(holding['dividends'] or 0) }}
+                                        ${{ "{:,.2f}".format(holding['dividends'] or 0) }}
                                     </span>
                                 </td>
                                 
                                 <!-- Interest -->
                                 <td class="text-end">
                                     <span class="fw-medium text-warning">
-                                        ${{ "{:,.0f}".format(holding['interest'] or 0) }}
+                                        ${{ "{:,.2f}".format(holding['interest'] or 0) }}
                                     </span>
                                 </td>
                                 
@@ -360,23 +360,23 @@
                                 
                                 <!-- Bought Shares -->
                                 <td class="text-end">
-                                    <span class="fw-medium">{{ "{:,.0f}".format(holding['total_bought_shares'] or 0) }}</span>
+                                    <span class="fw-medium">{{ "{:,.2f}".format(holding['total_bought_shares'] or 0) }}</span>
                                 </td>
                                 
                                 <!-- Sold Shares -->
                                 <td class="text-end">
-                                    <span class="fw-medium">{{ "{:,.0f}".format(holding['total_sold_shares'] or 0) }}</span>
+                                    <span class="fw-medium">{{ "{:,.2f}".format(holding['total_sold_shares'] or 0) }}</span>
                                 </td>
                                 
                                 <!-- Total Invested -->
                                 <td class="text-end">
-                                    <span class="text-muted">${{ "{:,.0f}".format(holding['total_bought_value'] or 0) }}</span>
+                                    <span class="text-muted">${{ "{:,.2f}".format(holding['total_bought_value'] or 0) }}</span>
                                     <br><small class="text-muted">{{ holding['currency'] }}</small>
                                 </td>
                                 
                                 <!-- Total Received -->
                                 <td class="text-end">
-                                    <span class="text-muted">${{ "{:,.0f}".format(holding['total_sold_value'] or 0) }}</span>
+                                    <span class="text-muted">${{ "{:,.2f}".format(holding['total_sold_value'] or 0) }}</span>
                                     <br><small class="text-muted">{{ holding['currency'] }}</small>
                                 </td>
                                 
@@ -384,21 +384,21 @@
                                 <td class="text-end">
                                     <span class="fw-bold {{ 'text-success' if holding['realized_gain'] >= 0 else 'text-danger' }}">
                                         {% if holding['realized_gain'] >= 0 %}+{% endif %}
-                                        ${{ "{:,.0f}".format(holding['realized_gain'] or 0) }}
+                                        ${{ "{:,.2f}".format(holding['realized_gain'] or 0) }}
                                     </span>
                                 </td>
                                 
                                 <!-- Dividends -->
                                 <td class="text-end">
                                     <span class="fw-medium text-info">
-                                        ${{ "{:,.0f}".format(holding['dividends'] or 0) }}
+                                        ${{ "{:,.2f}".format(holding['dividends'] or 0) }}
                                     </span>
                                 </td>
                                 
                                 <!-- Interest -->
                                 <td class="text-end">
                                     <span class="fw-medium text-warning">
-                                        ${{ "{:,.0f}".format(holding['interest'] or 0) }}
+                                        ${{ "{:,.2f}".format(holding['interest'] or 0) }}
                                     </span>
                                 </td>
                                 

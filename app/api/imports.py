@@ -37,15 +37,143 @@ def csv_preview():
         return jsonify({'success': False, 'error': _('Invalid file format. Only CSV files are allowed.')}), 400
     
     try:
-        # 使用通用的分隔符检测
-        from app.utils.csv_utils import detect_csv_delimiter_from_fileobj
-        delimiter = detect_csv_delimiter_from_fileobj(file)
+        # 重置文件指针
+        file.seek(0)
         
-        # 读取CSV文件
-        df = pd.read_csv(file, encoding='utf-8-sig', sep=delimiter)
+        # 先读取原始字节内容进行编码检测
+        raw_content = file.read(2048)
+        file.seek(0)
+        
+        # 检查文件是否为空
+        if not raw_content:
+            return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
+        
+        print(f"DEBUG: CSV file raw bytes sample (first 100 bytes): {raw_content[:100]!r}")
+        
+        # 详细编码分析和检测
+        def analyze_and_detect_encoding(raw_bytes):
+            analysis_info = {
+                'file_size': len(raw_bytes),
+                'chardet_result': None,
+                'manual_tests': [],
+                'detected_encoding': None,
+                'decoded_content': None
+            }
+            
+            # 使用chardet进行检测
+            try:
+                import chardet
+                chardet_result = chardet.detect(raw_bytes)
+                analysis_info['chardet_result'] = chardet_result
+                print(f"DEBUG: chardet analysis: {chardet_result}")
+            except ImportError:
+                print("DEBUG: chardet not available")
+            
+            return analysis_info
+        
+        # 执行详细分析
+        encoding_analysis = analyze_and_detect_encoding(raw_content)
+        
+        # 如果chardet检测到的置信度很低或无法检测，显示详细信息给用户
+        chardet_result = encoding_analysis.get('chardet_result')
+        if chardet_result is None or chardet_result.get('confidence', 0) < 0.8 or chardet_result.get('encoding') is None:
+            return jsonify({
+                'success': False,
+                'error': 'Encoding detection required',
+                'encoding_analysis': {
+                    'file_size': len(raw_content),
+                    'chardet_result': chardet_result or {'encoding': None, 'confidence': 0.0, 'language': None},
+                    'raw_sample': raw_content[:200].hex(),  # 十六进制表示
+                    'ascii_sample': ''.join(chr(b) if 32 <= b <= 126 else f'\\x{b:02x}' for b in raw_content[:100]),
+                    'message': f'检测到的编码: {(chardet_result or {}).get("encoding", "None")} (置信度: {(chardet_result or {}).get("confidence", 0):.2f})'
+                }
+            }), 400
+        
+        # 智能编码检测
+        def detect_encoding(raw_bytes):
+            # 首先尝试使用chardet库进行自动检测（如果可用）
+            try:
+                import chardet
+                detected = chardet.detect(raw_bytes)
+                if detected and detected.get('confidence', 0) > 0.7:
+                    encoding = detected['encoding']
+                    try:
+                        decoded = raw_bytes.decode(encoding)
+                        if decoded.strip():
+                            print(f"DEBUG: chardet detected encoding: {encoding} (confidence: {detected['confidence']:.2f})")
+                            return encoding, decoded
+                    except (UnicodeDecodeError, UnicodeError):
+                        pass
+            except ImportError:
+                print("DEBUG: chardet not available, using manual detection")
+            
+            # 扩展的编码列表，包括更多边缘情况
+            encodings = [
+                'utf-8-sig', 'utf-8', 
+                'gb2312', 'gbk', 'gb18030', 'hz-gb-2312',
+                'big5', 'big5hkscs',
+                'latin1', 'cp1252', 'iso-8859-1', 'iso-8859-15',
+                'cp437', 'cp850', 'cp858', 'cp1250', 'cp1251', 'cp1253', 'cp1254', 'cp1255', 'cp1256', 'cp1257', 'cp1258',
+                'mac-roman', 'mac-cyrillic',
+                'shift_jis', 'euc-jp', 'iso-2022-jp',
+                'euc-kr', 'cp949', 'iso-2022-kr',
+                'koi8-r', 'koi8-u',
+                'ascii'
+            ]
+            
+            for encoding in encodings:
+                try:
+                    decoded = raw_bytes.decode(encoding)
+                    # 检查解码后的内容是否有意义（不全是乱码）
+                    if decoded.strip():
+                        print(f"DEBUG: Successfully decoded with encoding: {encoding}")
+                        return encoding, decoded
+                except (UnicodeDecodeError, UnicodeError, LookupError):
+                    continue
+            
+            # 最后的回退：使用latin1并忽略错误
+            print("DEBUG: All encoding detection failed, using latin1 with error handling")
+            return 'latin1', raw_bytes.decode('latin1', errors='ignore')
+        
+        detected_encoding, decoded_content = detect_encoding(raw_content)
+        print(f"DEBUG: Detected encoding: {detected_encoding}")
+        print(f"DEBUG: Decoded content sample (first 200 chars): {decoded_content[:200]!r}")
+        
+        # 检查解码后的内容是否为空
+        if not decoded_content.strip():
+            return jsonify({'success': False, 'error': _('CSV file is empty or contains only whitespace')}), 400
+        
+        # 使用通用的分隔符检测（基于解码后的内容）
+        from app.utils.csv_utils import detect_csv_delimiter
+        delimiter = detect_csv_delimiter(decoded_content[:1024])
+        print(f"DEBUG: Detected delimiter: {delimiter!r}")
+        
+        # 读取CSV文件，使用检测到的编码
+        file.seek(0)
+        try:
+            df = pd.read_csv(file, encoding=detected_encoding, sep=delimiter, skipinitialspace=True)
+            print(f"DEBUG: Successfully read CSV with encoding {detected_encoding} and delimiter {delimiter!r}")
+        except pd.errors.EmptyDataError:
+            return jsonify({'success': False, 'error': _('CSV file contains no data')}), 400
+        except Exception as e:
+            print(f"DEBUG: pandas read_csv error with detected encoding: {e}")
+            # 尝试不指定分隔符，让pandas自动检测
+            try:
+                file.seek(0)
+                df = pd.read_csv(file, encoding=detected_encoding, skipinitialspace=True)
+                print(f"DEBUG: Successfully read CSV with encoding {detected_encoding} without explicit delimiter")
+            except Exception as e2:
+                print(f"DEBUG: Final fallback attempt failed: {e2}")
+                return jsonify({'success': False, 'error': f'Failed to parse CSV file with encoding {detected_encoding}: {str(e2)}'}), 400
+        
+        print(f"DEBUG: DataFrame shape: {df.shape}")
+        print(f"DEBUG: DataFrame columns: {df.columns.tolist()}")
         
         if df.empty:
             return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
+        
+        if len(df.columns) == 0:
+            return jsonify({'success': False, 'error': _('No columns found in CSV file')}), 400
         
         # 生成会话ID并临时保存文件
         session_id = str(uuid.uuid4())
@@ -147,11 +275,38 @@ def import_csv_with_mapping():
         if not os.path.exists(temp_file_path):
             return jsonify({'success': False, 'error': _('Session expired, please upload the file again')}), 400
         
-        # 使用通用的分隔符检测
-        from app.utils.csv_utils import detect_csv_delimiter_from_file
-        delimiter = detect_csv_delimiter_from_file(temp_file_path)
+        # 智能编码和分隔符检测
+        def detect_file_encoding_and_delimiter(file_path):
+            with open(file_path, 'rb') as f:
+                raw_content = f.read(2048)
+            
+            # 编码检测
+            encodings = ['utf-8-sig', 'utf-8', 'gb2312', 'gbk', 'gb18030', 'big5', 'latin1', 'cp1252', 'iso-8859-1']
+            detected_encoding = 'utf-8-sig'
+            decoded_content = ''
+            
+            for encoding in encodings:
+                try:
+                    decoded_content = raw_content.decode(encoding)
+                    if decoded_content.strip():
+                        detected_encoding = encoding
+                        print(f"DEBUG: File encoding detected: {encoding}")
+                        break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            else:
+                decoded_content = raw_content.decode('latin1', errors='ignore')
+                detected_encoding = 'latin1'
+            
+            # 分隔符检测
+            from app.utils.csv_utils import detect_csv_delimiter
+            delimiter = detect_csv_delimiter(decoded_content[:1024])
+            print(f"DEBUG: File delimiter detected: {delimiter!r}")
+            
+            return detected_encoding, delimiter
         
-        df = pd.read_csv(temp_file_path, encoding='utf-8-sig', sep=delimiter)
+        detected_encoding, delimiter = detect_file_encoding_and_delimiter(temp_file_path)
+        df = pd.read_csv(temp_file_path, encoding=detected_encoding, sep=delimiter)
         
         # 处理数据
         transactions_data, processing_errors = process_csv_with_mapping(df, column_mappings)
@@ -285,6 +440,41 @@ def process_csv_with_mapping(df, column_mappings):
     
     print(f"DEBUG: Processing {len(df)} rows with mappings: {column_mappings}")
     print(f"DEBUG: Available DataFrame columns: {df.columns.tolist()}")
+    
+    # 检测是否为描述格式的CSV
+    # 方式1: 检查CSV列名是否包含标准描述格式列 (date, transaction, description, amount, balance, currency)
+    description_format_columns = {'date', 'transaction', 'description', 'amount', 'balance', 'currency'}
+    csv_columns_set = set(df.columns.str.lower())
+    is_description_format_by_columns = description_format_columns.issubset(csv_columns_set)
+    
+    # 方式2: 检查用户映射 - 如果多个重要字段都映射到同一个描述列，则可能需要描述解析
+    description_column_mapping = None
+    fields_mapped_to_description = []
+    
+    for field, column in column_mappings.items():
+        if column and 'description' in column.lower():
+            description_column_mapping = column
+            fields_mapped_to_description.append(field)
+    
+    # 如果股票代码、数量、价格等多个字段都映射到描述列，启用描述解析
+    # 支持不同的字段名变体
+    important_fields = {
+        'stock_symbol', 'symbol', 
+        'quantity', 'qty',
+        'price', 
+        'transaction_type', 'type'
+    }
+    is_description_format_by_mapping = (
+        description_column_mapping and 
+        len(set(fields_mapped_to_description) & important_fields) >= 2
+    )
+    
+    if is_description_format_by_columns or is_description_format_by_mapping:
+        if is_description_format_by_columns:
+            print("DEBUG: 检测到描述格式CSV（按列名），使用专门的解析器处理")
+        else:
+            print(f"DEBUG: 检测到描述格式CSV（按映射），字段 {fields_mapped_to_description} 都映射到 '{description_column_mapping}' 列，使用专门的解析器处理")
+        return process_description_format_csv(df, column_mappings)
     
     # 验证映射的列是否存在于DataFrame中
     missing_columns = []
@@ -596,8 +786,29 @@ def import_csv_flexible():
     account = Account.query.get_or_404(account_id)
     
     try:
+        # 重置文件指针并进行编码检测
+        file.seek(0)
+        raw_content = file.read(2048)
+        file.seek(0)
+        
+        # 智能编码检测
+        encodings = ['utf-8-sig', 'utf-8', 'gb2312', 'gbk', 'gb18030', 'big5', 'latin1', 'cp1252', 'iso-8859-1']
+        detected_encoding = 'utf-8-sig'
+        
+        for encoding in encodings:
+            try:
+                decoded_content = raw_content.decode(encoding)
+                if decoded_content.strip():
+                    detected_encoding = encoding
+                    print(f"DEBUG: Smart import encoding detected: {encoding}")
+                    break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        else:
+            detected_encoding = 'latin1'
+        
         # 读取CSV文件
-        df = pd.read_csv(file, encoding='utf-8-sig')  # 处理BOM
+        df = pd.read_csv(file, encoding=detected_encoding)
         
         if df.empty:
             return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
@@ -705,7 +916,7 @@ def smart_header_mapping(headers):
             'security', 'asset', 'stock_code', 'instrument_code'
         ],
         'quantity': [
-            'quantity', 'shares', 'amount', 'qty', 'volume',
+            'quantity', 'shares', 'qty', 'volume',
             '数量', '股数', '份额', 'cantidad', 'menge',
             'share_quantity', 'units', 'lots'
         ],
@@ -878,6 +1089,92 @@ def parse_date(date_str, all_dates=None):
     print(f"DEBUG: Failed to parse date '{date_str}' with any format")
     return None
 
+def process_description_format_csv(df, column_mappings):
+    """处理描述格式的CSV - 支持标准列名或用户映射"""
+    from app.utils.transaction_parser import TransactionDescriptionParser
+    
+    transactions = []
+    processing_errors = []
+    
+    print(f"DEBUG: 使用描述格式解析器处理 {len(df)} 行数据")
+    print(f"DEBUG: 列映射: {column_mappings}")
+    
+    # 创建解析器
+    parser = TransactionDescriptionParser()
+    
+    for index, row in df.iterrows():
+        row_num = index + 2
+        try:
+            # 根据用户映射或标准列名获取数据
+            def get_field_value(field_names, default=''):
+                """根据映射获取字段值，支持多个字段名变体"""
+                if isinstance(field_names, str):
+                    field_names = [field_names]
+                
+                for field_name in field_names:
+                    if field_name in column_mappings and column_mappings[field_name]:
+                        # 使用用户映射的列
+                        mapped_column = column_mappings[field_name]
+                        return str(row.get(mapped_column, default)).strip()
+                
+                # 尝试标准列名
+                for field_name in field_names:
+                    if field_name in row:
+                        return str(row.get(field_name, default)).strip()
+                        
+                return default
+            
+            # 构造行字典
+            row_dict = {
+                'date': get_field_value(['date']),
+                'transaction': get_field_value(['transaction_type', 'type', 'transaction']),
+                'description': get_field_value(['description']),
+                'amount': get_field_value(['amount'], '0'),
+                'balance': get_field_value(['balance'], '0'),
+                'currency': get_field_value(['currency'], 'USD')
+            }
+            
+            print(f"DEBUG: Row {row_num} 数据: {row_dict}")
+            
+            # 使用解析器处理
+            parsed_data = parser.parse_csv_row(row_dict)
+            
+            if not parsed_data.get('parsed', False):
+                processing_errors.append(f"Row {row_num}: 无法解析描述 - {parsed_data.get('notes', '')}")
+                continue
+            
+            # 转换日期格式
+            trade_date = parse_date(parsed_data['date'])
+            if not trade_date:
+                processing_errors.append(f"Row {row_num}: 无效日期 '{parsed_data['date']}'")
+                continue
+            
+            # 构建交易数据 - 转换为主函数期望的字段名
+            transaction_data = {
+                'row_num': row_num,
+                'trade_date': trade_date,
+                'type': parsed_data['transaction_type'],  # 主函数期望 'type'
+                'stock': parsed_data['symbol'] or '',     # 主函数期望 'stock'
+                'quantity': parsed_data['quantity'],
+                'price': parsed_data['price'],
+                'currency': parsed_data['currency'],
+                'fee': 0.0,  # 默认手续费为0
+                'notes': parsed_data['notes'],
+                'amount': parsed_data['amount']  # 添加 amount 字段
+            }
+            
+            transactions.append(transaction_data)
+            print(f"DEBUG: Row {row_num} 成功解析: {parsed_data['symbol']} - {parsed_data['transaction_type']} - {parsed_data['quantity']}股 @ ${parsed_data['price']:.4f}")
+            
+        except Exception as e:
+            error_msg = f"Row {row_num}: 处理行时出错 - {str(e)}"
+            processing_errors.append(error_msg)
+            print(f"ERROR: {error_msg}")
+            continue
+    
+    print(f"DEBUG: 描述格式解析完成，成功 {len(transactions)} 行，错误 {len(processing_errors)} 行")
+    return transactions, processing_errors
+
 def parse_transaction_type(type_str):
     """智能解析交易类型"""
     if not type_str:
@@ -894,8 +1191,8 @@ def parse_transaction_type(type_str):
     dividend_keywords = ['DIVIDEND', 'DIV', 'DIVIDENDE', '分红', '股息', 'DISTRIBUTION', 'DIST']
     # 利息关键词
     interest_keywords = ['INTEREST', 'INT', '利息', 'ZINSEN', 'INTERÉS']
-    # 存款/转入关键词 (包括CONTRIBUTION)
-    deposit_keywords = ['DEPOSIT', 'TRANSFER IN', 'CASH RECEIPT', 'CONTRIBUTION', '存入', '转入', 'DEPÓSITO', 'EINZAHLUNG']
+    # 存款/转入关键词 (包括CONTRIBUTION和CONT)
+    deposit_keywords = ['DEPOSIT', 'TRANSFER IN', 'CASH RECEIPT', 'CONTRIBUTION', 'CONT', '存入', '转入', 'DEPÓSITO', 'EINZAHLUNG']
     # 取款/转出关键词
     withdrawal_keywords = ['WITHDRAWAL', 'TRANSFER OUT', 'CASH PAYMENT', '取出', '转出', 'RETIRO', 'AUSZAHLUNG']
     # 费用关键词

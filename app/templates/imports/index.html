@@ -207,6 +207,83 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
     </div>
 </div>
 
+<!-- 编码分析模态框 -->
+<div class="modal fade" id="encodingAnalysisModal" tabindex="-1" aria-labelledby="encodingAnalysisModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="encodingAnalysisModalLabel">
+                    <i class="fas fa-exclamation-triangle text-warning me-2"></i>{{ _('File Encoding Analysis') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning">
+                    <i class="fas fa-info-circle me-2"></i>
+                    {{ _('We detected a potential encoding issue with your CSV file. Below is the detailed analysis:') }}
+                </div>
+                
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6 class="card-title mb-0">{{ _('File Information') }}</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-sm-4"><strong>{{ _('File Size:') }}</strong></div>
+                            <div class="col-sm-8" id="fileSize">-</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-sm-4"><strong>{{ _('Detected Encoding:') }}</strong></div>
+                            <div class="col-sm-8" id="detectedEncoding">-</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-sm-4"><strong>{{ _('Confidence:') }}</strong></div>
+                            <div class="col-sm-8" id="encodingConfidence">-</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6 class="card-title mb-0">{{ _('Raw Data Sample') }}</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="bg-light p-2 rounded">
+                            <small class="text-muted">{{ _('First 100 bytes (as hex):') }}</small>
+                            <div class="mt-2">
+                                <code id="rawSample" style="word-break: break-all; font-size: 11px;">-</code>
+                            </div>
+                        </div>
+                        <div class="bg-light p-2 rounded mt-2">
+                            <small class="text-muted">{{ _('ASCII representation:') }}</small>
+                            <div class="mt-2">
+                                <code id="asciiSample" style="word-break: break-all; font-size: 11px;">-</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info">
+                    <h6>{{ _('Solutions:') }}</h6>
+                    <ol>
+                        <li>{{ _('Try opening your CSV file in Excel/Numbers and save it again as CSV (UTF-8)') }}</li>
+                        <li>{{ _('Check if your file was exported with the correct encoding from your broker') }}</li>
+                        <li>{{ _('Contact support if this issue persists with multiple files') }}</li>
+                    </ol>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-2"></i>{{ _('Close') }}
+                </button>
+                <button type="button" class="btn btn-primary" onclick="copyEncodingInfo()">
+                    <i class="fas fa-copy me-2"></i>{{ _('Copy Technical Info') }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- CSV导入模态框 -->
 <div class="modal fade" id="importCSVModal" tabindex="-1" aria-labelledby="importCSVModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -420,7 +497,12 @@ function handleCsvUpload(event) {
             csvPreviewData = data;
             showMappingModal(data);
         } else {
-            alert('{{ _("Error analyzing CSV: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            // Check if this is an encoding detection error
+            if (data.error === 'Encoding detection required' && data.encoding_analysis) {
+                showEncodingAnalysisDialog(data.encoding_analysis);
+            } else {
+                alert('{{ _("Error analyzing CSV: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            }
         }
     })
     .catch(error => {
@@ -782,6 +864,91 @@ function importWithMapping() {
         // Restore button state
         importBtn.innerHTML = originalText;
         importBtn.disabled = false;
+    });
+}
+
+function showEncodingAnalysisDialog(encodingAnalysis) {
+    // Close the upload modal first
+    const uploadModal = bootstrap.Modal.getInstance(document.getElementById('importCSVModal'));
+    if (uploadModal) {
+        uploadModal.hide();
+    }
+    
+    // Populate the encoding analysis modal with data
+    document.getElementById('fileSize').textContent = formatFileSize(encodingAnalysis.file_size);
+    
+    const chardetResult = encodingAnalysis.chardet_result;
+    if (chardetResult) {
+        document.getElementById('detectedEncoding').innerHTML = 
+            `<span class="badge bg-warning">${chardetResult.encoding || 'Unknown'}</span>`;
+        
+        const confidence = chardetResult.confidence || 0;
+        const confidenceColor = confidence > 0.8 ? 'success' : confidence > 0.5 ? 'warning' : 'danger';
+        document.getElementById('encodingConfidence').innerHTML = 
+            `<span class="badge bg-${confidenceColor}">${(confidence * 100).toFixed(1)}%</span>`;
+    } else {
+        document.getElementById('detectedEncoding').textContent = 'Not detected';
+        document.getElementById('encodingConfidence').innerHTML = '<span class="badge bg-danger">0%</span>';
+    }
+    
+    // Show raw data samples
+    document.getElementById('rawSample').textContent = encodingAnalysis.raw_sample || 'No data';
+    document.getElementById('asciiSample').textContent = encodingAnalysis.ascii_sample || 'No data';
+    
+    // Store encoding analysis for copying
+    window.currentEncodingAnalysis = encodingAnalysis;
+    
+    // Show the encoding analysis modal
+    setTimeout(() => {
+        const encodingModal = new bootstrap.Modal(document.getElementById('encodingAnalysisModal'));
+        encodingModal.show();
+    }, 300);
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function copyEncodingInfo() {
+    if (!window.currentEncodingAnalysis) {
+        alert('{{ _("No encoding information available") }}');
+        return;
+    }
+    
+    const analysis = window.currentEncodingAnalysis;
+    const chardetResult = analysis.chardet_result || {};
+    
+    const info = `File Encoding Analysis Report
+=====================================
+File Size: ${formatFileSize(analysis.file_size)}
+Detected Encoding: ${chardetResult.encoding || 'Unknown'}
+Confidence: ${chardetResult.confidence ? (chardetResult.confidence * 100).toFixed(1) + '%' : '0%'}
+
+Raw Sample (hex): ${analysis.raw_sample || 'No data'}
+ASCII Sample: ${analysis.ascii_sample || 'No data'}
+
+Message: ${analysis.message || 'No additional message'}
+
+Generated by Family Investment System - CSV Import Tool`;
+    
+    navigator.clipboard.writeText(info).then(() => {
+        // Show temporary success message
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check me-2"></i>{{ _("Copied!") }}';
+        btn.className = 'btn btn-success';
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.className = 'btn btn-primary';
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy encoding info:', err);
+        alert('{{ _("Failed to copy to clipboard") }}');
     });
 }
 </script>

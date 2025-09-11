@@ -16,19 +16,36 @@ def detect_csv_delimiter(sample_text: str) -> str:
     Returns:
         检测到的分隔符字符
     """
+    if not sample_text.strip():
+        return ','
+    
+    print(f"DEBUG: Detecting delimiter from sample: {sample_text[:100]!r}")
+    
     try:
         # 使用csv.Sniffer自动检测方言
         dialect = csv.Sniffer().sniff(sample_text, delimiters=',;\t|')
-        return dialect.delimiter
-    except csv.Error:
+        detected = dialect.delimiter
+        print(f"DEBUG: csv.Sniffer detected delimiter: {detected!r}")
+        return detected
+    except csv.Error as e:
+        print(f"DEBUG: csv.Sniffer failed: {e}")
         # 如果自动检测失败，手动检测最常用的分隔符
-        if ';' in sample_text and sample_text.count(';') > sample_text.count(','):
-            return ';'
-        elif '\t' in sample_text and sample_text.count('\t') > sample_text.count(','):
-            return '\t'
-        elif '|' in sample_text and sample_text.count('|') > sample_text.count(','):
-            return '|'
+        delimiters = [';', '\t', '|', ',']
+        counts = {}
+        
+        for delimiter in delimiters:
+            if delimiter in sample_text:
+                counts[delimiter] = sample_text.count(delimiter)
+        
+        print(f"DEBUG: Delimiter counts: {counts}")
+        
+        if counts:
+            # 返回出现次数最多的分隔符
+            best_delimiter = max(counts.items(), key=lambda x: x[1])[0]
+            print(f"DEBUG: Selected delimiter by count: {best_delimiter!r}")
+            return best_delimiter
         else:
+            print("DEBUG: No delimiters found, defaulting to comma")
             return ','
 
 

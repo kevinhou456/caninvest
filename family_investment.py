@@ -69,4 +69,11 @@ def create_demo():
     print(f"演示家庭 '{demo_family.name}' 创建完成！")
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5050)
+    import sys
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=5050, help='Port to run the application on')
+    args = parser.parse_args()
+    
+    app.run(debug=True, host='0.0.0.0', port=args.port)
