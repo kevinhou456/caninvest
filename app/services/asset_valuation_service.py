@@ -421,11 +421,11 @@ class AssetValuationService:
         }
         
         # 获取所有交易的股票列表  
-        symbols = db.session.query(Transaction.stock).filter(
+        symbols = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.stock.isnot(None),
             Transaction.trade_date <= target_date
-        ).distinct().all()
+        ).with_entities(Transaction.stock).distinct().all()
         
         for (symbol,) in symbols:
             if not symbol:

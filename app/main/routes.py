@@ -14,7 +14,7 @@ from app.models.transaction import Transaction
 # from app.models.stock import Stock, StockCategory  # Stock models deleted
 from app.models.stocks_cache import StocksCache
 from app.models.import_task import ImportTask, OCRTask
-from app.services.analytics_service import analytics_service, TimePeriod
+# from app.services.analytics_service import analytics_service, TimePeriod  # 旧架构已废弃
 from app.services.currency_service import currency_service
 from app.services.holdings_service import holdings_service
 from app.services.asset_valuation_service import AssetValuationService
@@ -195,91 +195,35 @@ def overview():
                              current_view='overview')
         
     except Exception as e:
-        # 回退到旧的analytics service
-        logging.error(f"统一服务出错，回退到analytics service: {e}", exc_info=True)
+        # 如果新服务失败，记录错误并显示基本信息
+        logging.error(f"AssetValuationService 出错: {e}", exc_info=True)
         
-        try:
-            # 转换时间段参数
-            try:
-                period_enum = TimePeriod(time_period)
-            except ValueError:
-                period_enum = TimePeriod.ALL_TIME
-            
-            metrics = analytics_service.get_portfolio_metrics(
-                family_id=family.id,
-                member_id=member_id,
-                account_id=account_id,
-                period=period_enum
-            )
-            
-            # 其余逻辑保持不变
-            from app.models.member import Member
-            members_count = Member.query.filter_by(family_id=family.id).count()
-            
-            if accounts:
-                account_ids = [acc.id for acc in accounts]
-                transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count()
-                recent_transactions = Transaction.query.filter(
-                    Transaction.account_id.in_(account_ids)
-                ).order_by(Transaction.trade_date.desc()).limit(8).all()
-            else:
-                transactions_count = 0
-                recent_transactions = []
-            
-            stats = {
-                'members_count': members_count,
-                'accounts_count': len(accounts),
-                'transactions_count': transactions_count,
-                'stocks_count': StocksCache.query.count(),
-                'pending_imports': 0,
-                'pending_ocr': 0
-            }
-            
-            return render_template('investment/overview.html',
-                                 title=_('Overview'),
-                                 family=family,
-                                 stats=stats,
-                                 metrics=metrics.to_dict(),
-                                 holdings=getattr(metrics, 'holdings', []),
-                                 cleared_holdings=getattr(metrics, 'cleared_holdings', []),
-                                 exchange_rates=exchange_rates,
-                                 recent_transactions=recent_transactions,
-                                 filter_description=filter_description,
-                                 cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
-                                 current_period=time_period,
-                                 member_id=member_id,
-                                 account_id=account_id,
-                                 current_view='overview')
-                                 
-        except Exception as e2:
-            logging.error(f"Analytics service回退也失败: {e2}", exc_info=True)
-            
-            # 最终回退 - 显示基本信息
-            from app.models.member import Member
-            stats = {
-                'members_count': Member.query.filter_by(family_id=family.id).count(),
-                'accounts_count': len(accounts),
-                'transactions_count': 0,
-                'stocks_count': 0,
-                'pending_imports': 0,
-                'pending_ocr': 0
-            }
-            
-            return render_template('investment/overview.html',
-                                 title=_('Overview'),
-                                 family=family,
-                                 stats=stats,
-                                 metrics=None,
-                                 holdings=[],
-                                 cleared_holdings=[],
-                                 exchange_rates=None,
-                                 recent_transactions=[],
-                                 filter_description="全部成员",
-                                 cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
-                                 current_period='all_time',
-                                 member_id=None,
-                                 account_id=None,
-                                 current_view='overview')
+        # 显示基本信息（不再回退到旧服务）
+        from app.models.member import Member
+        stats = {
+            'members_count': Member.query.filter_by(family_id=family.id).count(),
+            'accounts_count': len(accounts),
+            'transactions_count': 0,
+            'stocks_count': 0,
+            'pending_imports': 0,
+            'pending_ocr': 0
+        }
+        
+        return render_template('investment/overview.html',
+                             title=_('Overview'),
+                             family=family,
+                             stats=stats,
+                             metrics=None,
+                             holdings=[],
+                             cleared_holdings=[],
+                             exchange_rates=None,
+                             recent_transactions=[],
+                             filter_description="全部成员",
+                             cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
+                             current_period='all_time',
+                             member_id=None,
+                             account_id=None,
+                             current_view='overview')
 
 
 @bp.route('/api/accounts/cash-data', methods=['GET'])
