@@ -31,6 +31,14 @@ def create_app(config_name=None):
         from app.scheduler import scheduler
         scheduler.init_app(app)
     
+    # 初始化数据变更监听器 - 暂时禁用
+    # if not app.config.get('TESTING'):
+    #     from app.services.data_change_listener import init_data_change_listener
+    #     try:
+    #         init_data_change_listener(app)
+    #     except Exception as e:
+    #         app.logger.warning(f"数据变更监听器初始化失败: {e}")
+    
     # 注册蓝图
     from app.api import bp as api_bp
     app.register_blueprint(api_bp, url_prefix='/api/v1')

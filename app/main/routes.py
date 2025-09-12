@@ -4,6 +4,7 @@
 
 from flask import render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_babel import _
+from decimal import Decimal
 from app.main import bp
 from app import db
 from app.models.family import Family
@@ -16,6 +17,8 @@ from app.models.import_task import ImportTask, OCRTask
 from app.services.analytics_service import analytics_service, TimePeriod
 from app.services.currency_service import currency_service
 from app.services.holdings_service import holdings_service
+from app.services.asset_valuation_service import AssetValuationService
+from app.services.report_service import ReportService
 
 
 @bp.route('/')
@@ -27,7 +30,9 @@ def index():
 
 @bp.route('/overview')
 def overview():
-    """仪表板 - 投资组合总览"""
+    """仪表板 - 投资组合总览 - 使用统一的AssetValuationService"""
+    import logging
+    
     # 获取默认家庭（假设只有一个家庭，或者使用第一个家庭）
     family = Family.query.first()
     if not family:
@@ -42,27 +47,10 @@ def overview():
     account_id = request.args.get('account_id', type=int)
     time_period = request.args.get('period', 'all_time')
     
-    # 转换时间段参数
     try:
-        period_enum = TimePeriod(time_period)
-    except ValueError:
-        period_enum = TimePeriod.ALL_TIME
-    
-    # 使用新的分析服务获取投资组合指标
-    try:
-        metrics = analytics_service.get_portfolio_metrics(
-            family_id=family.id,
-            member_id=member_id,
-            account_id=account_id,
-            period=period_enum
-        )
-        
-        # 获取汇率信息
-        exchange_rates = currency_service.get_cad_usd_rates()
-        
-        # 获取基本统计数据
-        from app.models.member import Member
-        members_count = Member.query.filter_by(family_id=family.id).count()
+        # 初始化统一服务
+        asset_service = AssetValuationService()
+        report_service = ReportService()
         
         # 根据过滤条件获取账户
         if account_id:
@@ -74,43 +62,106 @@ def overview():
             account_ids = [am.account_id for am in member_accounts]
             accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
             
+            from app.models.member import Member
             member = Member.query.get(member_id)
             filter_description = f"成员: {member.name}" if member else "未找到成员"
         else:
             accounts = Account.query.filter_by(family_id=family.id).all()
             filter_description = "全部成员"
         
-        accounts_count = len(accounts)
+        # 获取汇率信息
+        exchange_rates = currency_service.get_cad_usd_rates()
         
-        # 获取现金数据
-        from app.models.cash import Cash
+        # 使用新的统一资产估值服务架构
+        account_ids = [acc.id for acc in accounts]
+        
+        # 获取综合投资组合指标 - 包含完整的财务计算
+        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(account_ids)
+        
+        # 获取详细的投资组合数据
+        portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
+        holdings = portfolio_data.get('current_holdings', [])
+        cleared_holdings = portfolio_data.get('cleared_holdings', [])
+        
+        # 从综合指标中提取数据
+        total_assets = comprehensive_metrics['total_assets']['cad']
+        total_stock_value = comprehensive_metrics['total_assets']['stock_value']
+        total_cash_cad = comprehensive_metrics['cash_balance']['cad']
+        total_cash_usd = comprehensive_metrics['cash_balance']['usd']
+        
+        # 创建包含完整财务指标的metrics对象
+        class ComprehensiveMetrics:
+            def __init__(self, metrics_data):
+                self.total_assets = type('obj', (object,), {
+                    'cad': metrics_data['total_assets']['cad'],
+                    'cad_only': metrics_data['total_assets']['cad'], 
+                    'usd_only': 0
+                })
+                self.stock_market_value = metrics_data['total_assets']['stock_value']
+                self.cash_balance_total = metrics_data['cash_balance']['total_cad']
+                
+                # 完整的财务指标 - 使用新架构的准确计算
+                self.total_return = type('obj', (object,), {
+                    'cad': metrics_data['total_return']['cad'], 
+                    'cad_only': metrics_data['total_return']['cad'], 
+                    'usd_only': 0
+                })
+                self.realized_gain = type('obj', (object,), {
+                    'cad': metrics_data['total_return']['realized_gain'], 
+                    'cad_only': metrics_data['total_return']['realized_gain'], 
+                    'usd_only': 0
+                })
+                self.unrealized_gain = type('obj', (object,), {
+                    'cad': metrics_data['total_return']['unrealized_gain'], 
+                    'cad_only': metrics_data['total_return']['unrealized_gain'], 
+                    'usd_only': 0
+                })
+                self.total_dividends = type('obj', (object,), {
+                    'cad': metrics_data['total_return']['dividends'], 
+                    'cad_only': metrics_data['total_return']['dividends'], 
+                    'usd_only': 0
+                })
+                self.total_interest = type('obj', (object,), {
+                    'cad': metrics_data['total_return']['interest'], 
+                    'cad_only': metrics_data['total_return']['interest'], 
+                    'usd_only': 0
+                })
+                self.total_deposits = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                self.total_withdrawals = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                
+            def to_dict(self):
+                return {
+                    'total_assets': {'cad': self.total_assets.cad, 'cad_only': self.total_assets.cad_only, 'usd_only': self.total_assets.usd_only},
+                    'stock_market_value': self.stock_market_value,
+                    'cash_balance_total': self.cash_balance_total,
+                    'total_return': {'cad': self.total_return.cad, 'cad_only': self.total_return.cad_only, 'usd_only': self.total_return.usd_only},
+                    'realized_gain': {'cad': self.realized_gain.cad, 'cad_only': self.realized_gain.cad_only, 'usd_only': self.realized_gain.usd_only},
+                    'unrealized_gain': {'cad': self.unrealized_gain.cad, 'cad_only': self.unrealized_gain.cad_only, 'usd_only': self.unrealized_gain.usd_only}
+                }
+        
+        metrics = ComprehensiveMetrics(comprehensive_metrics)
+        
+        # 准备现金数据
+        cash_data = {
+            'cad': total_cash_cad,
+            'usd': total_cash_usd, 
+            'total_cad': Decimal(str(total_cash_cad)) + Decimal(str(total_cash_usd)) * Decimal(str(exchange_rates.get('usd_to_cad', 1.35) if exchange_rates else 1.35))
+        }
+        
+        # 获取统计数据
+        from app.models.member import Member
+        members_count = Member.query.filter_by(family_id=family.id).count()
+        
         account_ids = [acc.id for acc in accounts] if accounts else []
-        if account_ids:
-            cash_data = Cash.get_total_cash_by_accounts(
-                account_ids, 
-                exchange_rates['usd_to_cad'] if exchange_rates else 1.35
-            )
-        else:
-            cash_data = {'usd': 0, 'cad': 0, 'total_cad': 0}
-        
-        # 计算交易数量
-        if accounts:
-            account_ids = [acc.id for acc in accounts]
-            transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count()
-        else:
-            transactions_count = 0
+        transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count() if account_ids else 0
         
         # 获取最近的交易
-        if accounts:
-            account_ids = [acc.id for acc in accounts]
+        if account_ids:
             recent_transactions = Transaction.query.filter(
                 Transaction.account_id.in_(account_ids)
             ).order_by(Transaction.trade_date.desc()).limit(8).all()
         else:
             recent_transactions = []
-        
-        # 获取股票数量
-        stocks_count = StocksCache.query.count()
         
         # 获取待处理任务
         pending_imports = ImportTask.query.filter_by(status='pending').count()
@@ -118,24 +169,20 @@ def overview():
         
         stats = {
             'members_count': members_count,
-            'accounts_count': accounts_count,
+            'accounts_count': len(accounts),
             'transactions_count': transactions_count,
-            'stocks_count': stocks_count,
+            'stocks_count': StocksCache.query.count(),
             'pending_imports': pending_imports,
             'pending_ocr': pending_ocr
         }
         
-        # 准备持仓数据  
-        holdings = metrics.holdings
-        cleared_holdings = metrics.cleared_holdings
-        
-        
+        logging.info(f"统一服务overview成功: {len(holdings)}个持仓, 总资产${total_assets:,.2f}")
         
         return render_template('investment/overview.html',
                              title=_('Overview'),
                              family=family,
                              stats=stats,
-                             metrics=metrics.to_dict(),
+                             metrics=metrics,
                              holdings=holdings,
                              cleared_holdings=cleared_holdings,
                              exchange_rates=exchange_rates,
@@ -148,134 +195,91 @@ def overview():
                              current_view='overview')
         
     except Exception as e:
-        # 如果新服务出错，尝试直接使用portfolio service获取数据
-        import logging
-        import traceback
-        logging.error(f"Dashboard analytics error: {e}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
+        # 回退到旧的analytics service
+        logging.error(f"统一服务出错，回退到analytics service: {e}", exc_info=True)
         
-        # 尝试直接调用portfolio service获取holdings
         try:
-            from app.services.portfolio_service import PortfolioService
-            portfolio_service = PortfolioService()
+            # 转换时间段参数
+            try:
+                period_enum = TimePeriod(time_period)
+            except ValueError:
+                period_enum = TimePeriod.ALL_TIME
             
-            # 获取账户
-            if account_id:
-                accounts = Account.query.filter_by(id=account_id, family_id=family.id).all()
-                filter_description = f"账户: {accounts[0].name}" if accounts else "未找到账户"
-            elif member_id:
-                from app.models.account import AccountMember
-                member_accounts = AccountMember.query.filter_by(member_id=member_id).all()
-                account_ids = [am.account_id for am in member_accounts]
-                accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
-                
-                from app.models.member import Member
-                member = Member.query.get(member_id)
-                filter_description = f"成员: {member.name}" if member else "未找到成员"
-            else:
-                accounts = Account.query.filter_by(family_id=family.id).all()
-                filter_description = "全部成员"
+            metrics = analytics_service.get_portfolio_metrics(
+                family_id=family.id,
+                member_id=member_id,
+                account_id=account_id,
+                period=period_enum
+            )
+            
+            # 其余逻辑保持不变
+            from app.models.member import Member
+            members_count = Member.query.filter_by(family_id=family.id).count()
             
             if accounts:
                 account_ids = [acc.id for acc in accounts]
-                
-                # 直接调用portfolio service获取summary
-                portfolio_summary = portfolio_service.get_portfolio_summary(account_ids)
-                holdings = portfolio_summary.get('holdings', [])
-                cleared_holdings = portfolio_summary.get('cleared_holdings', [])
-                
-                logging.info(f"Portfolio service fallback succeeded: {len(holdings)} holdings, {len(cleared_holdings)} cleared holdings")
-                
-                # 创建简单metrics对象
-                class SimpleMetrics:
-                    def __init__(self):
-                        self.total_assets = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                        self.total_return = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                        self.realized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                        self.unrealized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                        self.total_dividends = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                        self.total_interest = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                        self.total_deposits = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                        self.total_withdrawals = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                
-                simple_metrics = SimpleMetrics()
-                
-                # 获取统计数据
-                from app.models.member import Member
-                members_count = Member.query.filter_by(family_id=family.id).count()
                 transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count()
-                
-                stats = {
-                    'members_count': members_count,
-                    'accounts_count': len(accounts),
-                    'transactions_count': transactions_count,
-                    'stocks_count': StocksCache.query.count(),
-                    'pending_imports': 0,
-                    'pending_ocr': 0
-                }
-                
                 recent_transactions = Transaction.query.filter(
                     Transaction.account_id.in_(account_ids)
                 ).order_by(Transaction.trade_date.desc()).limit(8).all()
-                
-                return render_template('investment/overview.html',
-                                     title=_('Overview'),
-                                     family=family,
-                                     stats=stats,
-                                     metrics=simple_metrics,
-                                     holdings=holdings,
-                                     cleared_holdings=cleared_holdings,
-                                     exchange_rates=None,
-                                     recent_transactions=recent_transactions,
-                                     filter_description=filter_description,
-                                     cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
-                                     current_period=time_period,
-                                     member_id=member_id,
-                                     account_id=account_id,
-                                     current_view='overview')
+            else:
+                transactions_count = 0
+                recent_transactions = []
             
+            stats = {
+                'members_count': members_count,
+                'accounts_count': len(accounts),
+                'transactions_count': transactions_count,
+                'stocks_count': StocksCache.query.count(),
+                'pending_imports': 0,
+                'pending_ocr': 0
+            }
+            
+            return render_template('investment/overview.html',
+                                 title=_('Overview'),
+                                 family=family,
+                                 stats=stats,
+                                 metrics=metrics.to_dict(),
+                                 holdings=getattr(metrics, 'holdings', []),
+                                 cleared_holdings=getattr(metrics, 'cleared_holdings', []),
+                                 exchange_rates=exchange_rates,
+                                 recent_transactions=recent_transactions,
+                                 filter_description=filter_description,
+                                 cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
+                                 current_period=time_period,
+                                 member_id=member_id,
+                                 account_id=account_id,
+                                 current_view='overview')
+                                 
         except Exception as e2:
-            logging.error(f"Portfolio service fallback failed: {e2}")
+            logging.error(f"Analytics service回退也失败: {e2}", exc_info=True)
             
-        # 最终回退
-        # 基本统计信息  
-        from app.models.member import Member
-        from app.models.account import AccountMember
-        members_count = Member.query.filter_by(family_id=family.id).count()
-        accounts_count = Account.query.filter_by(family_id=family.id).count()
-        transactions_count = Transaction.query.join(Account).filter(Account.family_id == family.id).count()
-        stocks_count = StocksCache.query.count()
-        
-        stats = {
-            'members_count': members_count,
-            'accounts_count': accounts_count,
-            'transactions_count': transactions_count,
-            'stocks_count': stocks_count,
-            'pending_imports': 0,
-            'pending_ocr': 0
-        }
-        
-        recent_transactions = Transaction.query.join(Account).filter(
-            Account.family_id == family.id
-        ).order_by(Transaction.trade_date.desc()).limit(8).all()
-        
-        
-        # 使用默认的空metrics对象，确保使用新的overview模板
-        return render_template('investment/overview.html',
-                             title=_('Overview'),
-                             family=family,
-                             stats=stats,
-                             metrics=None,
-                             holdings=[],
-                             cleared_holdings=[],
-                             exchange_rates=None,
-                             recent_transactions=recent_transactions,
-                             filter_description="全部成员",
-                             cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
-                             current_period='all_time',
-                             member_id=None,
-                             account_id=None,
-                             current_view='overview')
+            # 最终回退 - 显示基本信息
+            from app.models.member import Member
+            stats = {
+                'members_count': Member.query.filter_by(family_id=family.id).count(),
+                'accounts_count': len(accounts),
+                'transactions_count': 0,
+                'stocks_count': 0,
+                'pending_imports': 0,
+                'pending_ocr': 0
+            }
+            
+            return render_template('investment/overview.html',
+                                 title=_('Overview'),
+                                 family=family,
+                                 stats=stats,
+                                 metrics=None,
+                                 holdings=[],
+                                 cleared_holdings=[],
+                                 exchange_rates=None,
+                                 recent_transactions=[],
+                                 filter_description="全部成员",
+                                 cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
+                                 current_period='all_time',
+                                 member_id=None,
+                                 account_id=None,
+                                 current_view='overview')
 
 
 @bp.route('/api/accounts/cash-data', methods=['GET'])

@@ -13,7 +13,7 @@ class StockCategory(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
     
     # 反向关联到股票
-    stocks = db.relationship('StocksCache', backref='category', lazy='dynamic')
+    stocks = db.relationship('StocksCache', backref=db.backref('category', lazy='select'), lazy='dynamic')
     
     def __repr__(self):
         return f'<StockCategory {self.name}>'

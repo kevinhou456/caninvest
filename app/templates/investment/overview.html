@@ -258,9 +258,9 @@
                                 
                                 <!-- Realized Gains -->
                                 <td class="text-end">
-                                    <span class="fw-medium {{ 'text-success' if holding['realized_gain'] >= 0 else 'text-danger' }}">
-                                        {% if holding['realized_gain'] >= 0 %}+{% endif %}
-                                        ${{ "{:,.2f}".format(holding['realized_gain'] or 0) }}
+                                    <span class="fw-medium {{ 'text-success' if holding.get('realized_gain', 0) >= 0 else 'text-danger' }}">
+                                        {% if holding.get('realized_gain', 0) >= 0 %}+{% endif %}
+                                        ${{ "{:,.2f}".format(holding.get('realized_gain', 0) or 0) }}
                                     </span>
                                 </td>
                                 
