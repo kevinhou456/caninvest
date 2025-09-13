@@ -80,8 +80,74 @@ def overview():
         
         # 获取详细的投资组合数据
         portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
-        holdings = portfolio_data.get('current_holdings', [])
-        cleared_holdings = portfolio_data.get('cleared_holdings', [])
+        raw_holdings = portfolio_data.get('current_holdings', [])
+        raw_cleared_holdings = portfolio_data.get('cleared_holdings', [])
+        
+        # 多账户股票合并逻辑 - 将相同股票(symbol+currency)合并显示
+        def merge_holdings_by_stock(holdings_list):
+            """合并相同股票的持仓数据"""
+            if len(account_ids) <= 1:
+                # 单账户或无账户，不需要合并
+                return holdings_list
+            
+            merged = {}
+            for holding in holdings_list:
+                # 使用股票代码+货币作为合并key
+                key = f"{holding.get('symbol', '')}_{holding.get('currency', 'USD')}"
+                
+                if key not in merged:
+                    # 第一次遇到这个股票，直接添加
+                    merged[key] = holding.copy()
+                    merged[key]['merged_accounts'] = [holding.get('account_name', '')]
+                    # 保存每个账户的详细信息用于悬停提示
+                    merged[key]['account_details'] = [{
+                        'account_name': holding.get('account_name', ''),
+                        'shares': holding.get('current_shares', 0),
+                        'cost': holding.get('total_cost', 0),
+                        'cost_cad': holding.get('total_cost_cad', 0),
+                        'realized_gain': holding.get('realized_gain', 0),
+                        'unrealized_gain': holding.get('unrealized_gain', 0)
+                    }]
+                else:
+                    # 合并相同股票的数据
+                    existing = merged[key]
+                    
+                    # 合并数量相关字段
+                    existing['current_shares'] = float(existing.get('current_shares', 0)) + float(holding.get('current_shares', 0))
+                    existing['total_cost'] = float(existing.get('total_cost', 0)) + float(holding.get('total_cost', 0))
+                    existing['current_value'] = float(existing.get('current_value', 0)) + float(holding.get('current_value', 0))
+                    existing['unrealized_gain'] = float(existing.get('unrealized_gain', 0)) + float(holding.get('unrealized_gain', 0))
+                    
+                    # 合并CAD相关字段
+                    existing['total_cost_cad'] = float(existing.get('total_cost_cad', 0)) + float(holding.get('total_cost_cad', 0))
+                    existing['current_value_cad'] = float(existing.get('current_value_cad', 0)) + float(holding.get('current_value_cad', 0))
+                    existing['unrealized_gain_cad'] = float(existing.get('unrealized_gain_cad', 0)) + float(holding.get('unrealized_gain_cad', 0))
+                    
+                    # 记录涉及的账户
+                    existing['merged_accounts'].append(holding.get('account_name', ''))
+                    
+                    # 添加当前账户的详细信息
+                    existing['account_details'].append({
+                        'account_name': holding.get('account_name', ''),
+                        'shares': holding.get('current_shares', 0),
+                        'cost': holding.get('total_cost', 0),
+                        'cost_cad': holding.get('total_cost_cad', 0),
+                        'realized_gain': holding.get('realized_gain', 0),
+                        'unrealized_gain': holding.get('unrealized_gain', 0)
+                    })
+                    
+                    # 重新计算平均价格
+                    if existing['current_shares'] > 0:
+                        existing['average_price'] = existing['total_cost'] / existing['current_shares']
+                        existing['average_price_cad'] = existing['total_cost_cad'] / existing['current_shares']
+                    
+                    # 保持其他字段不变（价格、汇率等）
+            
+            return list(merged.values())
+        
+        # 应用股票合并逻辑
+        holdings = merge_holdings_by_stock(raw_holdings)
+        cleared_holdings = merge_holdings_by_stock(raw_cleared_holdings)
         
         # 从综合指标中提取数据
         total_assets = comprehensive_metrics['total_assets']['cad']
@@ -94,37 +160,41 @@ def overview():
             def __init__(self, metrics_data):
                 self.total_assets = type('obj', (object,), {
                     'cad': metrics_data['total_assets']['cad'],
-                    'cad_only': metrics_data['total_assets']['cad'], 
-                    'usd_only': 0
+                    'cad_only': metrics_data['total_assets']['cad_only'], 
+                    'usd_only': metrics_data['total_assets']['usd_only']
                 })
-                self.stock_market_value = metrics_data['total_assets']['stock_value']
+                self.stock_market_value = type('obj', (object,), {
+                    'cad': metrics_data['total_assets']['stock_value'],
+                    'cad_only': metrics_data['total_assets']['stock_value_cad'], 
+                    'usd_only': metrics_data['total_assets']['stock_value_usd']
+                })
                 self.cash_balance_total = metrics_data['cash_balance']['total_cad']
                 
                 # 完整的财务指标 - 使用新架构的准确计算
                 self.total_return = type('obj', (object,), {
                     'cad': metrics_data['total_return']['cad'], 
-                    'cad_only': metrics_data['total_return']['cad'], 
-                    'usd_only': 0
+                    'cad_only': metrics_data['total_return']['cad_only'], 
+                    'usd_only': metrics_data['total_return']['usd_only']
                 })
                 self.realized_gain = type('obj', (object,), {
-                    'cad': metrics_data['total_return']['realized_gain'], 
-                    'cad_only': metrics_data['total_return']['realized_gain'], 
-                    'usd_only': 0
+                    'cad': metrics_data['realized_gain']['cad'], 
+                    'cad_only': metrics_data['realized_gain']['cad_only'], 
+                    'usd_only': metrics_data['realized_gain']['usd_only']
                 })
                 self.unrealized_gain = type('obj', (object,), {
-                    'cad': metrics_data['total_return']['unrealized_gain'], 
-                    'cad_only': metrics_data['total_return']['unrealized_gain'], 
-                    'usd_only': 0
+                    'cad': metrics_data['unrealized_gain']['cad'], 
+                    'cad_only': metrics_data['unrealized_gain']['cad_only'], 
+                    'usd_only': metrics_data['unrealized_gain']['usd_only']
                 })
                 self.total_dividends = type('obj', (object,), {
-                    'cad': metrics_data['total_return']['dividends'], 
-                    'cad_only': metrics_data['total_return']['dividends'], 
-                    'usd_only': 0
+                    'cad': metrics_data['dividends']['cad'], 
+                    'cad_only': metrics_data['dividends']['cad_only'], 
+                    'usd_only': metrics_data['dividends']['usd_only']
                 })
                 self.total_interest = type('obj', (object,), {
-                    'cad': metrics_data['total_return']['interest'], 
-                    'cad_only': metrics_data['total_return']['interest'], 
-                    'usd_only': 0
+                    'cad': metrics_data['interest']['cad'], 
+                    'cad_only': metrics_data['interest']['cad_only'], 
+                    'usd_only': metrics_data['interest']['usd_only']
                 })
                 self.total_deposits = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
                 self.total_withdrawals = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
@@ -132,7 +202,7 @@ def overview():
             def to_dict(self):
                 return {
                     'total_assets': {'cad': self.total_assets.cad, 'cad_only': self.total_assets.cad_only, 'usd_only': self.total_assets.usd_only},
-                    'stock_market_value': self.stock_market_value,
+                    'stock_market_value': {'cad': self.stock_market_value.cad, 'cad_only': self.stock_market_value.cad_only, 'usd_only': self.stock_market_value.usd_only},
                     'cash_balance_total': self.cash_balance_total,
                     'total_return': {'cad': self.total_return.cad, 'cad_only': self.total_return.cad_only, 'usd_only': self.total_return.usd_only},
                     'realized_gain': {'cad': self.realized_gain.cad, 'cad_only': self.realized_gain.cad_only, 'usd_only': self.realized_gain.usd_only},
@@ -1379,9 +1449,11 @@ def annual_stats():
                          current_year=current_year)
 
 
+
 @bp.route('/monthly-stats')
 def monthly_stats():
     """月度统计视图"""
+    from flask_babel import _
     family = Family.query.first()
     if not family:
         family = Family(name="我的家庭")
@@ -1389,42 +1461,9 @@ def monthly_stats():
         db.session.add(family)
         db.session.commit()
     
-    from datetime import datetime, timedelta
-    from sqlalchemy import extract
-    
-    # 获取最近12个月的数据
-    current_date = datetime.now()
-    monthly_data = []
-    
-    for i in range(12):
-        month_date = current_date - timedelta(days=30*i)
-        year = month_date.year
-        month = month_date.month
-        
-        month_transactions = Transaction.query.join(Account).filter(
-            Account.family_id == family.id,
-            extract('year', Transaction.trade_date) == year,
-            extract('month', Transaction.trade_date) == month
-        ).all()
-        
-        buy_amount = sum(t.quantity * t.price for t in month_transactions if t.type == 'buy')
-        sell_amount = sum(t.quantity * t.price for t in month_transactions if t.type == 'sell')
-        
-        monthly_data.append({
-            'year': year,
-            'month': month,
-            'month_name': month_date.strftime('%Y-%m'),
-            'buy_amount': buy_amount,
-            'sell_amount': sell_amount,
-            'net_investment': buy_amount - sell_amount,
-            'transaction_count': len(month_transactions)
-        })
-    
-    monthly_data.reverse()  # 按时间顺序排列
-    
     return render_template('investment/monthly_stats.html',
                          title=_('Monthly Statistics'),
-                         monthly_data=monthly_data)
+                         family=family)
 
 
 @bp.route('/quarterly-stats')
@@ -1486,6 +1525,7 @@ def quarterly_stats():
 @bp.route('/daily-stats')
 def daily_stats():
     """每日统计视图"""
+    from flask_babel import _
     family = Family.query.first()
     if not family:
         family = Family(name="我的家庭")
@@ -1493,40 +1533,25 @@ def daily_stats():
         db.session.add(family)
         db.session.commit()
     
-    from datetime import datetime, timedelta
-    from sqlalchemy import func
-    
-    # 获取最近30天的数据
-    end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=29)
-    
-    daily_data = []
-    current_date = start_date
-    
-    while current_date <= end_date:
-        day_transactions = Transaction.query.join(Account).filter(
-            Account.family_id == family.id,
-            func.date(Transaction.trade_date) == current_date
-        ).all()
-        
-        buy_amount = sum(t.quantity * t.price for t in day_transactions if t.type == 'buy')
-        sell_amount = sum(t.quantity * t.price for t in day_transactions if t.type == 'sell')
-        
-        daily_data.append({
-            'date': current_date,
-            'date_str': current_date.strftime('%Y-%m-%d'),
-            'weekday': current_date.strftime('%A'),
-            'buy_amount': buy_amount,
-            'sell_amount': sell_amount,
-            'net_investment': buy_amount - sell_amount,
-            'transaction_count': len(day_transactions)
-        })
-        
-        current_date += timedelta(days=1)
-    
     return render_template('investment/daily_stats.html',
                          title=_('Daily Statistics'),
-                         daily_data=daily_data)
+                         family=family)
+
+
+@bp.route('/recent-30-days-stats')
+def recent_30_days_stats():
+    """最近30天统计视图"""
+    from flask_babel import _
+    family = Family.query.first()
+    if not family:
+        family = Family(name="我的家庭")
+        from app import db
+        db.session.add(family)
+        db.session.commit()
+    
+    return render_template('investment/recent_30_days_stats.html',
+                         title=_('Recent 30 Days Statistics'),
+                         family=family)
 
 
 @bp.route('/holdings-analysis')
@@ -1539,73 +1564,9 @@ def holdings_analysis():
         db.session.add(family)
         db.session.commit()
     
-    # 获取所有账户的持仓信息（简化版）
-    accounts = Account.query.filter_by(family_id=family.id).all()
-    
-    holdings_by_stock = {}
-    holdings_by_category = {}
-    holdings_by_account = []
-    
-    for account in accounts:
-        # 计算每个账户的持仓（简化版 - 基于交易记录）
-        account_transactions = Transaction.query.filter_by(account_id=account.id).all()
-        account_holdings = {}
-        
-        for transaction in account_transactions:
-            symbol = transaction.stock if transaction.stock else 'CASH'
-            if symbol not in account_holdings:
-                account_holdings[symbol] = {
-                    'quantity': 0,
-                    'total_cost': 0,
-                    'stock': symbol  # 现在直接使用股票代码字符串
-                }
-            
-            if transaction.type == 'buy':
-                account_holdings[symbol]['quantity'] += transaction.quantity
-                account_holdings[symbol]['total_cost'] += transaction.quantity * transaction.price
-            elif transaction.type == 'sell':
-                account_holdings[symbol]['quantity'] -= transaction.quantity
-                account_holdings[symbol]['total_cost'] -= transaction.quantity * transaction.price
-        
-        # 过滤掉数量为0的持仓
-        account_holdings = {k: v for k, v in account_holdings.items() if v['quantity'] > 0}
-        
-        holdings_by_account.append({
-            'account': account,
-            'holdings': account_holdings
-        })
-        
-        # 汇总到总持仓
-        for symbol, holding in account_holdings.items():
-            if symbol not in holdings_by_stock:
-                holdings_by_stock[symbol] = {
-                    'quantity': 0,
-                    'total_cost': 0,
-                    'stock': holding['stock'],
-                    'accounts': []
-                }
-            
-            holdings_by_stock[symbol]['quantity'] += holding['quantity']
-            holdings_by_stock[symbol]['total_cost'] += holding['total_cost']
-            holdings_by_stock[symbol]['accounts'].append(account.name)
-            
-            # 按分类汇总
-            if holding['stock'] and holding['stock'].category:
-                category_name = holding['stock'].category.name
-                if category_name not in holdings_by_category:
-                    holdings_by_category[category_name] = {
-                        'total_cost': 0,
-                        'stocks': []
-                    }
-                holdings_by_category[category_name]['total_cost'] += holding['total_cost']
-                if symbol not in holdings_by_category[category_name]['stocks']:
-                    holdings_by_category[category_name]['stocks'].append(symbol)
-    
     return render_template('investment/holdings_analysis.html',
                          title=_('Holdings Analysis'),
-                         holdings_by_stock=holdings_by_stock,
-                         holdings_by_category=holdings_by_category,
-                         holdings_by_account=holdings_by_account)
+                         family=family)
 
 
 @bp.route('/transactions/delete-all', methods=['POST'])

@@ -409,8 +409,745 @@ class PortfolioService:
             return stock_info.category.name
         return 'Unknown'
     
+    def get_annual_analysis(self, account_ids: List[int], 
+                           years: Optional[List[int]] = None) -> Dict:
+        """获取年度分析数据
+        
+        Args:
+            account_ids: 账户ID列表
+            years: 年份列表，如果为None则自动计算有交易记录的年份
+            
+        Returns:
+            包含年度统计数据的字典
+        """
+        if not years:
+            # 获取有交易记录的年份
+            transaction_years_query = db.session.query(db.extract('year', Transaction.trade_date)).filter(
+                Transaction.account_id.in_(account_ids)
+            ).distinct()
+            transaction_years = [int(year[0]) for year in transaction_years_query.all()]
+            
+            # 获取所有需要分析的年份（从最早交易年份到当前年份）
+            if transaction_years:
+                min_year = min(transaction_years)
+                current_year = datetime.now().year
+                years = list(range(min_year, current_year + 1))
+        
+        annual_data = []
+        for year in sorted(years, reverse=True):  # 倒序排列
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+            
+            # 使用统一的portfolio_summary获取年度数据
+            year_portfolio = self.get_portfolio_summary(
+                account_ids, TimePeriod.CUSTOM, year_start, year_end
+            )
+            
+            # 计算年度交易统计
+            year_transactions = Transaction.query.filter(
+                Transaction.account_id.in_(account_ids),
+                Transaction.trade_date >= year_start,
+                Transaction.trade_date <= year_end
+            ).all()
+            
+            # 统计交易数据
+            transaction_count = len(year_transactions)
+            buy_amount = sum((tx.quantity * tx.price + tx.fee) 
+                           for tx in year_transactions if tx.type == 'BUY' and tx.quantity and tx.price)
+            sell_amount = sum((tx.quantity * tx.price - tx.fee) 
+                            for tx in year_transactions if tx.type == 'SELL' and tx.quantity and tx.price)
+            
+            # 按货币统计交易数据
+            buy_cad = sum((tx.quantity * tx.price + tx.fee) 
+                         for tx in year_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'CAD')
+            buy_usd = sum((tx.quantity * tx.price + tx.fee) 
+                         for tx in year_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'USD')
+            sell_cad = sum((tx.quantity * tx.price - tx.fee) 
+                          for tx in year_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'CAD')
+            sell_usd = sum((tx.quantity * tx.price - tx.fee) 
+                          for tx in year_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'USD')
+            
+            # 统计分红和利息（从amount字段）
+            dividends = sum(tx.amount for tx in year_transactions 
+                          if tx.type == 'DIVIDEND' and tx.amount)
+            interest = sum(tx.amount for tx in year_transactions 
+                         if tx.type == 'INTEREST' and tx.amount)
+            
+            # 按货币统计分红和利息
+            dividends_cad = sum(tx.amount for tx in year_transactions 
+                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'CAD')
+            dividends_usd = sum(tx.amount for tx in year_transactions 
+                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'USD')
+            interest_cad = sum(tx.amount for tx in year_transactions 
+                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'CAD')
+            interest_usd = sum(tx.amount for tx in year_transactions 
+                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'USD')
+            
+            # 计算年度已实现收益（从清算的持仓中统计）
+            annual_realized_gain = 0
+            annual_realized_gain_cad = 0
+            annual_realized_gain_usd = 0
+            for holding in year_portfolio.get('cleared_holdings', []):
+                realized_gain = holding.get('realized_gain', 0)
+                annual_realized_gain += realized_gain
+                # 按货币分组已实现收益
+                if holding.get('currency') == 'CAD':
+                    annual_realized_gain_cad += realized_gain
+                elif holding.get('currency') == 'USD':
+                    annual_realized_gain_usd += realized_gain
+            
+            # 计算按货币分组的总资产和浮动收益
+            total_assets_cad = 0
+            total_assets_usd = 0
+            unrealized_gain_cad = 0
+            unrealized_gain_usd = 0
+            
+            for holding in year_portfolio.get('current_holdings', []):
+                if holding.get('currency') == 'CAD':
+                    total_assets_cad += holding.get('current_value', 0)
+                    unrealized_gain_cad += holding.get('unrealized_gain', 0)
+                elif holding.get('currency') == 'USD':
+                    total_assets_usd += holding.get('current_value', 0)
+                    unrealized_gain_usd += holding.get('unrealized_gain', 0)
+            
+            annual_data.append({
+                'year': year,
+                'total_assets': year_portfolio['summary']['total_current_value'],
+                'annual_realized_gain': annual_realized_gain,
+                'annual_unrealized_gain': year_portfolio['summary']['total_unrealized_gain'],
+                'annual_dividends': dividends,
+                'annual_interest': interest,
+                'transaction_count': transaction_count,
+                'buy_amount': buy_amount,
+                'sell_amount': sell_amount,
+                'currency_breakdown': {
+                    'total_assets_cad': total_assets_cad,
+                    'total_assets_usd': total_assets_usd,
+                    'realized_gain_cad': annual_realized_gain_cad,
+                    'realized_gain_usd': annual_realized_gain_usd,
+                    'unrealized_gain_cad': unrealized_gain_cad,
+                    'unrealized_gain_usd': unrealized_gain_usd,
+                    'buy_cad': buy_cad,
+                    'buy_usd': buy_usd,
+                    'sell_cad': sell_cad,
+                    'sell_usd': sell_usd,
+                    'dividends_cad': dividends_cad,
+                    'dividends_usd': dividends_usd,
+                    'interest_cad': interest_cad,
+                    'interest_usd': interest_usd
+                }
+            })
+        
+        # 计算图表数据
+        chart_data = self._prepare_annual_chart_data(annual_data)
+        
+        return {
+            'annual_data': annual_data,
+            'chart_data': chart_data,
+            'summary': {
+                'years_covered': len(annual_data),
+                'total_years_gain': sum(item['annual_realized_gain'] + item['annual_unrealized_gain'] 
+                                      for item in annual_data),
+                'total_dividends': sum(item['annual_dividends'] for item in annual_data),
+                'total_interest': sum(item['annual_interest'] for item in annual_data),
+                'average_annual_return': self._calculate_average_annual_return(annual_data)
+            }
+        }
+    
+    def get_quarterly_analysis(self, account_ids: List[int], 
+                              years: Optional[List[int]] = None) -> Dict:
+        """获取季度分析数据
+        
+        Args:
+            account_ids: 账户ID列表
+            years: 年份列表，如果为None则自动计算有交易记录的年份
+            
+        Returns:
+            包含季度统计数据的字典
+        """
+        if not years:
+            # 获取有交易记录的年份
+            transaction_years_query = db.session.query(db.extract('year', Transaction.trade_date)).filter(
+                Transaction.account_id.in_(account_ids)
+            ).distinct()
+            transaction_years = [int(year[0]) for year in transaction_years_query.all()]
+            
+            # 获取所有需要分析的年份（从最早交易年份到当前年份）
+            if transaction_years:
+                min_year = min(transaction_years)
+                current_year = datetime.now().year
+                years = list(range(min_year, current_year + 1))
+        
+        quarterly_data = []
+        for year in sorted(years, reverse=True):
+            for quarter in [4, 3, 2, 1]:  # 倒序排列
+                quarter_start = date(year, (quarter - 1) * 3 + 1, 1)
+                if quarter == 4:
+                    quarter_end = date(year, 12, 31)
+                else:
+                    next_quarter_start = date(year, quarter * 3 + 1, 1)
+                    quarter_end = next_quarter_start - timedelta(days=1)
+                
+                # 使用统一的portfolio_summary获取季度数据
+                quarter_portfolio = self.get_portfolio_summary(
+                    account_ids, TimePeriod.CUSTOM, quarter_start, quarter_end
+                )
+                
+                # 计算季度交易统计
+                quarter_transactions = Transaction.query.filter(
+                    Transaction.account_id.in_(account_ids),
+                    Transaction.trade_date >= quarter_start,
+                    Transaction.trade_date <= quarter_end
+                ).all()
+                
+                # 统计交易数据
+                transaction_count = len(quarter_transactions)
+                buy_amount = sum((tx.quantity * tx.price + tx.fee) 
+                               for tx in quarter_transactions if tx.type == 'BUY' and tx.quantity and tx.price)
+                sell_amount = sum((tx.quantity * tx.price - tx.fee) 
+                                for tx in quarter_transactions if tx.type == 'SELL' and tx.quantity and tx.price)
+                
+                # 按货币统计交易数据
+                buy_cad = sum((tx.quantity * tx.price + tx.fee) 
+                             for tx in quarter_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'CAD')
+                buy_usd = sum((tx.quantity * tx.price + tx.fee) 
+                             for tx in quarter_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'USD')
+                sell_cad = sum((tx.quantity * tx.price - tx.fee) 
+                              for tx in quarter_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'CAD')
+                sell_usd = sum((tx.quantity * tx.price - tx.fee) 
+                              for tx in quarter_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'USD')
+                
+                # 统计分红和利息
+                dividends = sum(tx.amount for tx in quarter_transactions 
+                              if tx.type == 'DIVIDEND' and tx.amount)
+                interest = sum(tx.amount for tx in quarter_transactions 
+                             if tx.type == 'INTEREST' and tx.amount)
+                
+                # 按货币统计分红和利息
+                dividends_cad = sum(tx.amount for tx in quarter_transactions 
+                                  if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'CAD')
+                dividends_usd = sum(tx.amount for tx in quarter_transactions 
+                                  if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'USD')
+                interest_cad = sum(tx.amount for tx in quarter_transactions 
+                                 if tx.type == 'INTEREST' and tx.amount and tx.currency == 'CAD')
+                interest_usd = sum(tx.amount for tx in quarter_transactions 
+                                 if tx.type == 'INTEREST' and tx.amount and tx.currency == 'USD')
+                
+                # 计算季度已实现收益
+                quarterly_realized_gain = 0
+                quarterly_realized_gain_cad = 0
+                quarterly_realized_gain_usd = 0
+                for holding in quarter_portfolio.get('cleared_holdings', []):
+                    realized_gain = holding.get('realized_gain', 0)
+                    quarterly_realized_gain += realized_gain
+                    if holding.get('currency') == 'CAD':
+                        quarterly_realized_gain_cad += realized_gain
+                    elif holding.get('currency') == 'USD':
+                        quarterly_realized_gain_usd += realized_gain
+                
+                # 计算按货币分组的总资产和浮动收益
+                total_assets_cad = 0
+                total_assets_usd = 0
+                unrealized_gain_cad = 0
+                unrealized_gain_usd = 0
+                
+                for holding in quarter_portfolio.get('current_holdings', []):
+                    if holding.get('currency') == 'CAD':
+                        total_assets_cad += holding.get('current_value', 0)
+                        unrealized_gain_cad += holding.get('unrealized_gain', 0)
+                    elif holding.get('currency') == 'USD':
+                        total_assets_usd += holding.get('current_value', 0)
+                        unrealized_gain_usd += holding.get('unrealized_gain', 0)
+                
+                quarterly_data.append({
+                    'year': year,
+                    'quarter': quarter,
+                    'total_assets': quarter_portfolio['summary']['total_current_value'],
+                    'quarterly_realized_gain': quarterly_realized_gain,
+                    'quarterly_unrealized_gain': quarter_portfolio['summary']['total_unrealized_gain'],
+                    'quarterly_dividends': dividends,
+                    'quarterly_interest': interest,
+                    'transaction_count': transaction_count,
+                    'buy_amount': buy_amount,
+                    'sell_amount': sell_amount,
+                    'currency_breakdown': {
+                        'total_assets_cad': total_assets_cad,
+                        'total_assets_usd': total_assets_usd,
+                        'realized_gain_cad': quarterly_realized_gain_cad,
+                        'realized_gain_usd': quarterly_realized_gain_usd,
+                        'unrealized_gain_cad': unrealized_gain_cad,
+                        'unrealized_gain_usd': unrealized_gain_usd,
+                        'buy_cad': buy_cad,
+                        'buy_usd': buy_usd,
+                        'sell_cad': sell_cad,
+                        'sell_usd': sell_usd,
+                        'dividends_cad': dividends_cad,
+                        'dividends_usd': dividends_usd,
+                        'interest_cad': interest_cad,
+                        'interest_usd': interest_usd
+                    }
+                })
+        
+        return {
+            'quarterly_data': quarterly_data,
+            'summary': {
+                'quarters_covered': len(quarterly_data),
+                'total_quarters_gain': sum(item['quarterly_realized_gain'] + item['quarterly_unrealized_gain'] 
+                                         for item in quarterly_data),
+                'total_dividends': sum(item['quarterly_dividends'] for item in quarterly_data),
+                'total_interest': sum(item['quarterly_interest'] for item in quarterly_data),
+                'average_quarterly_return': self._calculate_average_return(quarterly_data, 'quarterly_realized_gain', 'quarterly_unrealized_gain')
+            }
+        }
+    
+    def get_monthly_analysis(self, account_ids: List[int], 
+                            months: Optional[int] = 12) -> Dict:
+        """获取月度分析数据
+        
+        Args:
+            account_ids: 账户ID列表
+            months: 要分析的月数，默认12个月
+            
+        Returns:
+            包含月度统计数据的字典
+        """
+        current_date = datetime.now().date()
+        monthly_data = []
+        
+        for i in range(months):
+            # 计算月份
+            month_date = current_date.replace(day=1) - timedelta(days=i * 30)
+            month_start = month_date.replace(day=1)
+            if month_start.month == 12:
+                month_end = month_start.replace(year=month_start.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                month_end = month_start.replace(month=month_start.month + 1, day=1) - timedelta(days=1)
+            
+            # 使用统一的portfolio_summary获取月度数据
+            month_portfolio = self.get_portfolio_summary(
+                account_ids, TimePeriod.CUSTOM, month_start, month_end
+            )
+            
+            # 计算月度交易统计
+            month_transactions = Transaction.query.filter(
+                Transaction.account_id.in_(account_ids),
+                Transaction.trade_date >= month_start,
+                Transaction.trade_date <= month_end
+            ).all()
+            
+            # 统计交易数据
+            transaction_count = len(month_transactions)
+            buy_amount = sum((tx.quantity * tx.price + tx.fee) 
+                           for tx in month_transactions if tx.type == 'BUY' and tx.quantity and tx.price)
+            sell_amount = sum((tx.quantity * tx.price - tx.fee) 
+                            for tx in month_transactions if tx.type == 'SELL' and tx.quantity and tx.price)
+            
+            # 按货币统计交易数据
+            buy_cad = sum((tx.quantity * tx.price + tx.fee) 
+                         for tx in month_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'CAD')
+            buy_usd = sum((tx.quantity * tx.price + tx.fee) 
+                         for tx in month_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'USD')
+            sell_cad = sum((tx.quantity * tx.price - tx.fee) 
+                          for tx in month_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'CAD')
+            sell_usd = sum((tx.quantity * tx.price - tx.fee) 
+                          for tx in month_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'USD')
+            
+            # 统计分红和利息
+            dividends = sum(tx.amount for tx in month_transactions 
+                          if tx.type == 'DIVIDEND' and tx.amount)
+            interest = sum(tx.amount for tx in month_transactions 
+                         if tx.type == 'INTEREST' and tx.amount)
+            
+            # 按货币统计分红和利息
+            dividends_cad = sum(tx.amount for tx in month_transactions 
+                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'CAD')
+            dividends_usd = sum(tx.amount for tx in month_transactions 
+                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'USD')
+            interest_cad = sum(tx.amount for tx in month_transactions 
+                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'CAD')
+            interest_usd = sum(tx.amount for tx in month_transactions 
+                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'USD')
+            
+            # 计算月度已实现收益
+            monthly_realized_gain = 0
+            monthly_realized_gain_cad = 0
+            monthly_realized_gain_usd = 0
+            for holding in month_portfolio.get('cleared_holdings', []):
+                realized_gain = holding.get('realized_gain', 0)
+                monthly_realized_gain += realized_gain
+                if holding.get('currency') == 'CAD':
+                    monthly_realized_gain_cad += realized_gain
+                elif holding.get('currency') == 'USD':
+                    monthly_realized_gain_usd += realized_gain
+            
+            # 计算按货币分组的总资产和浮动收益
+            total_assets_cad = 0
+            total_assets_usd = 0
+            unrealized_gain_cad = 0
+            unrealized_gain_usd = 0
+            
+            for holding in month_portfolio.get('current_holdings', []):
+                if holding.get('currency') == 'CAD':
+                    total_assets_cad += holding.get('current_value', 0)
+                    unrealized_gain_cad += holding.get('unrealized_gain', 0)
+                elif holding.get('currency') == 'USD':
+                    total_assets_usd += holding.get('current_value', 0)
+                    unrealized_gain_usd += holding.get('unrealized_gain', 0)
+            
+            monthly_data.append({
+                'year': month_start.year,
+                'month': month_start.month,
+                'month_name': month_start.strftime('%Y-%m'),
+                'total_assets': month_portfolio['summary']['total_current_value'],
+                'monthly_realized_gain': monthly_realized_gain,
+                'monthly_unrealized_gain': month_portfolio['summary']['total_unrealized_gain'],
+                'monthly_dividends': dividends,
+                'monthly_interest': interest,
+                'transaction_count': transaction_count,
+                'buy_amount': buy_amount,
+                'sell_amount': sell_amount,
+                'currency_breakdown': {
+                    'total_assets_cad': total_assets_cad,
+                    'total_assets_usd': total_assets_usd,
+                    'realized_gain_cad': monthly_realized_gain_cad,
+                    'realized_gain_usd': monthly_realized_gain_usd,
+                    'unrealized_gain_cad': unrealized_gain_cad,
+                    'unrealized_gain_usd': unrealized_gain_usd,
+                    'buy_cad': buy_cad,
+                    'buy_usd': buy_usd,
+                    'sell_cad': sell_cad,
+                    'sell_usd': sell_usd,
+                    'dividends_cad': dividends_cad,
+                    'dividends_usd': dividends_usd,
+                    'interest_cad': interest_cad,
+                    'interest_usd': interest_usd
+                }
+            })
+        
+        return {
+            'monthly_data': monthly_data,
+            'summary': {
+                'months_covered': len(monthly_data),
+                'total_months_gain': sum(item['monthly_realized_gain'] + item['monthly_unrealized_gain'] 
+                                       for item in monthly_data),
+                'total_dividends': sum(item['monthly_dividends'] for item in monthly_data),
+                'total_interest': sum(item['monthly_interest'] for item in monthly_data),
+                'average_monthly_return': self._calculate_average_return(monthly_data, 'monthly_realized_gain', 'monthly_unrealized_gain')
+            }
+        }
+    
+    def get_daily_analysis(self, account_ids: List[int], 
+                          days: Optional[int] = 30) -> Dict:
+        """获取日度分析数据
+        
+        Args:
+            account_ids: 账户ID列表
+            days: 要分析的天数，默认30天
+            
+        Returns:
+            包含日度统计数据的字典
+        """
+        current_date = datetime.now().date()
+        daily_data = []
+        
+        for i in range(days):
+            analysis_date = current_date - timedelta(days=i)
+            
+            # 使用统一的portfolio_summary获取单日数据
+            day_portfolio = self.get_portfolio_summary(
+                account_ids, TimePeriod.CUSTOM, analysis_date, analysis_date
+            )
+            
+            # 计算当日交易统计
+            day_transactions = Transaction.query.filter(
+                Transaction.account_id.in_(account_ids),
+                Transaction.trade_date == analysis_date
+            ).all()
+            
+            # 统计交易数据
+            transaction_count = len(day_transactions)
+            buy_amount = sum((tx.quantity * tx.price + tx.fee) 
+                           for tx in day_transactions if tx.type == 'BUY' and tx.quantity and tx.price)
+            sell_amount = sum((tx.quantity * tx.price - tx.fee) 
+                            for tx in day_transactions if tx.type == 'SELL' and tx.quantity and tx.price)
+            
+            # 按货币统计交易数据
+            buy_cad = sum((tx.quantity * tx.price + tx.fee) 
+                         for tx in day_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'CAD')
+            buy_usd = sum((tx.quantity * tx.price + tx.fee) 
+                         for tx in day_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'USD')
+            sell_cad = sum((tx.quantity * tx.price - tx.fee) 
+                          for tx in day_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'CAD')
+            sell_usd = sum((tx.quantity * tx.price - tx.fee) 
+                          for tx in day_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'USD')
+            
+            # 统计分红和利息
+            dividends = sum(tx.amount for tx in day_transactions 
+                          if tx.type == 'DIVIDEND' and tx.amount)
+            interest = sum(tx.amount for tx in day_transactions 
+                         if tx.type == 'INTEREST' and tx.amount)
+            
+            # 按货币统计分红和利息
+            dividends_cad = sum(tx.amount for tx in day_transactions 
+                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'CAD')
+            dividends_usd = sum(tx.amount for tx in day_transactions 
+                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'USD')
+            interest_cad = sum(tx.amount for tx in day_transactions 
+                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'CAD')
+            interest_usd = sum(tx.amount for tx in day_transactions 
+                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'USD')
+            
+            # 计算当日已实现收益
+            daily_realized_gain = 0
+            daily_realized_gain_cad = 0
+            daily_realized_gain_usd = 0
+            for holding in day_portfolio.get('cleared_holdings', []):
+                realized_gain = holding.get('realized_gain', 0)
+                daily_realized_gain += realized_gain
+                if holding.get('currency') == 'CAD':
+                    daily_realized_gain_cad += realized_gain
+                elif holding.get('currency') == 'USD':
+                    daily_realized_gain_usd += realized_gain
+            
+            # 计算按货币分组的总资产和浮动收益
+            total_assets_cad = 0
+            total_assets_usd = 0
+            unrealized_gain_cad = 0
+            unrealized_gain_usd = 0
+            
+            for holding in day_portfolio.get('current_holdings', []):
+                if holding.get('currency') == 'CAD':
+                    total_assets_cad += holding.get('current_value', 0)
+                    unrealized_gain_cad += holding.get('unrealized_gain', 0)
+                elif holding.get('currency') == 'USD':
+                    total_assets_usd += holding.get('current_value', 0)
+                    unrealized_gain_usd += holding.get('unrealized_gain', 0)
+            
+            daily_data.append({
+                'date': analysis_date.strftime('%Y-%m-%d'),
+                'total_assets': day_portfolio['summary']['total_current_value'],
+                'daily_realized_gain': daily_realized_gain,
+                'daily_unrealized_gain': day_portfolio['summary']['total_unrealized_gain'],
+                'daily_dividends': dividends,
+                'daily_interest': interest,
+                'transaction_count': transaction_count,
+                'buy_amount': buy_amount,
+                'sell_amount': sell_amount,
+                'currency_breakdown': {
+                    'total_assets_cad': total_assets_cad,
+                    'total_assets_usd': total_assets_usd,
+                    'realized_gain_cad': daily_realized_gain_cad,
+                    'realized_gain_usd': daily_realized_gain_usd,
+                    'unrealized_gain_cad': unrealized_gain_cad,
+                    'unrealized_gain_usd': unrealized_gain_usd,
+                    'buy_cad': buy_cad,
+                    'buy_usd': buy_usd,
+                    'sell_cad': sell_cad,
+                    'sell_usd': sell_usd,
+                    'dividends_cad': dividends_cad,
+                    'dividends_usd': dividends_usd,
+                    'interest_cad': interest_cad,
+                    'interest_usd': interest_usd
+                }
+            })
+        
+        return {
+            'daily_data': daily_data,
+            'summary': {
+                'days_covered': len(daily_data),
+                'total_days_gain': sum(item['daily_realized_gain'] + item['daily_unrealized_gain'] 
+                                     for item in daily_data),
+                'total_dividends': sum(item['daily_dividends'] for item in daily_data),
+                'total_interest': sum(item['daily_interest'] for item in daily_data),
+                'average_daily_return': self._calculate_average_return(daily_data, 'daily_realized_gain', 'daily_unrealized_gain')
+            }
+        }
+    
+    def get_recent_30_days_analysis(self, account_ids: List[int]) -> Dict:
+        """获取最近30天分析数据 - 调用日度分析"""
+        return self.get_daily_analysis(account_ids, 30)
+    
+    
+    def _prepare_annual_chart_data(self, annual_data: List[Dict]) -> Dict:
+        """准备年度图表数据"""
+        return {
+            'years': [item['year'] for item in annual_data],
+            'total_assets': [item['total_assets'] for item in annual_data],
+            'annual_gains': [item['annual_realized_gain'] + item['annual_unrealized_gain'] 
+                           for item in annual_data],
+            'realized_gains': [item['annual_realized_gain'] for item in annual_data],
+            'unrealized_gains': [item['annual_unrealized_gain'] for item in annual_data],
+            'dividends': [item['annual_dividends'] for item in annual_data],
+            'interest': [item['annual_interest'] for item in annual_data]
+        }
+    
+    def _calculate_average_annual_return(self, annual_data: List[Dict]) -> float:
+        """计算平均年收益率"""
+        if not annual_data:
+            return 0.0
+        
+        total_return = 0.0
+        valid_years = 0
+        
+        for item in annual_data:
+            if item['total_assets'] > 0:
+                annual_return = (item['annual_realized_gain'] + item['annual_unrealized_gain']) / item['total_assets'] * 100
+                total_return += annual_return
+                valid_years += 1
+        
+        return total_return / valid_years if valid_years > 0 else 0.0
+    
+    def _calculate_average_return(self, data: List[Dict], realized_field: str, unrealized_field: str) -> float:
+        """计算平均收益率（通用方法）"""
+        if not data:
+            return 0.0
+        
+        total_return = 0.0
+        valid_periods = 0
+        
+        for item in data:
+            if item['total_assets'] > 0:
+                period_return = (item[realized_field] + item[unrealized_field]) / item['total_assets'] * 100
+                total_return += period_return
+                valid_periods += 1
+        
+        return total_return / valid_periods if valid_periods > 0 else 0.0
+
+    def get_holdings_distribution(self, account_ids: List[int]) -> Dict:
+        """获取持仓分布数据 - 为四个饼状图提供数据"""
+        try:
+            # 获取当前时间点的投资组合汇总
+            current_date = datetime.now().date()
+            summary = self.get_portfolio_summary(account_ids, TimePeriod.CUSTOM, end_date=current_date)
+            
+            # 使用正确的数据结构：current_holdings是直接的持仓列表
+            current_holdings = summary.get('current_holdings', [])
+            
+            # 1. 按股票分布
+            by_stocks = []
+            stock_aggregation = {}
+            
+            for holding in current_holdings:
+                stock_symbol = holding['symbol']
+                current_value = float(holding['current_value'])
+                
+                if current_value > 0:
+                    if stock_symbol in stock_aggregation:
+                        stock_aggregation[stock_symbol]['value'] += current_value
+                    else:
+                        stock_cache = StocksCache.query.filter_by(symbol=stock_symbol).first()
+                        stock_aggregation[stock_symbol] = {
+                            'symbol': stock_symbol,
+                            'name': stock_cache.name if stock_cache else stock_symbol,
+                            'value': current_value
+                        }
+            
+            by_stocks = list(stock_aggregation.values())
+            
+            # 2. 按类别分布
+            by_category = defaultdict(lambda: {'value': 0, 'stocks': set()})
+            
+            for holding in current_holdings:
+                stock_symbol = holding['symbol']
+                current_value = float(holding['current_value'])
+                
+                if current_value > 0:
+                    stock_cache = StocksCache.query.filter_by(symbol=stock_symbol).first()
+                    category_name = stock_cache.category.name if (stock_cache and stock_cache.category) else 'Uncategorized'
+                    
+                    by_category[category_name]['value'] += current_value
+                    by_category[category_name]['stocks'].add(stock_symbol)
+            
+            # 转换为列表格式
+            by_category_list = [
+                {
+                    'category': category,
+                    'value': data['value'],
+                    'stocks_count': len(data['stocks'])
+                }
+                for category, data in by_category.items()
+            ]
+            
+            # 3. 按货币分布 - 通过汇率计算
+            total_value = float(summary['summary']['total_current_value'])
+            
+            # 计算各币种占比
+            cad_value = 0
+            usd_value = 0
+            
+            for holding in current_holdings:
+                current_value = float(holding['current_value'])
+                if current_value > 0:
+                    # 获取股票的货币
+                    stock_cache = StocksCache.query.filter_by(symbol=holding['symbol']).first()
+                    currency = stock_cache.currency if stock_cache else 'CAD'
+                    
+                    if currency == 'CAD':
+                        cad_value += current_value
+                    else:  # USD
+                        usd_value += current_value
+            
+            by_currency = []
+            if cad_value > 0:
+                by_currency.append({
+                    'currency': 'CAD',
+                    'value': cad_value
+                })
+            if usd_value > 0:
+                by_currency.append({
+                    'currency': 'USD', 
+                    'value': usd_value
+                })
+            
+            # 4. 按账户分布
+            by_account = defaultdict(lambda: {'value': 0, 'holdings_count': 0})
+            account_names = {}
+            
+            for holding in current_holdings:
+                account_id = holding['account_id']
+                current_value = float(holding['current_value'])
+                
+                if current_value > 0:
+                    by_account[account_id]['value'] += current_value
+                    by_account[account_id]['holdings_count'] += 1
+                    
+                    # 获取账户名称
+                    if account_id not in account_names:
+                        from app.models import Account
+                        account = Account.query.get(account_id)
+                        account_names[account_id] = account.name if account else f'Account {account_id}'
+            
+            by_account_list = [
+                {
+                    'account_id': account_id,
+                    'account_name': account_names[account_id],
+                    'value': data['value'],
+                    'holdings_count': data['holdings_count']
+                }
+                for account_id, data in by_account.items()
+                if data['value'] > 0
+            ]
+            
+            return {
+                'summary': {
+                    'total_value_cad': total_value,  # 所有值已经转换为CAD
+                    'unique_stocks': len(by_stocks),
+                    'categories_count': len(by_category_list),
+                    'accounts_count': len(by_account_list)
+                },
+                'by_stocks': by_stocks,
+                'by_category': by_category_list,
+                'by_currency': by_currency,
+                'by_account': by_account_list
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting holdings distribution: {e}")
+            raise
+
     def clear_cache(self):
         """清除缓存（无操作 - 不再使用本地缓存）"""
         pass
+
 # 全局服务实例
 portfolio_service = PortfolioService()

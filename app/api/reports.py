@@ -371,3 +371,311 @@ def export_account_report(account_id):
             'success': False,
             'error': str(e)
         }), 500
+
+@bp.route('/families/<int:family_id>/reports/annual-analysis', methods=['GET'])
+def get_family_annual_analysis(family_id):
+    """获取家庭年度分析报告"""
+    family = Family.query.get_or_404(family_id)
+    
+    # 获取参数
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    years_param = request.args.get('years')
+    
+    # 确定账户范围
+    account_ids = []
+    if account_id:
+        # 单个账户
+        account = Account.query.get_or_404(account_id)
+        if account.family_id != family_id:
+            return jsonify({'error': 'Account does not belong to this family'}), 400
+        account_ids = [account_id]
+    elif member_id:
+        # 成员的所有账户
+        member = Member.query.get_or_404(member_id)
+        if member.family_id != family_id:
+            return jsonify({'error': 'Member does not belong to this family'}), 400
+        account_ids = [acc.id for acc in member.get_accounts_objects()]
+    else:
+        # 家庭的所有账户
+        account_ids = [acc.id for acc in family.accounts]
+    
+    # 解析年份参数
+    years = None
+    if years_param:
+        try:
+            years = [int(year.strip()) for year in years_param.split(',')]
+        except ValueError:
+            return jsonify({'error': 'Invalid years parameter format'}), 400
+    
+    try:
+        # 调用统一的投资组合服务
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_annual_analysis(account_ids, years)
+        
+        return jsonify({
+            'family': family.to_dict(),
+            'filter_info': {
+                'member_id': member_id,
+                'account_id': account_id,
+                'account_count': len(account_ids)
+            },
+            'analysis': analysis_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate annual analysis: {str(e)}'
+        }), 500
+
+@bp.route('/families/<int:family_id>/reports/quarterly-analysis', methods=['GET'])
+def get_family_quarterly_analysis(family_id):
+    """获取家庭季度分析报告"""
+    family = Family.query.get_or_404(family_id)
+    
+    # 获取参数
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    years_param = request.args.get('years')
+    
+    # 确定账户范围
+    account_ids = []
+    if account_id:
+        # 单个账户
+        account = Account.query.get_or_404(account_id)
+        if account.family_id != family_id:
+            return jsonify({'error': 'Account does not belong to this family'}), 400
+        account_ids = [account_id]
+    elif member_id:
+        # 成员的所有账户
+        member = Member.query.get_or_404(member_id)
+        if member.family_id != family_id:
+            return jsonify({'error': 'Member does not belong to this family'}), 400
+        account_ids = [acc.id for acc in member.get_accounts_objects()]
+    else:
+        # 家庭的所有账户
+        account_ids = [acc.id for acc in family.accounts]
+    
+    # 解析年份参数
+    years = None
+    if years_param:
+        try:
+            years = [int(year.strip()) for year in years_param.split(',')]
+        except ValueError:
+            return jsonify({'error': 'Invalid years parameter format'}), 400
+    
+    try:
+        # 调用统一的投资组合服务
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_quarterly_analysis(account_ids, years)
+        
+        return jsonify({
+            'family': family.to_dict(),
+            'filter_info': {
+                'member_id': member_id,
+                'account_id': account_id,
+                'account_count': len(account_ids)
+            },
+            'analysis': analysis_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate quarterly analysis: {str(e)}'
+        }), 500
+
+@bp.route('/families/<int:family_id>/reports/monthly-analysis', methods=['GET'])
+def get_family_monthly_analysis(family_id):
+    """获取家庭月度分析报告"""
+    family = Family.query.get_or_404(family_id)
+    
+    # 获取参数
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    months = request.args.get('months', type=int, default=12)
+    
+    # 确定账户范围
+    account_ids = []
+    if account_id:
+        # 单个账户
+        account = Account.query.get_or_404(account_id)
+        if account.family_id != family_id:
+            return jsonify({'error': 'Account does not belong to this family'}), 400
+        account_ids = [account_id]
+    elif member_id:
+        # 成员的所有账户
+        member = Member.query.get_or_404(member_id)
+        if member.family_id != family_id:
+            return jsonify({'error': 'Member does not belong to this family'}), 400
+        account_ids = [acc.id for acc in member.get_accounts_objects()]
+    else:
+        # 家庭的所有账户
+        account_ids = [acc.id for acc in family.accounts]
+    
+    try:
+        # 调用统一的投资组合服务
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_monthly_analysis(account_ids, months)
+        
+        return jsonify({
+            'family': family.to_dict(),
+            'filter_info': {
+                'member_id': member_id,
+                'account_id': account_id,
+                'account_count': len(account_ids)
+            },
+            'analysis': analysis_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate monthly analysis: {str(e)}'
+        }), 500
+
+@bp.route('/families/<int:family_id>/reports/daily-analysis', methods=['GET'])
+def get_family_daily_analysis(family_id):
+    """获取家庭日度分析报告"""
+    family = Family.query.get_or_404(family_id)
+    
+    # 获取参数
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    days = request.args.get('days', type=int, default=30)
+    
+    # 确定账户范围
+    account_ids = []
+    if account_id:
+        # 单个账户
+        account = Account.query.get_or_404(account_id)
+        if account.family_id != family_id:
+            return jsonify({'error': 'Account does not belong to this family'}), 400
+        account_ids = [account_id]
+    elif member_id:
+        # 成员的所有账户
+        member = Member.query.get_or_404(member_id)
+        if member.family_id != family_id:
+            return jsonify({'error': 'Member does not belong to this family'}), 400
+        account_ids = [acc.id for acc in member.get_accounts_objects()]
+    else:
+        # 家庭的所有账户
+        account_ids = [acc.id for acc in family.accounts]
+    
+    try:
+        # 调用统一的投资组合服务
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_daily_analysis(account_ids, days)
+        
+        return jsonify({
+            'family': family.to_dict(),
+            'filter_info': {
+                'member_id': member_id,
+                'account_id': account_id,
+                'account_count': len(account_ids)
+            },
+            'analysis': analysis_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate daily analysis: {str(e)}'
+        }), 500
+
+@bp.route('/families/<int:family_id>/reports/recent-30-days-analysis', methods=['GET'])
+def get_family_recent_30_days_analysis(family_id):
+    """获取家庭最近30天分析报告"""
+    family = Family.query.get_or_404(family_id)
+    
+    # 获取参数
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    
+    # 确定账户范围
+    account_ids = []
+    if account_id:
+        # 单个账户
+        account = Account.query.get_or_404(account_id)
+        if account.family_id != family_id:
+            return jsonify({'error': 'Account does not belong to this family'}), 400
+        account_ids = [account_id]
+    elif member_id:
+        # 成员的所有账户
+        member = Member.query.get_or_404(member_id)
+        if member.family_id != family_id:
+            return jsonify({'error': 'Member does not belong to this family'}), 400
+        account_ids = [acc.id for acc in member.get_accounts_objects()]
+    else:
+        # 家庭的所有账户
+        account_ids = [acc.id for acc in family.accounts]
+    
+    try:
+        # 调用统一的投资组合服务
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_recent_30_days_analysis(account_ids)
+        
+        return jsonify({
+            'family': family.to_dict(),
+            'filter_info': {
+                'member_id': member_id,
+                'account_id': account_id,
+                'account_count': len(account_ids)
+            },
+            'analysis': analysis_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate recent 30 days analysis: {str(e)}'
+        }), 500
+
+@bp.route('/families/<int:family_id>/reports/holdings-distribution', methods=['GET'])
+def get_family_holdings_distribution(family_id):
+    """获取家庭持仓分布数据 - 为四个饼状图提供数据"""
+    family = Family.query.get_or_404(family_id)
+    
+    # 获取参数
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    
+    # 确定账户范围
+    account_ids = []
+    if account_id:
+        # 单个账户
+        account = Account.query.get_or_404(account_id)
+        if account.family_id != family_id:
+            return jsonify({'error': 'Account does not belong to this family'}), 400
+        account_ids = [account_id]
+    elif member_id:
+        # 成员的所有账户
+        member = Member.query.get_or_404(member_id)
+        if member.family_id != family_id:
+            return jsonify({'error': 'Member does not belong to this family'}), 400
+        account_ids = [acc.id for acc in member.get_accounts_objects()]
+    else:
+        # 家庭的所有账户
+        account_ids = [acc.id for acc in family.accounts]
+    
+    try:
+        # 调用统一的投资组合服务
+        from app.services.portfolio_service import portfolio_service
+        distribution_data = portfolio_service.get_holdings_distribution(account_ids)
+        
+        return jsonify({
+            'family': family.to_dict(),
+            'filter_info': {
+                'member_id': member_id,
+                'account_id': account_id,
+                'account_count': len(account_ids)
+            },
+            'distribution': distribution_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate holdings distribution: {str(e)}'
+        }), 500

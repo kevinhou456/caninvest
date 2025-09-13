@@ -1,0 +1,443 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-clock me-2"></i>{{ _('Recent 30 Days Statistics') }}
+        </h2>
+        <p class="text-muted">{{ _('Recent 30 days portfolio analysis and performance breakdown') }}</p>
+    </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="row mb-4" id="summary-cards">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            {{ _('Total Value') }} (CAD)
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-value-cad">
+                            $0.00
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            {{ _('Total Return') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-return">
+                            $0.00 (0.00%)
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Total Investment') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-investment">
+                            $0.00
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-credit-card fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            {{ _('30-Day Avg Return') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="avg-recent-return">
+                            0.00%
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-percentage fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row mb-4">
+    <!-- Recent 30 Days Total Assets Chart -->
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent 30 Days Total Assets') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="recent30DaysAssetsChart" style="height: 320px;"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent 30 Days Returns Breakdown Chart -->
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent 30 Days Returns Breakdown') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="recent30DaysReturnsChart" style="height: 320px;"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Data Analysis Table -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent 30 Days Data Analysis') }}</h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" id="recent30DaysTable" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>{{ _('Date') }}</th>
+                        <th>{{ _('Total Value (CAD)') }}</th>
+                        <th>{{ _('Total Value (USD)') }}</th>
+                        <th>{{ _('Total Investment (CAD)') }}</th>
+                        <th>{{ _('Total Investment (USD)') }}</th>
+                        <th>{{ _('Return (CAD)') }}</th>
+                        <th>{{ _('Return (USD)') }}</th>
+                        <th>{{ _('Return Percent') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let recent30DaysData = [];
+let recent30DaysAssetsChart = null;
+let recent30DaysReturnsChart = null;
+
+// Get current family ID and other parameters
+const familyId = {{ family.id if family else 'null' }};
+const memberId = new URLSearchParams(window.location.search).get('member_id');
+const accountId = new URLSearchParams(window.location.search).get('account_id');
+
+function loadRecent30DaysAnalysis() {
+    let apiUrl = `/api/v1/families/${familyId}/reports/recent-30-days-analysis`;
+    let params = new URLSearchParams();
+    
+    if (memberId) params.append('member_id', memberId);
+    if (accountId) params.append('account_id', accountId);
+    
+    if (params.toString()) {
+        apiUrl += '?' + params.toString();
+    }
+    
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            recent30DaysData = data.analysis.recent_30_days_data || [];
+            updateSummaryCards(data.analysis.summary || {});
+            updateRecent30DaysAssetsChart();
+            updateRecent30DaysReturnsChart();
+            updateRecent30DaysTable();
+        })
+        .catch(error => {
+            console.error('Error loading recent 30 days analysis:', error);
+        });
+}
+
+function updateSummaryCards(summary) {
+    document.getElementById('total-value-cad').textContent = 
+        '$' + (summary.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    const totalReturn = summary.total_return_cad || 0;
+    const totalReturnPercent = summary.total_return_percent || 0;
+    document.getElementById('total-return').textContent = 
+        '$' + totalReturn.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + 
+        ' (' + totalReturnPercent.toFixed(2) + '%)';
+    
+    document.getElementById('total-investment').textContent = 
+        '$' + (summary.total_investment_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    document.getElementById('avg-recent-return').textContent = 
+        (summary.avg_recent_30_days_return_percent || 0).toFixed(2) + '%';
+}
+
+function updateRecent30DaysAssetsChart() {
+    const ctx = document.getElementById('recent30DaysAssetsChart').getContext('2d');
+    
+    if (recent30DaysAssetsChart) {
+        recent30DaysAssetsChart.destroy();
+    }
+    
+    const labels = recent30DaysData.map(item => item.period);
+    const cadData = recent30DaysData.map(item => item.total_value_cad || 0);
+    const usdData = recent30DaysData.map(item => item.total_value_usd || 0);
+    
+    recent30DaysAssetsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'CAD',
+                data: cadData,
+                borderColor: 'rgba(54, 162, 235, 1)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.1
+            }, {
+                label: 'USD',
+                data: usdData,
+                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    ticks: {
+                        maxRotation: 45,
+                        callback: function(value, index) {
+                            // Show every 3rd label to avoid crowding
+                            if (index % 3 === 0) {
+                                const date = new Date(this.getLabelForValue(value));
+                                return (date.getMonth() + 1) + '/' + date.getDate();
+                            }
+                            return '';
+                        }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateRecent30DaysReturnsChart() {
+    const ctx = document.getElementById('recent30DaysReturnsChart').getContext('2d');
+    
+    if (recent30DaysReturnsChart) {
+        recent30DaysReturnsChart.destroy();
+    }
+    
+    const labels = recent30DaysData.map(item => item.period);
+    const cadReturnData = recent30DaysData.map(item => item.total_return_cad || 0);
+    const usdReturnData = recent30DaysData.map(item => item.total_return_usd || 0);
+    const returnPercentData = recent30DaysData.map(item => item.total_return_percent || 0);
+    
+    recent30DaysReturnsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Return CAD ($)',
+                data: cadReturnData,
+                borderColor: 'rgba(75, 192, 192, 1)',
+                backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                yAxisID: 'y',
+                tension: 0.1
+            }, {
+                label: 'Return USD ($)',
+                data: usdReturnData,
+                borderColor: 'rgba(153, 102, 255, 1)',
+                backgroundColor: 'rgba(153, 102, 255, 0.1)',
+                borderWidth: 2,
+                fill: false,
+                yAxisID: 'y',
+                tension: 0.1
+            }, {
+                label: 'Return %',
+                data: returnPercentData,
+                borderColor: 'rgba(255, 206, 86, 1)',
+                backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                borderWidth: 3,
+                fill: false,
+                yAxisID: 'y1',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        maxRotation: 45,
+                        callback: function(value, index) {
+                            // Show every 3rd label to avoid crowding
+                            if (index % 3 === 0) {
+                                const date = new Date(this.getLabelForValue(value));
+                                return (date.getMonth() + 1) + '/' + date.getDate();
+                            }
+                            return '';
+                        }
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    ticks: {
+                        callback: function(value) {
+                            return value.toFixed(1) + '%';
+                        }
+                    },
+                    grid: {
+                        drawOnChartArea: false,
+                    },
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            if (context.dataset.label === 'Return %') {
+                                return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + '%';
+                            } else {
+                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateRecent30DaysTable() {
+    const tbody = document.querySelector('#recent30DaysTable tbody');
+    tbody.innerHTML = '';
+    
+    // Reverse the data to show most recent first
+    const reversedData = [...recent30DaysData].reverse();
+    
+    reversedData.forEach(item => {
+        const row = tbody.insertRow();
+        
+        // Date
+        const cellDate = row.insertCell();
+        cellDate.textContent = item.period;
+        cellDate.className = 'font-weight-bold';
+        
+        // Total Value CAD
+        const cellValueCAD = row.insertCell();
+        cellValueCAD.textContent = '$' + (item.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Total Value USD
+        const cellValueUSD = row.insertCell();
+        cellValueUSD.textContent = '$' + (item.total_value_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Total Investment CAD
+        const cellInvestmentCAD = row.insertCell();
+        cellInvestmentCAD.textContent = '$' + (item.total_investment_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Total Investment USD
+        const cellInvestmentUSD = row.insertCell();
+        cellInvestmentUSD.textContent = '$' + (item.total_investment_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Return CAD
+        const cellReturnCAD = row.insertCell();
+        const returnCAD = item.total_return_cad || 0;
+        cellReturnCAD.textContent = '$' + returnCAD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        cellReturnCAD.className = returnCAD >= 0 ? 'text-success' : 'text-danger';
+        
+        // Return USD
+        const cellReturnUSD = row.insertCell();
+        const returnUSD = item.total_return_usd || 0;
+        cellReturnUSD.textContent = '$' + returnUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        cellReturnUSD.className = returnUSD >= 0 ? 'text-success' : 'text-danger';
+        
+        // Return %
+        const cellReturnPercent = row.insertCell();
+        const returnPercent = item.total_return_percent || 0;
+        cellReturnPercent.textContent = returnPercent.toFixed(2) + '%';
+        cellReturnPercent.className = returnPercent >= 0 ? 'text-success font-weight-bold' : 'text-danger font-weight-bold';
+    });
+}
+
+// Load data when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadRecent30DaysAnalysis();
+});
+</script>
+{% endblock %}

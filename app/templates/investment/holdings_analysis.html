@@ -6,31 +6,26 @@
         <h2 class="h3 mb-0 text-gray-800">
             <i class="fas fa-chart-pie me-2"></i>{{ _('Holdings Analysis') }}
         </h2>
-        <p class="text-muted">{{ _('Detailed analysis of current holdings and portfolio allocation') }}</p>
+        <p class="text-muted">{{ _('Current portfolio distribution analysis with four different perspectives') }}</p>
     </div>
 </div>
 
-<!-- Holdings Summary Cards -->
-<div class="row mb-4">
-    {% set total_positions = holdings_by_stock | length %}
-    {% set total_value = holdings_by_stock.values() | sum(attribute='total_cost') %}
-    {% set total_categories = holdings_by_category | length %}
-    {% set total_accounts = holdings_by_account | length %}
-    
+<!-- Summary Cards -->
+<div class="row mb-4" id="summary-cards">
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-primary shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            {{ _('Total Positions') }}
+                            {{ _('Total Value') }} (CAD)
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ total_positions }}
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-value">
+                            $0.00
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-layer-group fa-2x text-gray-300"></i>
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -43,14 +38,14 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            {{ _('Total Value') }}
+                            {{ _('Unique Stocks') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            ${{ "{:,.2f}".format(total_value) }}
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="unique-stocks">
+                            0
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                        <i class="fas fa-layer-group fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -65,8 +60,8 @@
                         <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
                             {{ _('Categories') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ total_categories }}
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="categories-count">
+                            0
                         </div>
                     </div>
                     <div class="col-auto">
@@ -85,8 +80,8 @@
                         <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
                             {{ _('Accounts') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ total_accounts }}
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="accounts-count">
+                            0
                         </div>
                     </div>
                     <div class="col-auto">
@@ -98,30 +93,30 @@
     </div>
 </div>
 
-<!-- Charts Row -->
+<!-- Four Pie Charts Row -->
 <div class="row">
     <!-- Holdings by Stock Chart -->
-    <div class="col-xl-6 col-lg-6">
-        <div class="card shadow mb-4">
+    <div class="col-xl-6 col-lg-6 mb-4">
+        <div class="card shadow h-100">
             <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Holdings by Stock') }}</h6>
+                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Stock') }}</h6>
             </div>
             <div class="card-body">
-                <div class="chart-area">
-                    <canvas id="holdingsChart"></canvas>
+                <div class="chart-area" style="position: relative; height: 400px;">
+                    <canvas id="stocksChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
     
     <!-- Holdings by Category Chart -->
-    <div class="col-xl-6 col-lg-6">
-        <div class="card shadow mb-4">
+    <div class="col-xl-6 col-lg-6 mb-4">
+        <div class="card shadow h-100">
             <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Holdings by Category') }}</h6>
+                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Category') }}</h6>
             </div>
             <div class="card-body">
-                <div class="chart-area">
+                <div class="chart-area" style="position: relative; height: 400px;">
                     <canvas id="categoryChart"></canvas>
                 </div>
             </div>
@@ -129,177 +124,31 @@
     </div>
 </div>
 
-<!-- Holdings by Stock Detail -->
-<div class="card shadow mb-4">
-    <div class="card-header py-3">
-        <h6 class="m-0 font-weight-bold text-primary">{{ _('Stock Holdings Detail') }}</h6>
-    </div>
-    <div class="card-body">
-        {% if holdings_by_stock %}
-        <div class="table-responsive">
-            <table class="table table-bordered" width="100%" cellspacing="0">
-                <thead>
-                    <tr>
-                        <th>{{ _('Symbol') }}</th>
-                        <th>{{ _('Company') }}</th>
-                        <th>{{ _('Quantity') }}</th>
-                        <th>{{ _('Total Cost') }}</th>
-                        <th>{{ _('Avg Cost') }}</th>
-                        <th>{{ _('Accounts') }}</th>
-                        <th>{{ _('Category') }}</th>
-                        <th>{{ _('Weight') }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for symbol, holding in holdings_by_stock.items() %}
-                    <tr>
-                        <td class="font-weight-bold">{{ symbol }}</td>
-                        <td>{{ holding.stock.name if holding.stock else '-' }}</td>
-                        <td>{{ "{:,.2f}".format(holding.quantity) }}</td>
-                        <td class="text-success">${{ "{:,.2f}".format(holding.total_cost) }}</td>
-                        <td>${{ "{:.2f}".format(holding.total_cost / holding.quantity if holding.quantity > 0 else 0) }}</td>
-                        <td>
-                            {% for account in holding.accounts[:3] %}
-                                <span class="badge badge-info">{{ account }}</span>
-                            {% endfor %}
-                            {% if holding.accounts | length > 3 %}
-                                <span class="badge badge-secondary">+{{ holding.accounts | length - 3 }}</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if holding.stock and holding.stock.category %}
-                                <span class="badge badge-primary">{{ holding.stock.category.name }}</span>
-                            {% else %}
-                                <span class="badge badge-secondary">{{ _('Uncategorized') }}</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <div class="progress">
-                                {% set weight = (holding.total_cost / total_value * 100) if total_value > 0 else 0 %}
-                                <div class="progress-bar" role="progressbar" style="width: {{ weight }}%">
-                                    {{ "{:.1f}%".format(weight) }}
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="text-center py-4">
-            <i class="fas fa-chart-pie fa-3x text-gray-300 mb-3"></i>
-            <p class="text-muted">{{ _('No holdings data available') }}</p>
-            <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal(null)">
-                <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
-            </button>
-        </div>
-        {% endif %}
-    </div>
-</div>
-
-<!-- Holdings by Category Detail -->
 <div class="row">
-    <div class="col-xl-8 col-lg-7">
-        <div class="card shadow mb-4">
+    <!-- Holdings by Currency Chart -->
+    <div class="col-xl-6 col-lg-6 mb-4">
+        <div class="card shadow h-100">
             <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Category Breakdown') }}</h6>
+                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Currency') }}</h6>
             </div>
             <div class="card-body">
-                {% if holdings_by_category %}
-                <div class="table-responsive">
-                    <table class="table table-bordered" width="100%" cellspacing="0">
-                        <thead>
-                            <tr>
-                                <th>{{ _('Category') }}</th>
-                                <th>{{ _('Total Value') }}</th>
-                                <th>{{ _('Stocks') }}</th>
-                                <th>{{ _('Weight') }}</th>
-                                <th>{{ _('Allocation') }}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for category, data in holdings_by_category.items() %}
-                            <tr>
-                                <td class="font-weight-bold">{{ category }}</td>
-                                <td class="text-success">${{ "{:,.2f}".format(data.total_cost) }}</td>
-                                <td>
-                                    {% for stock in data.stocks[:5] %}
-                                        <span class="badge badge-outline-primary">{{ stock }}</span>
-                                    {% endfor %}
-                                    {% if data.stocks | length > 5 %}
-                                        <span class="badge badge-secondary">+{{ data.stocks | length - 5 }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% set weight = (data.total_cost / total_value * 100) if total_value > 0 else 0 %}
-                                    {{ "{:.1f}%".format(weight) }}
-                                </td>
-                                <td>
-                                    <div class="progress">
-                                        <div class="progress-bar bg-{{ ['primary', 'success', 'info', 'warning', 'danger'][loop.index0 % 5] }}" 
-                                             role="progressbar" style="width: {{ weight }}%">
-                                        </div>
-                                    </div>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <div class="chart-area" style="position: relative; height: 400px;">
+                    <canvas id="currencyChart"></canvas>
                 </div>
-                {% else %}
-                <div class="text-center py-4">
-                    <i class="fas fa-tags fa-2x text-gray-300 mb-3"></i>
-                    <p class="text-muted">{{ _('No category data available') }}</p>
-                </div>
-                {% endif %}
             </div>
         </div>
     </div>
     
-    <!-- Holdings by Account -->
-    <div class="col-xl-4 col-lg-5">
-        <div class="card shadow mb-4">
+    <!-- Holdings by Account Chart -->
+    <div class="col-xl-6 col-lg-6 mb-4">
+        <div class="card shadow h-100">
             <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Holdings by Account') }}</h6>
+                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Account') }}</h6>
             </div>
             <div class="card-body">
-                {% if holdings_by_account %}
-                    {% for account_data in holdings_by_account %}
-                    {% if account_data.holdings %}
-                    <div class="mb-4">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <h6 class="font-weight-bold text-primary">{{ account_data.account.name }}</h6>
-                            <small class="text-muted">
-                                {% set account_value = account_data.holdings.values() | sum(attribute='total_cost') %}
-                                ${{ "{:,.0f}".format(account_value) }}
-                            </small>
-                        </div>
-                        
-                        {% for symbol, holding in account_data.holdings.items() %}
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <div>
-                                <span class="font-weight-bold">{{ symbol }}</span>
-                                <small class="text-muted">({{ "{:,.0f}".format(holding.quantity) }})</small>
-                            </div>
-                            <div class="text-right">
-                                <div>${{ "{:,.0f}".format(holding.total_cost) }}</div>
-                                <small class="text-muted">
-                                    {% set weight = (holding.total_cost / account_value * 100) if account_value > 0 else 0 %}
-                                    {{ "{:.1f}%".format(weight) }}
-                                </small>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-                    {% endfor %}
-                {% else %}
-                <div class="text-center py-3">
-                    <i class="fas fa-university fa-2x text-gray-300 mb-2"></i>
-                    <p class="text-muted">{{ _('No account holdings data') }}</p>
+                <div class="chart-area" style="position: relative; height: 400px;">
+                    <canvas id="accountChart"></canvas>
                 </div>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -307,82 +156,96 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Chart.js datalabels plugin for displaying percentages on charts -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <script>
-// Holdings by Stock Chart
-if (document.getElementById('holdingsChart')) {
-    const ctx = document.getElementById('holdingsChart').getContext('2d');
+let distributionData = {};
+let stocksChart = null;
+let categoryChart = null;
+let currencyChart = null;
+let accountChart = null;
+
+// Get current family ID and other parameters
+const familyId = {{ family.id if family else 'null' }};
+const memberId = new URLSearchParams(window.location.search).get('member_id');
+const accountId = new URLSearchParams(window.location.search).get('account_id');
+
+function loadHoldingsDistribution() {
+    let apiUrl = `/api/v1/families/${familyId}/reports/holdings-distribution`;
+    let params = new URLSearchParams();
     
-    const holdingsData = {
-        {% set holdings_items = holdings_by_stock.items() | list %}
-        labels: {{ holdings_items | map(attribute='0') | list | tojson }},
-        datasets: [{
-            data: {{ holdings_items | map(attribute='1.total_cost') | list | tojson }},
-            backgroundColor: [
-                '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', 
-                '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
-            ],
-            hoverBorderColor: "rgba(234, 236, 244, 1)",
-        }]
-    };
+    if (memberId) params.append('member_id', memberId);
+    if (accountId) params.append('account_id', accountId);
     
-    const holdingsChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: holdingsData,
-        options: {
-            maintainAspectRatio: false,
-            plugins: {
-                tooltip: {
-                    backgroundColor: "rgb(255,255,255)",
-                    bodyColor: "#858796",
-                    borderColor: '#dddfeb',
-                    borderWidth: 1,
-                    callbacks: {
-                        label: function(context) {
-                            const value = context.parsed;
-                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                            const percentage = ((value / total) * 100).toFixed(1);
-                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
-                        }
-                    }
-                },
-                legend: {
-                    display: true,
-                    position: 'bottom'
-                }
-            },
-            cutout: '60%'
-        }
-    });
+    if (params.toString()) {
+        apiUrl += '?' + params.toString();
+    }
+    
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            distributionData = data.distribution;
+            updateSummaryCards(data.distribution.summary);
+            updateStocksChart();
+            updateCategoryChart();
+            updateCurrencyChart();
+            updateAccountChart();
+        })
+        .catch(error => {
+            console.error('Error loading holdings distribution:', error);
+            showNoDataMessage();
+        });
 }
 
-// Holdings by Category Chart
-if (document.getElementById('categoryChart')) {
-    const ctx = document.getElementById('categoryChart').getContext('2d');
+function updateSummaryCards(summary) {
+    document.getElementById('total-value').textContent = 
+        '$' + (summary.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
-    const categoryData = {
-        {% set category_items = holdings_by_category.items() | list %}
-        labels: {{ category_items | map(attribute='0') | list | tojson }},
-        datasets: [{
-            data: {{ category_items | map(attribute='1.total_cost') | list | tojson }},
-            backgroundColor: [
-                '#1cc88a', '#4e73df', '#36b9cc', '#f6c23e', '#e74a3b', 
-                '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
-            ],
-            hoverBorderColor: "rgba(234, 236, 244, 1)",
-        }]
-    };
+    document.getElementById('unique-stocks').textContent = summary.unique_stocks || 0;
+    document.getElementById('categories-count').textContent = summary.categories_count || 0;
+    document.getElementById('accounts-count').textContent = summary.accounts_count || 0;
+}
+
+function updateStocksChart() {
+    const ctx = document.getElementById('stocksChart').getContext('2d');
     
-    const categoryChart = new Chart(ctx, {
+    if (stocksChart) {
+        stocksChart.destroy();
+    }
+    
+    if (!distributionData.by_stocks || distributionData.by_stocks.length === 0) {
+        showChartNoData(ctx, 'No stock holdings data');
+        return;
+    }
+    
+    // Sort by value and take top 10
+    const sortedStocks = distributionData.by_stocks
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 10);
+    
+    const labels = sortedStocks.map(stock => stock.symbol);
+    const data = sortedStocks.map(stock => stock.value);
+    
+    stocksChart = new Chart(ctx, {
         type: 'pie',
-        data: categoryData,
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b',
+                    '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
+                ],
+                hoverBorderColor: "rgba(234, 236, 244, 1)",
+                borderWidth: 2
+            }]
+        },
+        plugins: [ChartDataLabels],
         options: {
+            responsive: true,
             maintainAspectRatio: false,
             plugins: {
                 tooltip: {
-                    backgroundColor: "rgb(255,255,255)",
-                    bodyColor: "#858796",
-                    borderColor: '#dddfeb',
-                    borderWidth: 1,
                     callbacks: {
                         label: function(context) {
                             const value = context.parsed;
@@ -395,10 +258,261 @@ if (document.getElementById('categoryChart')) {
                 legend: {
                     display: true,
                     position: 'bottom'
+                },
+                datalabels: {
+                    display: function(context) {
+                        const value = context.parsed;
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = (value / total) * 100;
+                        return percentage >= 3; // 降低到3%显示更多标签
+                    },
+                    color: 'white',
+                    font: {
+                        weight: 'bold',
+                        size: 11
+                    },
+                    formatter: function(value, context) {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = ((value / total) * 100).toFixed(1);
+                        return percentage + '%';
+                    }
                 }
             }
         }
     });
 }
+
+function updateCategoryChart() {
+    const ctx = document.getElementById('categoryChart').getContext('2d');
+    
+    if (categoryChart) {
+        categoryChart.destroy();
+    }
+    
+    if (!distributionData.by_category || distributionData.by_category.length === 0) {
+        showChartNoData(ctx, 'No category data');
+        return;
+    }
+    
+    const labels = distributionData.by_category.map(cat => cat.category);
+    const data = distributionData.by_category.map(cat => cat.value);
+    
+    categoryChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    '#1cc88a', '#4e73df', '#36b9cc', '#f6c23e', '#e74a3b',
+                    '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
+                ],
+                hoverBorderColor: "rgba(234, 236, 244, 1)",
+                borderWidth: 2
+            }]
+        },
+        plugins: [ChartDataLabels],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            const stocksCount = distributionData.by_category[context.dataIndex].stocks_count;
+                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%) - ' + stocksCount + ' stocks';
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'bottom'
+                },
+                datalabels: {
+                    display: function(context) {
+                        const value = context.parsed;
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = (value / total) * 100;
+                        return percentage >= 3; // 降低到3%显示更多标签
+                    },
+                    color: 'white',
+                    font: {
+                        weight: 'bold',
+                        size: 11
+                    },
+                    formatter: function(value, context) {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = ((value / total) * 100).toFixed(1);
+                        return percentage + '%';
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateCurrencyChart() {
+    const ctx = document.getElementById('currencyChart').getContext('2d');
+    
+    if (currencyChart) {
+        currencyChart.destroy();
+    }
+    
+    if (!distributionData.by_currency || distributionData.by_currency.length === 0) {
+        showChartNoData(ctx, 'No currency data');
+        return;
+    }
+    
+    const labels = distributionData.by_currency.map(curr => curr.currency);
+    const data = distributionData.by_currency.map(curr => curr.value);
+    
+    currencyChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    '#FFF5B7', '#28a745'  // 淡黄色for CAD, 绿色for USD
+                ],
+                hoverBorderColor: "rgba(234, 236, 244, 1)",
+                borderWidth: 2
+            }]
+        },
+        plugins: [ChartDataLabels],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'bottom'
+                },
+                datalabels: {
+                    display: true, // 货币分布只有两个，都显示
+                    color: 'white',
+                    font: {
+                        weight: 'bold',
+                        size: 14
+                    },
+                    formatter: function(value, context) {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = ((value / total) * 100).toFixed(1);
+                        return percentage + '%';
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateAccountChart() {
+    const ctx = document.getElementById('accountChart').getContext('2d');
+    
+    if (accountChart) {
+        accountChart.destroy();
+    }
+    
+    if (!distributionData.by_account || distributionData.by_account.length === 0) {
+        showChartNoData(ctx, 'No account data');
+        return;
+    }
+    
+    const labels = distributionData.by_account.map(acc => acc.account_name);
+    const data = distributionData.by_account.map(acc => acc.value);
+    
+    accountChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    '#e74a3b', '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e',
+                    '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
+                ],
+                hoverBorderColor: "rgba(234, 236, 244, 1)",
+                borderWidth: 2
+            }]
+        },
+        plugins: [ChartDataLabels],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            const holdingsCount = distributionData.by_account[context.dataIndex].holdings_count;
+                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%) - ' + holdingsCount + ' holdings';
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'bottom'
+                },
+                datalabels: {
+                    display: function(context) {
+                        const value = context.parsed;
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = (value / total) * 100;
+                        return percentage >= 3; // 降低到3%显示更多标签
+                    },
+                    color: 'white',
+                    font: {
+                        weight: 'bold',
+                        size: 11
+                    },
+                    formatter: function(value, context) {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = ((value / total) * 100).toFixed(1);
+                        return percentage + '%';
+                    }
+                }
+            }
+        }
+    });
+}
+
+function showChartNoData(ctx, message) {
+    ctx.fillStyle = '#858796';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(message, ctx.canvas.width / 2, ctx.canvas.height / 2);
+}
+
+function showNoDataMessage() {
+    const cards = document.querySelectorAll('.chart-area');
+    cards.forEach(card => {
+        card.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-chart-pie fa-3x text-gray-300 mb-3"></i>
+                <p class="text-muted">{{ _('No holdings data available') }}</p>
+            </div>
+        `;
+    });
+}
+
+// Load data when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadHoldingsDistribution();
+});
 </script>
 {% endblock %}
