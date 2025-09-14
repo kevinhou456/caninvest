@@ -329,13 +329,33 @@ def import_csv_with_mapping():
                 # 检查股票代码是否需要矫正
                 original_stock = row_data['stock']
                 if original_stock:
-                    from app.models.stock_symbol_correction import StockSymbolCorrection
                     currency = row_data.get('currency', 'USD')
-                    corrected_stock = StockSymbolCorrection.get_corrected_symbol(original_stock, currency)
-                    if corrected_stock != original_stock.upper():
-                        print(f"股票代码矫正: {original_stock}({currency}) -> {corrected_stock}")
+                    
+                    # 第一步：如果交易记录币种是CAD,而股票代码结尾不是.TO则自动添加.TO
+                    processed_stock = original_stock
+                    if currency == 'CAD' and not processed_stock.upper().endswith('.TO'):
+                        processed_stock = processed_stock + '.TO'
+                        print(f"CAD币种股票代码自动添加后缀: {original_stock} -> {processed_stock}")
+                        row_data['stock'] = processed_stock
+                    
+                    # 第二步：检查股票代码矫正表
+                    from app.models.stock_symbol_correction import StockSymbolCorrection
+                    corrected_stock = StockSymbolCorrection.get_corrected_symbol(processed_stock, currency)
+                    if corrected_stock != processed_stock.upper():
+                        print(f"股票代码矫正: {processed_stock}({currency}) -> {corrected_stock}")
                         row_data['stock'] = corrected_stock
                         corrected_count += 1
+                    
+                    # 第三步：检查是否存在不同币种相同代码的交易记录
+                    final_stock = row_data['stock']
+                    from app.models.transaction import Transaction
+                    existing_currency = Transaction.get_currency_by_stock_symbol(final_stock)
+                    if existing_currency and existing_currency != currency:
+                        error_msg = f"股票 {final_stock} 已存在使用 {existing_currency} 币种的交易记录，不允许导入使用 {currency} 币种的记录。同一股票代码只能使用一种货币。"
+                        print(f"币种冲突检测: {error_msg}")
+                        errors.append(error_msg)
+                        failed_count += 1
+                        continue
                 
                 # 检查是否为重复记录
                 trade_date = row_data['trade_date']
@@ -1065,17 +1085,23 @@ def parse_date(date_str, all_dates=None):
         except ValueError:
             print(f"DEBUG: Failed to parse '{date_str}' with detected format {_detected_date_format}")
     
-    # 如果检测格式失败，回退到逐个尝试
+    # 如果检测格式失败，回退到逐个尝试，包括自然语言格式
     fallback_formats = [
-        '%d/%m/%Y',  # 优先使用欧洲格式
-        '%Y-%m-%d',
-        '%m/%d/%Y',
+        '%d/%m/%Y',           # 优先使用欧洲格式
+        '%Y-%m-%d',           # ISO format
+        '%m/%d/%Y',           # US format
         '%Y/%m/%d',
         '%d-%m-%Y',
         '%m-%d-%Y',
         '%d.%m.%Y',
         '%m.%d.%Y',
         '%Y.%m.%d',
+        '%B %d, %Y',          # September 5, 2025
+        '%b %d, %Y',          # Sep 5, 2025
+        '%d %B %Y',           # 5 September 2025
+        '%d %b %Y',           # 5 Sep 2025
+        '%B %d %Y',           # September 5 2025 (no comma)
+        '%b %d %Y',           # Sep 5 2025 (no comma)
         '%Y年%m月%d日',
         '%m月%d日%Y年'
     ]
@@ -1085,6 +1111,13 @@ def parse_date(date_str, all_dates=None):
             return datetime.strptime(date_str, fmt).date()
         except ValueError:
             continue
+    
+    # 如果标准格式都无法解析，尝试使用dateutil作为最终回退
+    try:
+        from dateutil import parser
+        return parser.parse(date_str).date()
+    except:
+        pass
     
     print(f"DEBUG: Failed to parse date '{date_str}' with any format")
     return None
