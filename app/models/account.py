@@ -119,12 +119,11 @@ class Account(db.Model):
     @property
     def realized_gain(self):
         """已实现收益"""
+        from app.models.transaction import Transaction
+        portfolio = Transaction.get_portfolio_summary(account_id=self.id)
         total = 0
-        for transaction in self.transactions:
-            if transaction.transaction_type == 'SELL':
-                # 简化计算：卖出金额 - 平均成本
-                total += transaction.total_amount - \
-                        (transaction.quantity * transaction.average_buy_price)
+        for stock_data in portfolio.values():
+            total += stock_data.get('realized_gain', 0)
         return total
     
     def get_members(self):

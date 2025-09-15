@@ -147,6 +147,7 @@ class AssetValuationService:
             symbols = Transaction.query.filter(
                 Transaction.account_id == account_id,
                 Transaction.stock.isnot(None),
+                Transaction.stock != '',
                 Transaction.trade_date <= target_date
             ).with_entities(Transaction.stock).distinct().all()
             
@@ -179,7 +180,7 @@ class AssetValuationService:
                     current_holdings.append({
                         'symbol': symbol,
                         'account_id': account_id,
-                        'account_name': account.name,
+                        'account_name': self._get_account_name_with_members(account),
                         'currency': currency,
                         'shares': float(current_shares),
                         'average_cost': float(avg_cost),
@@ -200,7 +201,7 @@ class AssetValuationService:
                     cleared_holdings.append({
                         'symbol': symbol,
                         'account_id': account_id,
-                        'account_name': account.name,
+                        'account_name': self._get_account_name_with_members(account),
                         'currency': currency,
                         'total_bought_shares': float(total_bought_shares),
                         'total_sold_shares': float(total_sold_shares),
@@ -310,6 +311,10 @@ class AssetValuationService:
         dividends_usd = Decimal('0')
         interest_cad = Decimal('0')
         interest_usd = Decimal('0')
+        deposits_cad = Decimal('0')
+        deposits_usd = Decimal('0')
+        withdrawals_cad = Decimal('0')
+        withdrawals_usd = Decimal('0')
         
         # 获取汇率
         exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
@@ -342,6 +347,13 @@ class AssetValuationService:
             dividends_usd += account_stats['dividends_usd']
             interest_cad += account_stats['interest_cad']
             interest_usd += account_stats['interest_usd']
+            
+            # 计算存款和取款
+            deposits_withdrawals = self._calculate_deposits_withdrawals_by_currency(account_id, target_date)
+            deposits_cad += deposits_withdrawals['deposits_cad']
+            deposits_usd += deposits_withdrawals['deposits_usd']
+            withdrawals_cad += deposits_withdrawals['withdrawals_cad']
+            withdrawals_usd += deposits_withdrawals['withdrawals_usd']
         
         # 计算总和（CAD等价）
         total_stock_value = stock_value_cad + stock_value_usd * exchange_rate_decimal
@@ -352,6 +364,8 @@ class AssetValuationService:
         total_unrealized_gain = unrealized_gain_cad + unrealized_gain_usd * exchange_rate_decimal
         total_dividends = dividends_cad + dividends_usd * exchange_rate_decimal
         total_interest = interest_cad + interest_usd * exchange_rate_decimal
+        total_deposits = deposits_cad + deposits_usd * exchange_rate_decimal
+        total_withdrawals = withdrawals_cad + withdrawals_usd * exchange_rate_decimal
         total_return = total_realized_gain + total_unrealized_gain + total_dividends + total_interest
         
         return {
@@ -394,6 +408,16 @@ class AssetValuationService:
                 'cad_only': float(interest_cad),
                 'usd_only': float(interest_usd)
             },
+            'total_deposits': {
+                'cad': float(total_deposits),
+                'cad_only': float(deposits_cad),
+                'usd_only': float(deposits_usd)
+            },
+            'total_withdrawals': {
+                'cad': float(total_withdrawals),
+                'cad_only': float(withdrawals_cad),
+                'usd_only': float(withdrawals_usd)
+            },
             'cash_balance': {
                 'cad': float(cash_cad),
                 'usd': float(cash_usd),
@@ -424,19 +448,22 @@ class AssetValuationService:
         symbols = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.stock.isnot(None),
+            Transaction.stock != '',
             Transaction.trade_date <= target_date
         ).with_entities(Transaction.stock).distinct().all()
         
+        #从交易记录中获取股票的币种
+        
+
         for (symbol,) in symbols:
             if not symbol:
                 continue
-                
-            # 判断币种
-            currency = 'CAD' if symbol.endswith('.TO') else 'USD'
             
+            currency = Transaction.get_currency_by_stock_symbol(symbol)
+
             # 计算该股票的市值和收益
             stock_stats = self._calculate_stock_stats(account_id, symbol, target_date)
-            
+
             if currency == 'CAD':
                 stats['stock_value_cad'] += stock_stats['market_value']
                 stats['realized_gain_cad'] += stock_stats['realized_gain']
@@ -445,6 +472,8 @@ class AssetValuationService:
                 stats['stock_value_usd'] += stock_stats['market_value']
                 stats['realized_gain_usd'] += stock_stats['realized_gain']
                 stats['unrealized_gain_usd'] += stock_stats['unrealized_gain']
+            
+            
         
         # 计算股息和利息（按币种）
         dividend_interest_stats = self._calculate_dividend_interest_by_currency(account_id, target_date)
@@ -452,7 +481,11 @@ class AssetValuationService:
         
         return stats
     
-    def _calculate_stock_stats(self, account_id: int, symbol: str, target_date: date) -> Dict:
+
+    
+
+
+    def _calculate_stock_stats(self, account_id: int, symbol: str,  target_date: date) -> Dict:
         """
         计算单个股票的统计数据
         """
@@ -462,6 +495,7 @@ class AssetValuationService:
             Transaction.stock == symbol,
             Transaction.trade_date <= target_date,
             Transaction.type.in_(['BUY', 'SELL'])
+            
         ).order_by(Transaction.trade_date.asc()).all()
         
         # FIFO计算
@@ -470,7 +504,10 @@ class AssetValuationService:
         total_cost = Decimal('0')
         realized_gain = Decimal('0')
         
+       
+
         for tx in transactions:
+           
             quantity = Decimal(str(tx.quantity or 0))
             net_amount = Decimal(str(tx.net_amount or 0))
             
@@ -511,7 +548,10 @@ class AssetValuationService:
         unrealized_gain = Decimal('0')
         
         if current_shares > 0:
-            currency = 'CAD' if symbol.endswith('.TO') else 'USD'
+            # 智能货币检测逻辑
+            stock_info = self._get_stock_info(symbol)
+            currency = stock_info['currency']
+                
             price = self.stock_price_service.get_cached_stock_price(symbol, currency)
             if price and price > 0:
                 market_value = current_shares * Decimal(str(price))
@@ -556,6 +596,46 @@ class AssetValuationService:
                     stats['interest_cad'] += amount
                 else:
                     stats['interest_usd'] += amount
+        
+        return stats
+    
+    def _calculate_deposits_withdrawals_by_currency(self, account_id: int, target_date: date) -> Dict:
+        """
+        按币种计算存款和取款
+        """
+        stats = {
+            'deposits_cad': Decimal('0'),
+            'deposits_usd': Decimal('0'),
+            'withdrawals_cad': Decimal('0'),
+            'withdrawals_usd': Decimal('0')
+        }
+        
+        # 获取存款和取款交易
+        transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.trade_date <= target_date,
+            Transaction.type.in_(['DEPOSIT', 'WITHDRAWAL'])
+        ).all()
+        
+        for tx in transactions:
+            # 优先使用amount字段，如果没有则使用quantity*price
+            if tx.amount:
+                amount = Decimal(str(tx.amount))
+            else:
+                amount = Decimal(str(tx.quantity or 0)) * Decimal(str(tx.price or 0))
+            
+            currency = tx.currency or 'USD'  # 默认USD
+            
+            if tx.type == 'DEPOSIT':
+                if currency == 'CAD':
+                    stats['deposits_cad'] += amount
+                else:
+                    stats['deposits_usd'] += amount
+            elif tx.type == 'WITHDRAWAL':
+                if currency == 'CAD':
+                    stats['withdrawals_cad'] += amount
+                else:
+                    stats['withdrawals_usd'] += amount
         
         return stats
 
@@ -908,10 +988,41 @@ class AssetValuationService:
     
     def _get_stock_info(self, symbol: str) -> Dict:
         """获取股票基本信息"""
-        # 这里可以扩展为查询股票信息表
-        # 暂时使用简单逻辑判断货币
-        if symbol.endswith('.TO'):
-            return {'currency': 'CAD'}
+        from app.models import StocksCache
+        
+        # 首先尝试从交易记录中获取币种
+        currency = Transaction.get_currency_by_stock_symbol(symbol)
+        if currency:
+            return {'currency': currency}
+        
+        # 从StocksCache表中查找股票信息
+        stocks = StocksCache.query.filter_by(symbol=symbol).all()
+        
+        if stocks:
+            # 如果有多个记录，智能选择货币
+            if len(stocks) == 1:
+                return {'currency': stocks[0].currency}
+            
+            # 多个记录时的处理逻辑
+            if symbol.endswith('.TO'):
+                # 对于加拿大股票，优先选择CAD，除非是特殊的美元计价股票
+                usd_stock = next((s for s in stocks if s.currency == 'USD'), None)
+                cad_stock = next((s for s in stocks if s.currency == 'CAD'), None)
+                
+                # 特殊案例：-U结尾的.TO股票通常是美元计价
+                if symbol.endswith('-U.TO') and usd_stock:
+                    return {'currency': 'USD'}
+                elif cad_stock:
+                    return {'currency': 'CAD'}
+                elif usd_stock:
+                    return {'currency': 'USD'}
+                else:
+                    return {'currency': stocks[0].currency}
+            else:
+                # 非.TO股票使用第一个记录
+                return {'currency': stocks[0].currency}
+        
+        # 如果没有找到，默认使用USD
         return {'currency': 'USD'}
     
     def validate_data_consistency(self, account_id: int) -> List[str]:
@@ -944,3 +1055,20 @@ class AssetValuationService:
             logger.error(f"数据一致性检查出错: {e}", exc_info=True)
         
         return errors
+    
+    def _get_account_name_with_members(self, account):
+        """
+        获取带有成员信息的账户名称
+        格式: "账户名称 - 所有者"
+        """
+        if not account:
+            return ""
+        
+        display_text = account.name
+        
+        # 为所有账户显示成员信息，不仅仅是联名账户
+        if account.account_members:
+            member_names = [am.member.name for am in account.account_members]
+            display_text += f" - {', '.join(member_names)}"
+        
+        return display_text
