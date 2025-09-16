@@ -4,51 +4,28 @@
 <div class="row mb-4">
     <div class="col-12">
         <h2 class="h3 mb-0 text-gray-800">
-            <i class="fas fa-calendar-alt me-2"></i>{{ _('Annual Statistics') }}
+            <i class="fas fa-chart-bar me-2"></i>{{ _('Annual Analysis') }}
         </h2>
-        <p class="text-muted">{{ _('Investment activity by year') }}</p>
+        <p class="text-muted">{{ _('Comprehensive annual investment performance analysis') }}</p>
     </div>
 </div>
 
-<!-- Annual Summary Cards -->
+<!-- Summary Cards -->
 <div class="row mb-4">
-    {% set total_investment = annual_data | sum(attribute='net_investment') %}
-    {% set total_transactions = annual_data | sum(attribute='transaction_count') %}
-    
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-primary shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            {{ _('Total Net Investment') }}
+                            {{ _('Years Covered') }}
                         </div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            ${{ "{:,.2f}".format(total_investment) }}
+                            <span id="years-covered">-</span>
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-info shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            {{ _('Total Transactions') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ total_transactions }}
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
+                        <i class="fas fa-calendar-alt fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -61,14 +38,34 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            {{ _('Active Years') }}
+                            {{ _('Total Returns') }}
                         </div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ annual_data | selectattr('transaction_count', 'greaterthan', 0) | list | length }}
+                            $<span id="total-returns">-</span>
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-calendar fa-2x text-gray-300"></i>
+                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Average Annual Return') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            <span id="avg-annual-return">-</span>%
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-percentage fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -81,15 +78,14 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            {{ _('Average per Year') }}
+                            {{ _('Current Assets') }}
                         </div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {% set active_years = annual_data | selectattr('transaction_count', 'greaterthan', 0) | list | length %}
-                            ${{ "{:,.2f}".format(total_investment / active_years if active_years > 0 else 0) }}
+                            $<span id="current-assets">-</span>
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-calculator fa-2x text-gray-300"></i>
+                        <i class="fas fa-wallet fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -97,130 +93,222 @@
     </div>
 </div>
 
-<!-- Annual Data Chart and Table -->
-<div class="row">
-    <div class="col-xl-8 col-lg-7">
+<!-- Charts Row -->
+<div class="row mb-4">
+    <!-- Total Assets Chart -->
+    <div class="col-lg-4">
         <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Annual Investment Trend') }}</h6>
+            <div class="card-header py-3 bg-primary">
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets') }}</h6>
             </div>
             <div class="card-body">
-                <div class="chart-area">
-                    <canvas id="annualChart"></canvas>
+                <div class="chart-area" style="height: 350px;">
+                    <canvas id="annualAssetsChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
     
-    <div class="col-xl-4 col-lg-5">
+    <!-- Annual Returns Breakdown Chart -->
+    <div class="col-lg-8">
         <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Year Summary') }}</h6>
+            <div class="card-header py-3 bg-success">
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Returns Breakdown') }}</h6>
             </div>
             <div class="card-body">
-                {% for year_data in annual_data %}
-                {% if year_data.transaction_count > 0 %}
-                <div class="mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span class="font-weight-bold">{{ year_data.year }}</span>
-                        <span class="text-xs text-gray-500">{{ year_data.transaction_count }} {{ _('transactions') }}</span>
-                    </div>
-                    <div class="text-sm">
-                        <span class="text-success">+${{ "{:,.0f}".format(year_data.buy_amount) }}</span>
-                        <span class="text-muted mx-1">|</span>
-                        <span class="text-danger">-${{ "{:,.0f}".format(year_data.sell_amount) }}</span>
-                        <span class="text-muted mx-1">=</span>
-                        <span class="{{ 'text-success' if year_data.net_investment >= 0 else 'text-danger' }}">
-                            ${{ "{:+,.0f}".format(year_data.net_investment) }}
-                        </span>
-                    </div>
+                <div class="chart-area" style="height: 350px;">
+                    <canvas id="annualReturnsChart"></canvas>
                 </div>
-                {% endif %}
-                {% endfor %}
             </div>
         </div>
     </div>
 </div>
 
-<!-- Detailed Annual Table -->
+<!-- Annual Data Analysis Table -->
 <div class="card shadow mb-4">
-    <div class="card-header py-3">
-        <h6 class="m-0 font-weight-bold text-primary">{{ _('Annual Details') }}</h6>
+    <div class="card-header py-3 d-flex justify-content-between align-items-center bg-info">
+        <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Data Analysis') }}</h6>
+        <div class="dropdown">
+            <button class="btn btn-primary dropdown-toggle btn-sm" type="button" id="exportDropdown" data-toggle="dropdown">
+                <i class="fas fa-download me-1"></i>{{ _('Export') }}
+            </button>
+            <div class="dropdown-menu">
+                <a class="dropdown-item" href="#" onclick="exportTableToCSV()">
+                    <i class="fas fa-file-csv me-2"></i>{{ _('CSV') }}
+                </a>
+                <a class="dropdown-item" href="#" onclick="exportTableToPDF()">
+                    <i class="fas fa-file-pdf me-2"></i>{{ _('PDF') }}
+                </a>
+            </div>
+        </div>
     </div>
     <div class="card-body">
         <div class="table-responsive">
-            <table class="table table-bordered" width="100%" cellspacing="0">
+            <table class="table table-bordered" id="annualAnalysisTable" width="100%" cellspacing="0">
                 <thead>
-                    <tr>
+                    <tr class="bg-primary text-white">
                         <th>{{ _('Year') }}</th>
+                        <th>{{ _('Total Assets') }}</th>
+                        <th>{{ _('Realized Gain/Loss') }}</th>
+                        <th>{{ _('Unrealized Gain/Loss') }}</th>
+                        <th>{{ _('Total Dividends') }}</th>
+                        <th>{{ _('Total Interest') }}</th>
+                        <th>{{ _('Transactions') }}</th>
                         <th>{{ _('Buy Amount') }}</th>
                         <th>{{ _('Sell Amount') }}</th>
-                        <th>{{ _('Net Investment') }}</th>
-                        <th>{{ _('Transactions') }}</th>
-                        <th>{{ _('Activity') }}</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% for year_data in annual_data %}
-                    <tr>
-                        <td class="font-weight-bold">{{ year_data.year }}</td>
-                        <td class="text-success">${{ "{:,.2f}".format(year_data.buy_amount) }}</td>
-                        <td class="text-danger">${{ "{:,.2f}".format(year_data.sell_amount) }}</td>
-                        <td class="{{ 'text-success' if year_data.net_investment >= 0 else 'text-danger' }}">
-                            ${{ "{:+,.2f}".format(year_data.net_investment) }}
-                        </td>
-                        <td>{{ year_data.transaction_count }}</td>
-                        <td>
-                            {% if year_data.transaction_count > 0 %}
-                                <span class="badge badge-success">{{ _('Active') }}</span>
-                            {% else %}
-                                <span class="badge badge-secondary">{{ _('Inactive') }}</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
+                <tbody id="annual-data-tbody">
+                    <!-- Data will be populated by JavaScript -->
                 </tbody>
+                <tfoot>
+                    <tr class="bg-light font-weight-bold">
+                        <td>{{ _('Total') }}</td>
+                        <td id="total-assets-footer">-</td>
+                        <td id="total-realized-footer">-</td>
+                        <td id="total-unrealized-footer">-</td>
+                        <td id="total-dividends-footer">-</td>
+                        <td id="total-interest-footer">-</td>
+                        <td id="total-transactions-footer">-</td>
+                        <td id="total-buy-footer">-</td>
+                        <td id="total-sell-footer">-</td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     </div>
 </div>
+
+<div id="loading-spinner" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status">
+        <span class="sr-only">{{ _('Loading...') }}</span>
+    </div>
+    <p class="mt-2 text-muted">{{ _('Loading annual analysis data...') }}</p>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-// Annual Chart
-if (document.getElementById('annualChart')) {
-    const ctx = document.getElementById('annualChart').getContext('2d');
-    const annualChart = new Chart(ctx, {
+let annualData = [];
+let annualAssetsChart = null;
+let annualReturnsChart = null;
+
+// Load annual analysis data
+function loadAnnualAnalysis() {
+    const familyId = {{ current_family.id if current_family else 1 }};
+    const memberId = {{ current_member_id if current_member_id else 'null' }};
+    const accountId = {{ current_account_id if current_account_id else 'null' }};
+    
+    let apiUrl = `/api/v1/families/${familyId}/reports/annual-analysis`;
+    const params = new URLSearchParams();
+    
+    if (memberId) {
+        params.append('member_id', memberId);
+    }
+    if (accountId) {
+        params.append('account_id', accountId);
+    }
+    
+    if (params.toString()) {
+        apiUrl += '?' + params.toString();
+    }
+    
+    console.log('Loading annual analysis from:', apiUrl);
+    
+    fetch(apiUrl)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Annual analysis data:', data);
+            if (data.analysis) {
+                annualData = data.analysis.annual_data || [];
+                updateSummaryCards(data.analysis.summary || {});
+                updateAnnualAssetsChart();
+                updateAnnualReturnsChart();
+                updateAnnualTable();
+                document.getElementById('loading-spinner').style.display = 'none';
+            } else {
+                showError('No analysis data returned from API');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading annual analysis:', error);
+            showError('Failed to load annual analysis data: ' + error.message);
+        });
+}
+
+// Update summary cards
+function updateSummaryCards(summary) {
+    document.getElementById('years-covered').textContent = summary.years_covered || 0;
+    document.getElementById('total-returns').textContent = formatNumber(summary.total_years_gain || 0);
+    document.getElementById('avg-annual-return').textContent = formatNumber(summary.average_annual_return || 0, 2);
+    
+    // Calculate current assets from latest year (find latest year's assets)
+    let currentAssets = 0;
+    if (annualData.length > 0) {
+        const latestYear = Math.max(...annualData.map(item => item.year));
+        const latestData = annualData.find(item => item.year === latestYear);
+        currentAssets = latestData ? latestData.total_assets : 0;
+    }
+    document.getElementById('current-assets').textContent = formatNumber(currentAssets);
+}
+
+// Update annual assets chart
+function updateAnnualAssetsChart() {
+    const ctx = document.getElementById('annualAssetsChart').getContext('2d');
+    
+    if (annualAssetsChart) {
+        annualAssetsChart.destroy();
+    }
+    
+    // Sort data by year ascending for charts
+    const chartData = [...annualData].sort((a, b) => a.year - b.year);
+    const years = chartData.map(item => item.year);
+    const assets = chartData.map(item => item.total_assets);
+    
+    annualAssetsChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: {{ annual_data | map(attribute='year') | list | tojson }},
-            datasets: [{
-                label: '{{ _('Net Investment') }}',
-                data: {{ annual_data | map(attribute='net_investment') | list | tojson }},
-                backgroundColor: 'rgba(78, 115, 223, 0.8)',
-                borderColor: 'rgba(78, 115, 223, 1)',
-                borderWidth: 1
-            }, {
-                label: '{{ _('Buy Amount') }}',
-                data: {{ annual_data | map(attribute='buy_amount') | list | tojson }},
-                backgroundColor: 'rgba(28, 200, 138, 0.8)',
-                borderColor: 'rgba(28, 200, 138, 1)',
-                borderWidth: 1
-            }, {
-                label: '{{ _('Sell Amount') }}',
-                data: {{ annual_data | map(attribute='sell_amount') | list | tojson }},
-                backgroundColor: 'rgba(231, 74, 59, 0.8)',
-                borderColor: 'rgba(231, 74, 59, 1)',
-                borderWidth: 1
-            }]
+            labels: years,
+            datasets: [
+                {
+                    label: '{{ _("Total Assets") }}',
+                    data: assets,
+                    backgroundColor: 'rgba(78, 115, 223, 0.8)',
+                    borderColor: 'rgba(78, 115, 223, 1)',
+                    borderWidth: 1
+                }
+            ]
         },
         options: {
-            maintainAspectRatio: false,
             responsive: true,
+            maintainAspectRatio: false,
+            elements: {
+                bar: {
+                    categoryPercentage: 0.8,
+                    barPercentage: 0.9
+                }
+            },
             scales: {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '{{ _("Year") }}'
+                    }
+                },
                 y: {
-                    beginAtZero: true,
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '{{ _("Total Assets ($)") }}'
+                    },
                     ticks: {
                         callback: function(value) {
                             return '$' + value.toLocaleString();
@@ -235,10 +323,258 @@ if (document.getElementById('annualChart')) {
                             return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
                         }
                     }
+                },
+                legend: {
+                    display: false
                 }
             }
         }
     });
 }
+
+// Update annual returns breakdown chart
+function updateAnnualReturnsChart() {
+    const ctx = document.getElementById('annualReturnsChart').getContext('2d');
+    
+    if (annualReturnsChart) {
+        annualReturnsChart.destroy();
+    }
+    
+    // Sort data by year ascending for charts
+    const chartData = [...annualData].sort((a, b) => a.year - b.year);
+    const years = chartData.map(item => item.year);
+    const realizedGains = chartData.map(item => item.annual_realized_gain || 0);
+    const unrealizedGains = chartData.map(item => item.annual_unrealized_gain || 0);
+    const dividendsAndInterest = chartData.map(item => (item.annual_dividends || 0) + (item.annual_interest || 0));
+    
+    annualReturnsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: years,
+            datasets: [
+                {
+                    label: '{{ _("Realized Gains") }}',
+                    data: realizedGains,
+                    backgroundColor: 'rgba(28, 200, 138, 0.8)',
+                    borderColor: 'rgba(28, 200, 138, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: '{{ _("Unrealized Gains") }}',
+                    data: unrealizedGains,
+                    backgroundColor: 'rgba(54, 162, 235, 0.8)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: '{{ _("Dividends & Interest") }}',
+                    data: dividendsAndInterest,
+                    backgroundColor: 'rgba(255, 206, 86, 0.8)',
+                    borderColor: 'rgba(255, 206, 86, 1)',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            elements: {
+                bar: {
+                    categoryPercentage: 0.8,
+                    barPercentage: 0.9
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '{{ _("Year") }}'
+                    }
+                },
+                y: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '{{ _("Returns ($)") }}'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            if (context.dataset.label === '{{ _("Dividends & Interest") }}') {
+                                const yearIndex = context.dataIndex;
+                                const dividends = chartData[yearIndex].annual_dividends || 0;
+                                const interest = chartData[yearIndex].annual_interest || 0;
+                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString() + 
+                                       ' ({{ _("Dividends") }}: $' + dividends.toLocaleString() + 
+                                       ', {{ _("Interest") }}: $' + interest.toLocaleString() + ')';
+                            }
+                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                        },
+                        footer: function(tooltipItems) {
+                            let total = 0;
+                            tooltipItems.forEach(function(tooltipItem) {
+                                total += tooltipItem.parsed.y;
+                            });
+                            return '{{ _("Total") }}: $' + total.toLocaleString();
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
+                }
+            }
+        }
+    });
+}
+
+// Update annual table
+function updateAnnualTable() {
+    const tbody = document.getElementById('annual-data-tbody');
+    tbody.innerHTML = '';
+    
+    let totalAssets = 0, totalRealized = 0, totalUnrealized = 0;
+    let totalDividends = 0, totalInterest = 0, totalTransactions = 0;
+    let totalBuy = 0, totalSell = 0;
+    
+    // Sort data by year descending for table (newest first)
+    const tableData = [...annualData].sort((a, b) => b.year - a.year);
+    
+    tableData.forEach(item => {
+        const row = document.createElement('tr');
+        
+        const realizedClass = item.annual_realized_gain >= 0 ? 'text-success' : 'text-danger';
+        const unrealizedClass = item.annual_unrealized_gain >= 0 ? 'text-success' : 'text-danger';
+        
+        const currencyBreakdown = item.currency_breakdown || {};
+        
+        row.innerHTML = `
+            <td class="font-weight-bold">${item.year}</td>
+            <td>
+                $${formatNumber(item.total_assets)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
+            </td>
+            <td class="${realizedClass}">
+                $${formatNumber(item.annual_realized_gain, 2, true)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
+            </td>
+            <td class="${unrealizedClass}">
+                $${formatNumber(item.annual_unrealized_gain, 2, true)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.unrealized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.unrealized_gain_usd || 0, 2, true)}</small>
+            </td>
+            <td class="text-info">
+                $${formatNumber(item.annual_dividends)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
+            </td>
+            <td class="text-info">
+                $${formatNumber(item.annual_interest)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.interest_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.interest_usd || 0, 2)}</small>
+            </td>
+            <td class="text-center">${item.transaction_count}</td>
+            <td class="text-success">
+                $${formatNumber(item.buy_amount, 2)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.buy_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.buy_usd || 0, 2)}</small>
+            </td>
+            <td class="text-danger">
+                $${formatNumber(item.sell_amount, 2)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.sell_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.sell_usd || 0, 2)}</small>
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+        
+        // Update totals (use latest year for assets)
+        if (item === tableData[0]) {
+            totalAssets = item.total_assets;
+        }
+        totalRealized += item.annual_realized_gain;
+        totalUnrealized += item.annual_unrealized_gain;
+        totalDividends += item.annual_dividends;
+        totalInterest += item.annual_interest;
+        totalTransactions += item.transaction_count;
+        totalBuy += item.buy_amount;
+        totalSell += item.sell_amount;
+    });
+    
+    // Update footer totals
+    document.getElementById('total-assets-footer').textContent = '$' + formatNumber(totalAssets);
+    document.getElementById('total-realized-footer').textContent = '$' + formatNumber(totalRealized, 2, true);
+    document.getElementById('total-unrealized-footer').textContent = '$' + formatNumber(totalUnrealized, 2, true);
+    document.getElementById('total-dividends-footer').textContent = '$' + formatNumber(totalDividends);
+    document.getElementById('total-interest-footer').textContent = '$' + formatNumber(totalInterest);
+    document.getElementById('total-transactions-footer').textContent = totalTransactions;
+    document.getElementById('total-buy-footer').textContent = '$' + formatNumber(totalBuy, 2);
+    document.getElementById('total-sell-footer').textContent = '$' + formatNumber(totalSell, 2);
+}
+
+// Utility functions
+function formatNumber(num, decimals = 0, showSign = false) {
+    // Convert to number and fix precision to avoid floating point issues
+    const number = parseFloat(num) || 0;
+    const formatted = number.toLocaleString('en-US', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+    });
+    
+    if (showSign && number > 0) {
+        return '+' + formatted;
+    }
+    
+    return formatted;
+}
+
+function showError(message) {
+    document.getElementById('loading-spinner').innerHTML = `
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-triangle me-2"></i>${message}
+        </div>
+    `;
+}
+
+// Export functions
+function exportTableToCSV() {
+    const table = document.getElementById('annualAnalysisTable');
+    const rows = table.querySelectorAll('tr');
+    let csv = [];
+    
+    for (let i = 0; i < rows.length; i++) {
+        const row = [], cols = rows[i].querySelectorAll('td, th');
+        
+        for (let j = 0; j < cols.length; j++) {
+            row.push('"' + cols[j].innerText.replace(/"/g, '""') + '"');
+        }
+        
+        csv.push(row.join(','));
+    }
+    
+    const csvFile = new Blob([csv.join('\n')], { type: 'text/csv' });
+    const downloadLink = document.createElement('a');
+    downloadLink.download = 'annual_analysis.csv';
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+    downloadLink.style.display = 'none';
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+}
+
+function exportTableToPDF() {
+    window.print();
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadAnnualAnalysis();
+});
 </script>
 {% endblock %}

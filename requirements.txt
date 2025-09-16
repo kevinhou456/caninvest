@@ -10,6 +10,7 @@ SQLAlchemy==1.4.53
 
 # 数据处理
 requests==2.31.0
+python-dateutil==2.8.2
 
 # 基本工具库
 python-dotenv==1.0.0

@@ -159,10 +159,10 @@
                             <li><strong>{{ _('Symbol') }}</strong>: {{ _('symbol, ticker, stock, 股票代码...') }}</li>
                             <li><strong>{{ _('Quantity') }}</strong>: {{ _('quantity, shares, qty, 数量...') }}</li>
                             <li><strong>{{ _('Price') }}</strong>: {{ _('price, unit_price, 价格...') }}</li>
+                            <li><strong>{{ _('Currency') }}</strong>: {{ _('currency, ccy, 货币...') }} <span class="text-danger">*</span></li>
                         </ul>
                         <h6>{{ _('Optional Data:') }}</h6>
                         <ul>
-                            <li><strong>{{ _('Currency') }}</strong>: {{ _('currency, ccy, 货币 (defaults to USD)') }}</li>
                             <li><strong>{{ _('Amount') }}</strong>: {{ _('amount, total, 金额 (for cash transactions like deposits/dividends)') }}</li>
                             <li><strong>{{ _('Fee') }}</strong>: {{ _('fee, commission, 手续费') }}</li>
                             <li><strong>{{ _('Notes') }}</strong>: {{ _('notes, description, 备注') }}</li>
@@ -300,10 +300,10 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
                         <label for="accountSelect" class="form-label">{{ _('Target Account') }} <span class="text-danger">*</span></label>
                         <select class="form-select" name="account_id" id="accountSelect" required>
                             <option value="">{{ _('Select Account') }}</option>
-                            {% for account in accounts %}
+                            {% for account in get_sorted_accounts_with_members(accounts) %}
                             <option value="{{ account.id }}" 
                                     {% if preselected_account_id and account.id == preselected_account_id %}selected{% endif %}>
-                                {{ account.name }} ({{ account.account_type.name if account.account_type else 'Unknown' }})
+                                    {{ _get_account_name_with_members(account) }}
                             </option>
                             {% endfor %}
                         </select>
@@ -636,7 +636,7 @@ function buildColumnMappingTable(csvColumns, suggestedMapping) {
         { field: 'symbol', name: '{{ _("Stock Symbol") }}', required: true },
         { field: 'quantity', name: '{{ _("Quantity") }}', required: true },
         { field: 'price', name: '{{ _("Price") }}', required: true },
-        { field: 'currency', name: '{{ _("Currency") }}', required: false },
+        { field: 'currency', name: '{{ _("Currency") }}', required: true },
         { field: 'amount', name: '{{ _("Amount") }}', required: false }, // Updated with amount field
         { field: 'fee', name: '{{ _("Fee/Commission") }}', required: false },
         { field: 'notes', name: '{{ _("Notes") }}', required: false }
@@ -777,7 +777,7 @@ function importWithMapping() {
         }
         
         // 检查必需字段
-        const requiredFields = ['date', 'type', 'symbol', 'quantity', 'price'];
+        const requiredFields = ['date', 'type', 'symbol', 'quantity', 'price', 'currency'];
         if (requiredFields.includes(field) && !csvColumn) {
             hasRequiredFields = false;
             missingFields.push(field);

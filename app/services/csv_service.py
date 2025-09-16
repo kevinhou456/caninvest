@@ -339,14 +339,37 @@ class CSVTransactionService:
                     print(f"No date value found in field '{date_field}'. Row: {row}")
                     continue
                 
-                # 尝试多种日期格式
+                # 尝试多种日期格式，包括自然语言格式
                 trade_date = None
-                for date_format in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y%m%d']:
+                date_formats = [
+                    '%Y-%m-%d',           # 2025-09-05
+                    '%m/%d/%Y',           # 09/05/2025
+                    '%d/%m/%Y',           # 05/09/2025
+                    '%Y%m%d',             # 20250905
+                    '%B %d, %Y',          # September 5, 2025
+                    '%b %d, %Y',          # Sep 5, 2025
+                    '%d %B %Y',           # 5 September 2025
+                    '%d %b %Y',           # 5 Sep 2025
+                    '%B %d %Y',           # September 5 2025 (no comma)
+                    '%b %d %Y',           # Sep 5 2025 (no comma)
+                    '%m-%d-%Y',           # 09-05-2025
+                    '%d-%m-%Y',           # 05-09-2025
+                ]
+                
+                for date_format in date_formats:
                     try:
                         trade_date = datetime.strptime(date_str, date_format).date()
                         break
                     except ValueError:
                         continue
+                
+                # 如果标准格式都无法解析，尝试使用dateutil作为回退
+                if not trade_date:
+                    try:
+                        from dateutil import parser
+                        trade_date = parser.parse(date_str).date()
+                    except:
+                        pass
                 
                 if not trade_date:
                     continue
@@ -460,20 +483,31 @@ class CSVTransactionService:
         original_symbol = txn_data['symbol']
         currency = txn_data.get('currency', 'CAD')
         
-        # 检查是否有股票代码矫正记录
-        corrected_symbol = StockSymbolCorrection.get_corrected_symbol(original_symbol, currency)
+        # 第一步：如果交易记录币种是CAD,而股票代码结尾不是.TO则自动添加.TO
+        processed_symbol = original_symbol
+        if currency == 'CAD' and not processed_symbol.upper().endswith('.TO'):
+            processed_symbol = processed_symbol + '.TO'
+            # print(f"CAD币种股票代码自动添加后缀: {original_symbol} -> {processed_symbol}")
+            
+        # 第二步：检查是否有股票代码矫正记录
+        corrected_symbol = StockSymbolCorrection.get_corrected_symbol(processed_symbol, currency)
         
-        # 检查是否发生了矫正
-        was_corrected = corrected_symbol != original_symbol.upper()
+        # 第三步：检查是否存在不同币种相同代码的交易记录
+        from app.models.transaction import Transaction
+        existing_currency = Transaction.get_currency_by_stock_symbol(corrected_symbol)
+        if existing_currency and existing_currency != currency:
+            raise ValueError(f"股票 {corrected_symbol} 已存在使用 {existing_currency} 币种的交易记录，不允许导入使用 {currency} 币种的记录。同一股票代码只能使用一种货币。")
         
-        # 如果股票代码被矫正了，使用矫正后的代码并更新交易记录中的symbol
-        if was_corrected:
-            print(f"股票代码矫正: {original_symbol}({currency}) -> {corrected_symbol}")
-            symbol = corrected_symbol
-            # 更新交易数据中的symbol，这样后续创建Transaction时会使用矫正后的代码
-            txn_data['symbol'] = corrected_symbol
-        else:
-            symbol = original_symbol
+        # 检查是否发生了矫正（包括自动添加.TO和股票代码矫正表矫正）
+        was_corrected = (corrected_symbol != original_symbol.upper()) or (processed_symbol != original_symbol)
+        
+        # 使用最终矫正后的代码并更新交易记录中的symbol
+        symbol = corrected_symbol
+        # if corrected_symbol != processed_symbol:
+            # print(f"股票代码矫正表矫正: {processed_symbol}({currency}) -> {corrected_symbol}")
+        
+        # 更新交易数据中的symbol，这样后续创建Transaction时会使用最终的代码
+        txn_data['symbol'] = corrected_symbol
         
         # 使用联合主键查找现有股票记录
         stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
@@ -486,16 +520,13 @@ class CSVTransactionService:
         exchange = txn_data.get('exchange', '')
         
         if not exchange:
-            # 根据股票符号推断交易所
+            # 根据股票符号推断交易所 - 不修改currency，只推断交易所
             if symbol.endswith('.TO'):
                 exchange = 'TSX'
-                currency = 'CAD'  # 确保货币一致性
             elif symbol.endswith('.V'):
                 exchange = 'TSXV'
-                currency = 'CAD'  # 确保货币一致性
             elif '.' not in symbol:
                 exchange = 'NASDAQ'
-                # 保持传入的currency，不强制改为USD
             else:
                 exchange = 'UNKNOWN'
         

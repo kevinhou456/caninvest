@@ -7,11 +7,154 @@ from flask_babel import _
 from datetime import datetime, timedelta
 from app.models.family import Family
 from app.models.member import Member
-from app.models.account import Account
+from app.models.account import Account, AccountMember
 # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
 from app.models.transaction import Transaction
 from app.models.contribution import Contribution
 from . import bp
+
+
+def apply_member_ownership_proportions(analysis_data, member_id):
+    """
+    应用成员所有权比例到分析数据
+    当汇总成员账户时，对于共享账户需要按照持股比例计算
+    """
+    account_memberships = AccountMember.query.filter_by(member_id=member_id).all()
+    
+    # 创建账户到所有权比例的映射
+    ownership_map = {}
+    for am in account_memberships:
+        ownership_map[am.account_id] = float(am.ownership_percentage) / 100.0
+    
+    def apply_proportion_to_value(value, account_id):
+        """对单个数值应用比例"""
+        if account_id in ownership_map:
+            proportion = ownership_map[account_id]
+            return value * proportion if value is not None else None
+        return value
+    
+    def apply_proportion_to_dict(data_dict, account_id_key='account_id'):
+        """对字典中的数值应用比例"""
+        if not isinstance(data_dict, dict):
+            return data_dict
+            
+        result = data_dict.copy()
+        account_id = result.get(account_id_key)
+        
+        if account_id in ownership_map:
+            proportion = ownership_map[account_id]
+            
+            # 需要按比例计算的字段
+            proportional_fields = [
+                'net_deposits', 'net_withdrawals', 'dividends_received', 
+                'interest_received', 'fees_paid', 'taxes_paid',
+                'period_start_value', 'period_end_value', 'net_gain_loss',
+                'total_return', 'current_value', 'total_cost', 'unrealized_gain',
+                'realized_gain', 'total_gain', 'market_value', 'book_value'
+            ]
+            
+            for field in proportional_fields:
+                if field in result and result[field] is not None:
+                    try:
+                        result[field] = float(result[field]) * proportion
+                    except (ValueError, TypeError):
+                        pass
+        
+        return result
+    
+    # 应用比例到不同层级的数据
+    if 'yearly_data' in analysis_data:
+        for year_data in analysis_data['yearly_data']:
+            if 'accounts' in year_data:
+                year_data['accounts'] = [
+                    apply_proportion_to_dict(acc_data) 
+                    for acc_data in year_data['accounts']
+                ]
+            
+            # 重新计算年度汇总数据
+            if 'accounts' in year_data:
+                accounts = year_data['accounts']
+                year_data['summary'] = _recalculate_summary(accounts)
+    
+    if 'quarterly_data' in analysis_data:
+        for quarter_data in analysis_data['quarterly_data']:
+            if 'accounts' in quarter_data:
+                quarter_data['accounts'] = [
+                    apply_proportion_to_dict(acc_data) 
+                    for acc_data in quarter_data['accounts']
+                ]
+            if 'accounts' in quarter_data:
+                accounts = quarter_data['accounts']
+                quarter_data['summary'] = _recalculate_summary(accounts)
+    
+    if 'monthly_data' in analysis_data:
+        for month_data in analysis_data['monthly_data']:
+            if 'accounts' in month_data:
+                month_data['accounts'] = [
+                    apply_proportion_to_dict(acc_data) 
+                    for acc_data in month_data['accounts']
+                ]
+            if 'accounts' in month_data:
+                accounts = month_data['accounts']
+                month_data['summary'] = _recalculate_summary(accounts)
+    
+    if 'daily_data' in analysis_data:
+        for daily_data_item in analysis_data['daily_data']:
+            if 'accounts' in daily_data_item:
+                daily_data_item['accounts'] = [
+                    apply_proportion_to_dict(acc_data) 
+                    for acc_data in daily_data_item['accounts']
+                ]
+            if 'accounts' in daily_data_item:
+                accounts = daily_data_item['accounts']
+                daily_data_item['summary'] = _recalculate_summary(accounts)
+    
+    # 对于持仓分布数据
+    if 'holdings' in analysis_data:
+        for holding in analysis_data['holdings']:
+            account_id = holding.get('account_id')
+            if account_id in ownership_map:
+                proportion = ownership_map[account_id]
+                for field in ['current_value', 'total_cost', 'unrealized_gain', 'quantity', 'average_cost']:
+                    if field in holding and holding[field] is not None:
+                        try:
+                            holding[field] = float(holding[field]) * proportion
+                        except (ValueError, TypeError):
+                            pass
+    
+    return analysis_data
+
+
+def _recalculate_summary(accounts):
+    """重新计算汇总数据"""
+    summary = {
+        'net_deposits': 0,
+        'net_withdrawals': 0,
+        'dividends_received': 0,
+        'interest_received': 0,
+        'fees_paid': 0,
+        'taxes_paid': 0,
+        'period_start_value': 0,
+        'period_end_value': 0,
+        'net_gain_loss': 0,
+        'total_return': 0
+    }
+    
+    for acc in accounts:
+        for field in summary.keys():
+            if field in acc and acc[field] is not None:
+                try:
+                    summary[field] += float(acc[field])
+                except (ValueError, TypeError):
+                    pass
+    
+    # 计算收益率
+    if summary['period_start_value'] > 0:
+        summary['return_rate'] = (summary['net_gain_loss'] / summary['period_start_value']) * 100
+    else:
+        summary['return_rate'] = 0
+    
+    return summary
 
 @bp.route('/families/<int:family_id>/reports/portfolio', methods=['GET'])
 def get_family_portfolio_report(family_id):
@@ -126,8 +269,8 @@ def get_account_performance_report(account_id):
     holdings_summary = account.get_holdings_summary()
     
     # 计算交易统计
-    buy_transactions = [t for t in transactions if t.transaction_type == 'BUY']
-    sell_transactions = [t for t in transactions if t.transaction_type == 'SELL']
+    buy_transactions = [t for t in transactions if t.type == 'BUY']
+    sell_transactions = [t for t in transactions if t.type == 'SELL']
     
     total_invested = sum(t.net_amount for t in buy_transactions)
     total_divested = sum(t.net_amount for t in sell_transactions)
@@ -395,7 +538,8 @@ def get_family_annual_analysis(family_id):
         member = Member.query.get_or_404(member_id)
         if member.family_id != family_id:
             return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_ids = [acc.id for acc in member.get_accounts_objects()]
+        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
+        account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
         account_ids = [acc.id for acc in family.accounts]
@@ -412,6 +556,10 @@ def get_family_annual_analysis(family_id):
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
         analysis_data = portfolio_service.get_annual_analysis(account_ids, years)
+        
+        # 如果是成员过滤，应用所有权比例计算
+        if member_id:
+            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -452,7 +600,8 @@ def get_family_quarterly_analysis(family_id):
         member = Member.query.get_or_404(member_id)
         if member.family_id != family_id:
             return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_ids = [acc.id for acc in member.get_accounts_objects()]
+        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
+        account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
         account_ids = [acc.id for acc in family.accounts]
@@ -469,6 +618,10 @@ def get_family_quarterly_analysis(family_id):
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
         analysis_data = portfolio_service.get_quarterly_analysis(account_ids, years)
+        
+        # 如果是成员过滤，应用所有权比例计算
+        if member_id:
+            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -509,7 +662,8 @@ def get_family_monthly_analysis(family_id):
         member = Member.query.get_or_404(member_id)
         if member.family_id != family_id:
             return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_ids = [acc.id for acc in member.get_accounts_objects()]
+        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
+        account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
         account_ids = [acc.id for acc in family.accounts]
@@ -518,6 +672,10 @@ def get_family_monthly_analysis(family_id):
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
         analysis_data = portfolio_service.get_monthly_analysis(account_ids, months)
+        
+        # 如果是成员过滤，应用所有权比例计算
+        if member_id:
+            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -558,7 +716,8 @@ def get_family_daily_analysis(family_id):
         member = Member.query.get_or_404(member_id)
         if member.family_id != family_id:
             return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_ids = [acc.id for acc in member.get_accounts_objects()]
+        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
+        account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
         account_ids = [acc.id for acc in family.accounts]
@@ -567,6 +726,10 @@ def get_family_daily_analysis(family_id):
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
         analysis_data = portfolio_service.get_daily_analysis(account_ids, days)
+        
+        # 如果是成员过滤，应用所有权比例计算
+        if member_id:
+            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -606,7 +769,8 @@ def get_family_recent_30_days_analysis(family_id):
         member = Member.query.get_or_404(member_id)
         if member.family_id != family_id:
             return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_ids = [acc.id for acc in member.get_accounts_objects()]
+        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
+        account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
         account_ids = [acc.id for acc in family.accounts]
@@ -615,6 +779,10 @@ def get_family_recent_30_days_analysis(family_id):
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
         analysis_data = portfolio_service.get_recent_30_days_analysis(account_ids)
+        
+        # 如果是成员过滤，应用所有权比例计算
+        if member_id:
+            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -654,7 +822,8 @@ def get_family_holdings_distribution(family_id):
         member = Member.query.get_or_404(member_id)
         if member.family_id != family_id:
             return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_ids = [acc.id for acc in member.get_accounts_objects()]
+        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
+        account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
         account_ids = [acc.id for acc in family.accounts]
@@ -663,6 +832,10 @@ def get_family_holdings_distribution(family_id):
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
         distribution_data = portfolio_service.get_holdings_distribution(account_ids)
+        
+        # 如果是成员过滤，应用所有权比例计算
+        if member_id:
+            distribution_data = apply_member_ownership_proportions(distribution_data, member_id)
         
         return jsonify({
             'family': family.to_dict(),

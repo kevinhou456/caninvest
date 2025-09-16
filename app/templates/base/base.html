@@ -65,6 +65,22 @@
                             <li><a class="dropdown-item" href="{{ url_for('main.portfolio_reports') }}">{{ _('Portfolio Reports') }}</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('main.performance_reports') }}">{{ _('Performance Reports') }}</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('main.tax_reports') }}">{{ _('Tax Reports') }}</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.annual_stats') }}">
+                                <i class="fas fa-chart-area me-1"></i>{{ _('Annual Statistics') }}
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.monthly_stats') }}">
+                                <i class="fas fa-chart-bar me-1"></i>{{ _('Monthly Statistics') }}
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.recent_30_days_stats') }}">
+                                <i class="fas fa-clock me-1"></i>{{ _('Recent 30 Days Statistics') }}
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.quarterly_stats') }}">
+                                <i class="fas fa-chart-line me-1"></i>{{ _('Quarterly Statistics') }}
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.daily_stats') }}">
+                                <i class="fas fa-calendar-day me-1"></i>{{ _('Daily Statistics') }}
+                            </a></li>
                         </ul>
                     </li>
                     <li class="nav-item">

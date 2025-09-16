@@ -354,13 +354,17 @@
                    href="{{ url_for('main.annual_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar-alt me-2"></i>{{ _('Annual Stats') }}
                 </a>
+                <a class="nav-link {{ 'active' if current_view == 'quarterly' }}" 
+                   href="{{ url_for('main.quarterly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                    <i class="fas fa-calendar-week me-2"></i>{{ _('Quarterly Stats') }}
+                </a>
                 <a class="nav-link {{ 'active' if current_view == 'monthly' }}" 
                    href="{{ url_for('main.monthly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar me-2"></i>{{ _('Monthly Stats') }}
                 </a>
-                <a class="nav-link {{ 'active' if current_view == 'quarterly' }}" 
-                   href="{{ url_for('main.quarterly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
-                    <i class="fas fa-calendar-week me-2"></i>{{ _('Quarterly Stats') }}
+                <a class="nav-link {{ 'active' if current_view == 'recent_30_days' }}" 
+                   href="{{ url_for('main.recent_30_days_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                    <i class="fas fa-clock me-2"></i>{{ _('Recent 30 Days Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'daily' }}" 
                    href="{{ url_for('main.daily_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">

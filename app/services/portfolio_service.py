@@ -210,13 +210,15 @@ class PortfolioService:
             return PositionSnapshot(symbol, account_id, as_of_date)
         
         # 创建快照对象
-        # 初始化时使用默认货币，实际货币将从交易记录中获取
+        # 初始化时不能使用默认货币，如果交易区间没有交易记录会搞错股票的币种
+        currency = Transaction.get_currency_by_stock_symbol(symbol)
+
         snapshot = PositionSnapshot(
             symbol=symbol,
             account_id=account_id,
             as_of_date=as_of_date,
             account_name=account.name,
-            currency='USD'  # 默认值，将在处理交易时被实际货币覆盖
+            currency=currency  # 默认值，将在处理交易时被实际货币覆盖
         )
         
         # 获取截止日期前的所有交易记录
@@ -238,10 +240,8 @@ class PortfolioService:
 
     def _process_transaction_fifo(self, snapshot: PositionSnapshot, tx: Transaction):
         """使用严格的FIFO原则处理交易"""
-        # 从交易记录中获取真实的货币信息
-        if tx.currency:
-            snapshot.currency = tx.currency
-            
+        
+
         if tx.type == 'BUY':
             # 买入：创建新的FIFO批次
             lot = FIFOLot(
@@ -335,7 +335,8 @@ class PortfolioService:
             # 获取该账户的所有股票
             symbols = db.session.query(Transaction.stock).filter(
                 Transaction.account_id == account_id,
-                Transaction.stock.isnot(None)
+                Transaction.stock.isnot(None),
+                Transaction.stock != ''
             ).distinct().all()
             
             for (symbol,) in symbols:
@@ -396,7 +397,13 @@ class PortfolioService:
         """获取当前价格 - 直接调用外部API服务（保持API缓存）"""
         try:
             from app.services.stock_price_service import StockPriceService
+            from app.models import StocksCache
+            
             price_service = StockPriceService()
+
+          
+            
+            #所有股票价格都是用stock price service获取的，所以货币就是传入的货币
             price = price_service.get_cached_stock_price(symbol, currency)
             return price
         except Exception as e:
@@ -434,6 +441,8 @@ class PortfolioService:
                 years = list(range(min_year, current_year + 1))
         
         annual_data = []
+        if not years:
+            years = []  # Set empty list if no years found
         for year in sorted(years, reverse=True):  # 倒序排列
             year_start = date(year, 1, 1)
             year_end = date(year, 12, 31)

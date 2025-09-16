@@ -62,7 +62,7 @@ class StockSymbolCorrection(db.Model):
         ).first()
         
         if correction:
-            print(f"股票代码矫正: {original_symbol}({currency}) -> {correction.corrected_symbol}")
+            # print(f"股票代码矫正: {original_symbol}({currency}) -> {correction.corrected_symbol}")
             return correction.corrected_symbol
         
         return original_symbol.upper()

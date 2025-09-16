@@ -43,6 +43,9 @@ def create_app(config_name=None):
     from app.api import bp as api_bp
     app.register_blueprint(api_bp, url_prefix='/api/v1')
     
+    from app.api.daily_stats import daily_stats_bp
+    app.register_blueprint(daily_stats_bp)
+    
     from app.main import bp as main_bp
     app.register_blueprint(main_bp)
     
@@ -73,6 +76,80 @@ def create_app(config_name=None):
         """获取当前日期 - 与持仓计算使用相同的方式"""
         from datetime import date
         return date.today()
+    
+    @app.template_global()
+    def _get_account_name_with_members(account):
+        """
+        获取带有成员信息的账户名称
+        格式: "账户名称 - 所有者"
+        """
+        if not account:
+            return ""
+        
+        display_text = account.name
+        
+        # 为所有账户显示成员信息，不仅仅是联名账户
+        if account.account_members:
+            member_names = [am.member.name for am in account.account_members]
+            display_text += f" - {', '.join(member_names)}"
+        
+        return display_text
+    
+    @app.template_global()
+    def get_sorted_accounts_with_members(accounts):
+        """
+        获取按成员排序的账户列表，联合账户放在最后
+        
+        Args:
+            accounts: 账户列表
+            
+        Returns:
+            list: 排序后的账户列表，按以下规则排序：
+                  1. 个人账户按成员名字排序
+                  2. 联合账户放在最后
+        """
+        if not accounts:
+            return []
+        
+        individual_accounts = []
+        joint_accounts = []
+        
+        for account in accounts:
+            # 获取账户成员数量
+            try:
+                member_count = len(account.account_members) if account.account_members else 0
+            except TypeError:
+                # 如果account_members是AppenderQuery对象，使用count()方法
+                member_count = account.account_members.count() if account.account_members else 0
+            
+            if member_count <= 1:
+                # 个人账户（包括没有成员的账户）
+                individual_accounts.append(account)
+            else:
+                # 联合账户（多个成员）
+                joint_accounts.append(account)
+        
+        # 个人账户按第一个成员名字排序
+        def get_sort_key(acc):
+            try:
+                if acc.account_members and len(acc.account_members) > 0:
+                    return acc.account_members[0].member.name
+                else:
+                    return acc.name
+            except TypeError:
+                # 如果account_members是AppenderQuery对象
+                if acc.account_members and acc.account_members.count() > 0:
+                    return acc.account_members[0].member.name
+                else:
+                    return acc.name
+        
+        individual_accounts.sort(key=get_sort_key)
+        
+        # 联合账户按账户名排序
+        joint_accounts.sort(key=lambda acc: acc.name)
+        
+        # 合并：个人账户在前，联合账户在后
+        return individual_accounts + joint_accounts
     
     @app.template_global()
     def get_current_filter_display(family, member_id=None, account_id=None, include_members=False, account_members=None):

@@ -59,10 +59,31 @@ class Family(db.Model):
     
     def get_portfolio_summary(self):
         """获取投资组合摘要"""
+        # 计算总存款和取款
+        total_deposits = 0
+        total_withdrawals = 0
+        
+        for account in self.accounts:
+            for transaction in account.transactions:
+                if transaction.type == 'DEPOSIT':
+                    # 对于存款，使用amount字段（如果存在）或者quantity * price
+                    if transaction.amount:
+                        total_deposits += float(transaction.amount)
+                    else:
+                        total_deposits += float(transaction.quantity * transaction.price)
+                elif transaction.type == 'WITHDRAWAL':
+                    # 对于取款，使用amount字段（如果存在）或者quantity * price
+                    if transaction.amount:
+                        total_withdrawals += float(transaction.amount)
+                    else:
+                        total_withdrawals += float(transaction.quantity * transaction.price)
+        
         summary = {
             'total_value': self.total_value,
             'unrealized_gain': self.total_unrealized_gain,
             'realized_gain': self.total_realized_gain,
+            'total_deposits': total_deposits,
+            'total_withdrawals': total_withdrawals,
             'account_count': self.accounts.count(),
             'member_count': self.members.count(),
             'accounts_by_type': {},

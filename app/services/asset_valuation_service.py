@@ -5,7 +5,7 @@
 确保数据准确性和一致性
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Dict, Optional, List
 from decimal import Decimal, ROUND_HALF_UP
 import logging
@@ -814,6 +814,9 @@ class AssetValuationService:
         total_market_value = Decimal('0')
         holdings_detail = {}
         
+        # 判断是否需要历史价格
+        is_historical = target_date < date.today()
+        
         for symbol, shares in holdings.items():
             if shares <= 0:
                 continue
@@ -821,7 +824,14 @@ class AssetValuationService:
             # 获取股价和货币
             stock_info = self._get_stock_info(symbol)
             currency = stock_info.get('currency', 'USD')
-            price = self.stock_price_service.get_cached_stock_price(symbol, currency)
+            
+            # 根据日期选择价格获取方式
+            if is_historical:
+                # 使用历史价格
+                price = self._get_historical_stock_price(symbol, target_date)
+            else:
+                # 使用当前缓存价格
+                price = self.stock_price_service.get_cached_stock_price(symbol, currency)
             
             if price is None or price <= 0:
                 logger.warning(f"无法获取{symbol}在{target_date}的价格")
@@ -849,6 +859,47 @@ class AssetValuationService:
             }
             
         return total_market_value, holdings_detail
+    
+    def _get_historical_stock_price(self, symbol: str, target_date: date) -> Optional[Decimal]:
+        """
+        获取指定日期的历史股票价格
+        
+        Args:
+            symbol: 股票代码
+            target_date: 目标日期
+            
+        Returns:
+            该日期的股票价格，如果无法获取返回None
+        """
+        try:
+            # 使用StockPriceService获取历史价格
+            # 获取包含目标日期的历史数据范围
+            start_date = target_date - timedelta(days=7)  # 获取一周的数据以防某天没有数据
+            end_date = target_date + timedelta(days=1)
+            
+            history = self.stock_price_service.get_stock_history(symbol, start_date, end_date)
+            
+            # 查找目标日期的价格
+            date_str = target_date.strftime('%Y-%m-%d')
+            if date_str in history and 'close' in history[date_str]:
+                return Decimal(str(history[date_str]['close']))
+            
+            # 如果目标日期没有数据，查找最近的前一个交易日
+            current_date = target_date
+            for i in range(7):  # 最多向前查找7天
+                current_date -= timedelta(days=1)
+                date_str = current_date.strftime('%Y-%m-%d')
+                if date_str in history and 'close' in history[date_str]:
+                    logger.debug(f"使用{current_date}的价格作为{target_date}的历史价格: {symbol}")
+                    return Decimal(str(history[date_str]['close']))
+            
+            # 如果都没有找到，返回None
+            logger.warning(f"无法获取{symbol}在{target_date}附近的历史价格")
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取{symbol}历史价格失败: {e}")
+            return None
     
     def _calculate_cash_balance(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
         """

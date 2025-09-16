@@ -96,6 +96,7 @@ def get_family_dashboard(family_id):
     
     # 获取最近交易
     from app.models.transaction import Transaction
+    from app.models.account import Account
     recent_transactions = Transaction.query.join(
         Transaction.account
     ).filter(

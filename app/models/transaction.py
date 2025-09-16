@@ -299,3 +299,26 @@ class Transaction(db.Model):
                 'amount': float(sell_summary.total_amount or 0)
             }
         }
+    
+    @classmethod
+    def get_currency_by_stock_symbol(cls, stock_symbol):
+        """
+        根据股票代码获取币种
+        从交易记录中读取该股票代码第一条记录的货币值
+        
+        Args:
+            stock_symbol: 股票代码
+            
+        Returns:
+            str: 货币代码 (USD/CAD)，如果没有找到返回 None
+        """
+        if not stock_symbol:
+            return None
+            
+        # 查找该股票代码的第一条交易记录（按交易日期升序排列）
+        transaction = cls.query.filter_by(stock=stock_symbol).order_by(cls.trade_date.asc()).first()
+        
+        if transaction:
+            return transaction.currency
+        else:
+            return None

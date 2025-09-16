@@ -87,7 +87,7 @@ class StocksCache(db.Model):
         return True
     
     @classmethod
-    def get_or_create(cls, symbol, currency='USD', name=None, exchange=None):
+    def get_or_create(cls, symbol, currency, name=None, exchange=None):
         """获取或创建股票缓存记录"""
         stock = cls.query.filter_by(symbol=symbol.upper(), currency=currency).first()
         

@@ -102,7 +102,10 @@ class SmartHistoryManager:
         if not currency and transactions:
             currency = self._infer_currency(stock_symbol, transactions)
         elif not currency:
-            currency = 'CAD' if stock_symbol.endswith('.TO') else 'USD'
+            # 使用Transaction模型的方法从交易记录中获取币种
+            currency = Transaction.get_currency_by_stock_symbol(stock_symbol)
+            if not currency:
+                currency = 'USD'  # 默认值
         
         # 获取缓存的历史数据
         try:
@@ -173,8 +176,9 @@ class SmartHistoryManager:
             if transaction.currency:
                 return transaction.currency
         
-        # 回退到根据股票代码推断
-        return 'CAD' if stock_symbol.endswith('.TO') else 'USD'
+        # 使用Transaction模型的方法从交易记录中获取币种
+        currency = Transaction.get_currency_by_stock_symbol(stock_symbol)
+        return currency if currency else 'USD'  # 默认值
     
     def _should_force_refresh(self, stock_symbol: str, start_date: date, end_date: date, currency: str) -> bool:
         """

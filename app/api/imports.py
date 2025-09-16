@@ -335,14 +335,14 @@ def import_csv_with_mapping():
                     processed_stock = original_stock
                     if currency == 'CAD' and not processed_stock.upper().endswith('.TO'):
                         processed_stock = processed_stock + '.TO'
-                        print(f"CAD币种股票代码自动添加后缀: {original_stock} -> {processed_stock}")
+                        # print(f"CAD币种股票代码自动添加后缀: {original_stock} -> {processed_stock}")
                         row_data['stock'] = processed_stock
                     
                     # 第二步：检查股票代码矫正表
                     from app.models.stock_symbol_correction import StockSymbolCorrection
                     corrected_stock = StockSymbolCorrection.get_corrected_symbol(processed_stock, currency)
                     if corrected_stock != processed_stock.upper():
-                        print(f"股票代码矫正: {processed_stock}({currency}) -> {corrected_stock}")
+                        # print(f"股票代码矫正: {processed_stock}({currency}) -> {corrected_stock}")
                         row_data['stock'] = corrected_stock
                         corrected_count += 1
                     
@@ -380,7 +380,6 @@ def import_csv_with_mapping():
                     notes=notes
                 ):
                     skipped_count += 1
-                    print(f"DEBUG: Skipping duplicate transaction - {type} {quantity} {stock} on {trade_date}")
                     continue
                 
                 transaction = Transaction(
@@ -398,7 +397,6 @@ def import_csv_with_mapping():
                 
                 db.session.add(transaction)
                 created_count += 1
-                print(f"DEBUG: Adding new transaction - {type} {quantity} {stock} on {trade_date}")
                 
             except Exception as e:
                 failed_count += 1
@@ -528,7 +526,6 @@ def process_csv_with_mapping(df, column_mappings):
             # 日期
             if 'date' in column_mappings and column_mappings['date']:
                 date_str = str(row[column_mappings['date']]).strip()
-                print(f"DEBUG: Row {row_num} - Date string: '{date_str}'")
                 trade_date = parse_date(date_str, date_samples)
                 if not trade_date:
                     processing_errors.append(f"Row {row_num}: Invalid date '{date_str}'")
@@ -541,7 +538,6 @@ def process_csv_with_mapping(df, column_mappings):
             # 交易类型
             if 'type' in column_mappings and column_mappings['type']:
                 type_str = str(row[column_mappings['type']]).strip().upper()
-                print(f"DEBUG: Row {row_num} - Type string: '{type_str}'")
                 transaction_type = parse_transaction_type(type_str)
                 if not transaction_type:
                     processing_errors.append(f"Row {row_num}: Invalid transaction type '{type_str}'")
@@ -556,7 +552,6 @@ def process_csv_with_mapping(df, column_mappings):
             
             if 'symbol' in column_mappings and column_mappings['symbol']:
                 symbol = str(row[column_mappings['symbol']]).strip().upper()
-                print(f"DEBUG: Row {row_num} - Symbol: '{symbol}'")
                 if symbol and symbol != 'NAN':
                     row_data['stock'] = symbol
                 elif requires_symbol:
@@ -575,7 +570,6 @@ def process_csv_with_mapping(df, column_mappings):
             amount_value = None
             if 'amount' in column_mappings and column_mappings['amount']:
                 amount_str = str(row[column_mappings['amount']]).replace(',', '').replace('$', '')
-                print(f"DEBUG: Row {row_num} - Amount string: '{amount_str}'")
                 if amount_str and amount_str.lower() not in ['nan', '', 'none']:
                     try:
                         amount_value = abs(float(amount_str))
@@ -629,7 +623,6 @@ def process_csv_with_mapping(df, column_mappings):
                     # 股票交易：必须有quantity和price，忽略amount
                     if 'quantity' in column_mappings and column_mappings['quantity']:
                         quantity_str = str(row[column_mappings['quantity']]).replace(',', '').replace('$', '')
-                        print(f"DEBUG: Row {row_num} - Quantity string: '{quantity_str}'")
                         if quantity_str and quantity_str.lower() not in ['nan', '', 'none']:
                             row_data['quantity'] = abs(float(quantity_str))
                         else:
@@ -641,7 +634,6 @@ def process_csv_with_mapping(df, column_mappings):
                     
                     if 'price' in column_mappings and column_mappings['price']:
                         price_str = str(row[column_mappings['price']]).replace(',', '').replace('$', '')
-                        print(f"DEBUG: Row {row_num} - Price string: '{price_str}'")
                         if price_str and price_str.lower() not in ['nan', '', 'none']:
                             row_data['price'] = abs(float(price_str))
                         else:
@@ -676,10 +668,11 @@ def process_csv_with_mapping(df, column_mappings):
                             currency = 'USD'
                         elif 'EUR' in curr_str or 'EURO' in curr_str:
                             currency = 'EUR'
-                        print(f"DEBUG: Row {row_num} - Extracted currency '{currency}' from currency field: '{curr_str[:50]}...'")
-                else:
-                    print(f"DEBUG: Row {row_num} - Empty currency field, using default USD")
+                        else:
+                            currency = 'USD'
             else:
+                currency = 'USD'  # 默认货币
+                
                 # 从描述字段中智能提取货币
                 description_text = ''
                 if 'description' in column_mappings and column_mappings['description']:
@@ -701,7 +694,6 @@ def process_csv_with_mapping(df, column_mappings):
                 elif 'EUR' in combined_text or 'EURO' in combined_text:
                     currency = 'EUR'
                 
-                print(f"DEBUG: Row {row_num} - Detected currency '{currency}' from text: '{combined_text[:50]}...'")
             
             row_data['currency'] = currency
             
@@ -729,7 +721,6 @@ def process_csv_with_mapping(df, column_mappings):
                 row_data['notes'] = ''
             
             transactions.append(row_data)
-            print(f"DEBUG: Row {row_num} - Successfully processed")
             
         except Exception as e:
             error_msg = f"Row {row_num}: Unexpected error - {str(e)}"
@@ -875,7 +866,6 @@ def import_csv_flexible():
                     notes=notes
                 ):
                     skipped_count += 1
-                    print(f"DEBUG: Skipping duplicate transaction - {type} {quantity} {stock} on {trade_date}")
                     continue
                 
                 transaction = Transaction(
@@ -892,7 +882,6 @@ def import_csv_flexible():
                 
                 db.session.add(transaction)
                 created_count += 1
-                print(f"DEBUG: Adding new transaction - {type} {quantity} {stock} on {trade_date}")
                 
             except Exception as e:
                 failed_count += 1
@@ -1197,7 +1186,6 @@ def process_description_format_csv(df, column_mappings):
             }
             
             transactions.append(transaction_data)
-            print(f"DEBUG: Row {row_num} 成功解析: {parsed_data['symbol']} - {parsed_data['transaction_type']} - {parsed_data['quantity']}股 @ ${parsed_data['price']:.4f}")
             
         except Exception as e:
             error_msg = f"Row {row_num}: 处理行时出错 - {str(e)}"

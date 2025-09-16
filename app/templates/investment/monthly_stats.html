@@ -4,52 +4,28 @@
 <div class="row mb-4">
     <div class="col-12">
         <h2 class="h3 mb-0 text-gray-800">
-            <i class="fas fa-calendar me-2"></i>{{ _('Monthly Statistics') }}
+            <i class="fas fa-chart-bar me-2"></i>{{ _('Monthly Statistics') }}
         </h2>
-        <p class="text-muted">{{ _('Investment activity by month over the last 12 months') }}</p>
+        <p class="text-muted">{{ _('Monthly portfolio analysis and performance breakdown') }}</p>
     </div>
 </div>
 
-<!-- Monthly Summary Cards -->
-<div class="row mb-4">
-    {% set total_investment = monthly_data | sum(attribute='net_investment') %}
-    {% set total_transactions = monthly_data | sum(attribute='transaction_count') %}
-    {% set active_months = monthly_data | selectattr('transaction_count', 'greaterthan', 0) | list | length %}
-    
+<!-- Summary Cards -->
+<div class="row mb-4" id="summary-cards">
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-primary shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            {{ _('12-Month Net Investment') }}
+                            {{ _('Total Value') }} (CAD)
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            ${{ "{:,.2f}".format(total_investment) }}
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-value-cad">
+                            $0.00
                         </div>
                     </div>
                     <div class="col-auto">
                         <i class="fas fa-chart-line fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-info shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            {{ _('Total Transactions') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ total_transactions }}
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -62,14 +38,34 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            {{ _('Active Months') }}
+                            {{ _('Total Return') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            {{ active_months }} / 12
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-return">
+                            $0.00 (0.00%)
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-calendar-check fa-2x text-gray-300"></i>
+                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            {{ _('Total Investment') }}
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-investment">
+                            $0.00
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-credit-card fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -82,14 +78,14 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            {{ _('Monthly Average') }}
+                            {{ _('Monthly Avg Return') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            ${{ "{:,.2f}".format(total_investment / active_months if active_months > 0 else 0) }}
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="avg-monthly-return">
+                            0.00%
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-calculator fa-2x text-gray-300"></i>
+                        <i class="fas fa-percentage fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -97,88 +93,58 @@
     </div>
 </div>
 
-<!-- Monthly Chart and Recent Months -->
-<div class="row">
-    <div class="col-xl-8 col-lg-7">
+<!-- Charts Row -->
+<div class="row mb-4">
+    <!-- Monthly Total Assets Chart -->
+    <div class="col-xl-4 col-lg-5">
         <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Investment Trend') }}</h6>
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Total Assets') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area">
-                    <canvas id="monthlyChart"></canvas>
+                    <canvas id="monthlyAssetsChart" style="height: 320px;"></canvas>
                 </div>
             </div>
         </div>
     </div>
     
-    <div class="col-xl-4 col-lg-5">
+    <!-- Monthly Returns Breakdown Chart -->
+    <div class="col-xl-8 col-lg-7">
         <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Recent Months') }}</h6>
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Returns Breakdown') }}</h6>
             </div>
             <div class="card-body">
-                {% for month_data in monthly_data[-6:] %}
-                {% if month_data.transaction_count > 0 %}
-                <div class="mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span class="font-weight-bold">{{ month_data.month_name }}</span>
-                        <span class="text-xs text-gray-500">{{ month_data.transaction_count }} {{ _('transactions') }}</span>
-                    </div>
-                    <div class="text-sm">
-                        <span class="text-success">+${{ "{:,.0f}".format(month_data.buy_amount) }}</span>
-                        <span class="text-muted mx-1">|</span>
-                        <span class="text-danger">-${{ "{:,.0f}".format(month_data.sell_amount) }}</span>
-                        <span class="text-muted mx-1">=</span>
-                        <span class="{{ 'text-success' if month_data.net_investment >= 0 else 'text-danger' }}">
-                            ${{ "{:+,.0f}".format(month_data.net_investment) }}
-                        </span>
-                    </div>
+                <div class="chart-area">
+                    <canvas id="monthlyReturnsChart" style="height: 320px;"></canvas>
                 </div>
-                {% endif %}
-                {% endfor %}
             </div>
         </div>
     </div>
 </div>
 
-<!-- Detailed Monthly Table -->
+<!-- Data Analysis Table -->
 <div class="card shadow mb-4">
     <div class="card-header py-3">
-        <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Details') }}</h6>
+        <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Data Analysis') }}</h6>
     </div>
     <div class="card-body">
         <div class="table-responsive">
-            <table class="table table-bordered" width="100%" cellspacing="0">
+            <table class="table table-bordered" id="monthlyTable" width="100%" cellspacing="0">
                 <thead>
                     <tr>
                         <th>{{ _('Month') }}</th>
-                        <th>{{ _('Buy Amount') }}</th>
-                        <th>{{ _('Sell Amount') }}</th>
-                        <th>{{ _('Net Investment') }}</th>
-                        <th>{{ _('Transactions') }}</th>
-                        <th>{{ _('Activity') }}</th>
+                        <th>{{ _('Total Value (CAD)') }}</th>
+                        <th>{{ _('Total Value (USD)') }}</th>
+                        <th>{{ _('Total Investment (CAD)') }}</th>
+                        <th>{{ _('Total Investment (USD)') }}</th>
+                        <th>{{ _('Return (CAD)') }}</th>
+                        <th>{{ _('Return (USD)') }}</th>
+                        <th>{{ _('Return Percent') }}</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for month_data in monthly_data %}
-                    <tr>
-                        <td class="font-weight-bold">{{ month_data.month_name }}</td>
-                        <td class="text-success">${{ "{:,.2f}".format(month_data.buy_amount) }}</td>
-                        <td class="text-danger">${{ "{:,.2f}".format(month_data.sell_amount) }}</td>
-                        <td class="{{ 'text-success' if month_data.net_investment >= 0 else 'text-danger' }}">
-                            ${{ "{:+,.2f}".format(month_data.net_investment) }}
-                        </td>
-                        <td>{{ month_data.transaction_count }}</td>
-                        <td>
-                            {% if month_data.transaction_count > 0 %}
-                                <span class="badge badge-success">{{ _('Active') }}</span>
-                            {% else %}
-                                <span class="badge badge-secondary">{{ _('Quiet') }}</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
                 </tbody>
             </table>
         </div>
@@ -188,48 +154,90 @@
 
 {% block scripts %}
 <script>
-// Monthly Chart
-if (document.getElementById('monthlyChart')) {
-    const ctx = document.getElementById('monthlyChart').getContext('2d');
-    const monthlyChart = new Chart(ctx, {
-        type: 'line',
+let monthlyData = [];
+let monthlyAssetsChart = null;
+let monthlyReturnsChart = null;
+
+// Get current family ID and other parameters
+const familyId = {{ family.id if family else 'null' }};
+const memberId = new URLSearchParams(window.location.search).get('member_id');
+const accountId = new URLSearchParams(window.location.search).get('account_id');
+
+function loadMonthlyAnalysis() {
+    let apiUrl = `/api/v1/families/${familyId}/reports/monthly-analysis`;
+    let params = new URLSearchParams();
+    
+    if (memberId) params.append('member_id', memberId);
+    if (accountId) params.append('account_id', accountId);
+    
+    if (params.toString()) {
+        apiUrl += '?' + params.toString();
+    }
+    
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            monthlyData = data.analysis.monthly_data || [];
+            updateSummaryCards(data.analysis.summary || {});
+            updateMonthlyAssetsChart();
+            updateMonthlyReturnsChart();
+            updateMonthlyTable();
+        })
+        .catch(error => {
+            console.error('Error loading monthly analysis:', error);
+        });
+}
+
+function updateSummaryCards(summary) {
+    document.getElementById('total-value-cad').textContent = 
+        '$' + (summary.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    const totalReturn = summary.total_return_cad || 0;
+    const totalReturnPercent = summary.total_return_percent || 0;
+    document.getElementById('total-return').textContent = 
+        '$' + totalReturn.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + 
+        ' (' + totalReturnPercent.toFixed(2) + '%)';
+    
+    document.getElementById('total-investment').textContent = 
+        '$' + (summary.total_investment_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    document.getElementById('avg-monthly-return').textContent = 
+        (summary.avg_monthly_return_percent || 0).toFixed(2) + '%';
+}
+
+function updateMonthlyAssetsChart() {
+    const ctx = document.getElementById('monthlyAssetsChart').getContext('2d');
+    
+    if (monthlyAssetsChart) {
+        monthlyAssetsChart.destroy();
+    }
+    
+    const labels = monthlyData.map(item => item.period);
+    const cadData = monthlyData.map(item => item.total_value_cad || 0);
+    const usdData = monthlyData.map(item => item.total_value_usd || 0);
+    
+    monthlyAssetsChart = new Chart(ctx, {
+        type: 'bar',
         data: {
-            labels: {{ monthly_data | map(attribute='month_name') | list | tojson }},
+            labels: labels,
             datasets: [{
-                label: '{{ _('Net Investment') }}',
-                data: {{ monthly_data | map(attribute='net_investment') | list | tojson }},
-                borderColor: 'rgba(78, 115, 223, 1)',
-                backgroundColor: 'rgba(78, 115, 223, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.1
+                label: 'CAD',
+                data: cadData,
+                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
             }, {
-                label: '{{ _('Buy Amount') }}',
-                data: {{ monthly_data | map(attribute='buy_amount') | list | tojson }},
-                borderColor: 'rgba(28, 200, 138, 1)',
-                backgroundColor: 'rgba(28, 200, 138, 0.1)',
-                borderWidth: 2,
-                fill: false,
-                tension: 0.1
-            }, {
-                label: '{{ _('Sell Amount') }}',
-                data: {{ monthly_data | map(attribute='sell_amount') | list | tojson }},
-                borderColor: 'rgba(231, 74, 59, 1)',
-                backgroundColor: 'rgba(231, 74, 59, 0.1)',
-                borderWidth: 2,
-                fill: false,
-                tension: 0.1
+                label: 'USD',
+                data: usdData,
+                backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 1
             }]
         },
         options: {
-            maintainAspectRatio: false,
             responsive: true,
+            maintainAspectRatio: false,
             scales: {
-                x: {
-                    ticks: {
-                        maxRotation: 45
-                    }
-                },
                 y: {
                     beginAtZero: true,
                     ticks: {
@@ -251,5 +259,148 @@ if (document.getElementById('monthlyChart')) {
         }
     });
 }
+
+function updateMonthlyReturnsChart() {
+    const ctx = document.getElementById('monthlyReturnsChart').getContext('2d');
+    
+    if (monthlyReturnsChart) {
+        monthlyReturnsChart.destroy();
+    }
+    
+    const labels = monthlyData.map(item => item.period);
+    const cadReturnData = monthlyData.map(item => item.total_return_cad || 0);
+    const usdReturnData = monthlyData.map(item => item.total_return_usd || 0);
+    const returnPercentData = monthlyData.map(item => item.total_return_percent || 0);
+    
+    monthlyReturnsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Return CAD ($)',
+                data: cadReturnData,
+                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1,
+                yAxisID: 'y'
+            }, {
+                label: 'Return USD ($)',
+                data: usdReturnData,
+                backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                borderColor: 'rgba(153, 102, 255, 1)',
+                borderWidth: 1,
+                yAxisID: 'y'
+            }, {
+                label: 'Return %',
+                data: returnPercentData,
+                type: 'line',
+                borderColor: 'rgba(255, 206, 86, 1)',
+                backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                borderWidth: 3,
+                fill: false,
+                yAxisID: 'y1'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    ticks: {
+                        callback: function(value) {
+                            return value.toFixed(1) + '%';
+                        }
+                    },
+                    grid: {
+                        drawOnChartArea: false,
+                    },
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            if (context.dataset.label === 'Return %') {
+                                return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + '%';
+                            } else {
+                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateMonthlyTable() {
+    const tbody = document.querySelector('#monthlyTable tbody');
+    tbody.innerHTML = '';
+    
+    monthlyData.forEach(item => {
+        const row = tbody.insertRow();
+        
+        // Month
+        const cellMonth = row.insertCell();
+        cellMonth.textContent = item.period;
+        cellMonth.className = 'font-weight-bold';
+        
+        // Total Value CAD
+        const cellValueCAD = row.insertCell();
+        cellValueCAD.textContent = '$' + (item.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Total Value USD
+        const cellValueUSD = row.insertCell();
+        cellValueUSD.textContent = '$' + (item.total_value_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Total Investment CAD
+        const cellInvestmentCAD = row.insertCell();
+        cellInvestmentCAD.textContent = '$' + (item.total_investment_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Total Investment USD
+        const cellInvestmentUSD = row.insertCell();
+        cellInvestmentUSD.textContent = '$' + (item.total_investment_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Return CAD
+        const cellReturnCAD = row.insertCell();
+        const returnCAD = item.total_return_cad || 0;
+        cellReturnCAD.textContent = '$' + returnCAD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        cellReturnCAD.className = returnCAD >= 0 ? 'text-success' : 'text-danger';
+        
+        // Return USD
+        const cellReturnUSD = row.insertCell();
+        const returnUSD = item.total_return_usd || 0;
+        cellReturnUSD.textContent = '$' + returnUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        cellReturnUSD.className = returnUSD >= 0 ? 'text-success' : 'text-danger';
+        
+        // Return %
+        const cellReturnPercent = row.insertCell();
+        const returnPercent = item.total_return_percent || 0;
+        cellReturnPercent.textContent = returnPercent.toFixed(2) + '%';
+        cellReturnPercent.className = returnPercent >= 0 ? 'text-success font-weight-bold' : 'text-danger font-weight-bold';
+    });
+}
+
+// Load data when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadMonthlyAnalysis();
+});
 </script>
 {% endblock %}

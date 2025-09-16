@@ -15,22 +15,8 @@
                             <label for="modal_account_id" class="form-label">{{ _('Account') }} <span class="text-danger">*</span></label>
                             <select class="form-select" id="modal_account_id" name="account_id" required>
                                 <option value="">{{ _('Select Account') }}</option>
-                                {% for account in accounts %}
-                                <option value="{{ account.id }}">
-                                    {% if account.account_members %}
-                                        {% set member_names = [] %}
-                                        {% for am in account.account_members %}
-                                            {% if account.is_joint %}
-                                                {{ member_names.append(am.member.name + " (" + "%.1f"|format(am.ownership_percentage|float) + "%)") or "" }}
-                                            {% else %}
-                                                {{ member_names.append(am.member.name) or "" }}
-                                            {% endif %}
-                                        {% endfor %}
-                                        {{ member_names|join(", ") }} - {{ account.name }}
-                                    {% else %}
-                                        {{ account.name }}
-                                    {% endif %}
-                                </option>
+                                {% for account in get_sorted_accounts_with_members(accounts) %}
+                                <option value="{{ account.id }}">{{ _get_account_name_with_members(account) }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -533,5 +519,56 @@ function resetTransactionForm() {
     // Reset summary
     document.getElementById('modal-summary-content').innerHTML = '<p class="text-muted">{{ _("Fill in the form to see transaction summary") }}</p>';
 }
+
+// Handle form submission with AJAX for popup dialogs
+document.getElementById('addTransactionForm').addEventListener('submit', function(e) {
+    e.preventDefault(); // Prevent default form submission
+    
+    const submitButton = this.querySelector('button[type="submit"]');
+    const originalButtonContent = submitButton.innerHTML;
+    
+    // Show loading state
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>{{ _("Creating...") }}';
+    
+    // Get form data
+    const formData = new FormData(this);
+    
+    // Send AJAX request
+    fetch(this.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        return response.json().then(data => ({ status: response.status, data: data }));
+    })
+    .then(({ status, data }) => {
+        if (status === 200 && data.success) {
+            // Success - show success popup and redirect
+            alert(data.message || '{{ _("Transaction created successfully!") }}');
+            const accountId = formData.get('account_id');
+            window.location.href = '{{ url_for("main.transactions") }}' + (accountId ? '?account_id=' + accountId : '');
+        } else {
+            // Error - show error popup
+            const errorMessage = data.error || '{{ _("An error occurred while creating the transaction") }}';
+            alert(errorMessage);
+            
+            // Reset button state
+            submitButton.disabled = false;
+            submitButton.innerHTML = originalButtonContent;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Network error occurred. Please try again.") }}');
+        
+        // Reset button state
+        submitButton.disabled = false;
+        submitButton.innerHTML = originalButtonContent;
+    });
+});
 
 </script>

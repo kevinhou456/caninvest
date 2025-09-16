@@ -386,8 +386,16 @@ class HoldingsService:
         """获取股票当前价格 - 使用统一的缓存机制"""
         try:
             from app.services.stock_price_service import StockPriceService
+            from app.models import StocksCache
+            
             price_service = StockPriceService()
+
+            
+            #所有股票价格都是用stock price service获取的，所以货币就是传入的货币
+                 
+            
             price = price_service.get_cached_stock_price(symbol, currency)
+
             return price if price > 0 else None
         except Exception as e:
             print(f"Failed to get stock price for {symbol} ({currency}): {e}")
@@ -459,11 +467,12 @@ class HoldingsService:
             if not account_ids:
                 return []
             
-            # 查找所有历史交易过的股票
+            # 查找所有历史交易过的股票 - 排除空股票符号
             historical_stocks = db.session.query(Transaction.stock).filter(
                 Transaction.account_id.in_(account_ids),
                 Transaction.trade_date <= as_of_date,
                 Transaction.stock.isnot(None),
+                Transaction.stock != '',  # 明确排除空字符串
                 Transaction.type.in_(['BUY', 'SELL'])
             ).distinct().all()
             

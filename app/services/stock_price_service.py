@@ -21,8 +21,16 @@ class StockPriceService:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
     
-    def get_stock_price(self, symbol: str) -> Optional[Dict]:
-        """从Yahoo Finance获取股票当前价格"""
+    def get_stock_price(self, symbol: str, expected_currency: str = None) -> Optional[Dict]:
+        """从Yahoo Finance获取股票当前价格，并验证货币匹配
+        
+        Args:
+            symbol: 股票代码
+            expected_currency: 期望的货币代码 (USD/CAD)，如果提供则验证货币匹配
+        
+        Returns:
+            Dict: 股票价格数据，如果货币不匹配则返回None
+        """
         try:
             # Yahoo Finance API URL
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -44,10 +52,20 @@ class StockPriceService:
             if current_price is None:
                 return None
             
+            # 获取Yahoo Finance返回的货币信息
+            yahoo_currency = meta.get('currency', 'USD').upper()
+            
+            # 如果指定了期望的货币，进行验证
+            if expected_currency:
+                expected_currency = expected_currency.upper()
+                if yahoo_currency != expected_currency:
+                    print(f"货币不匹配: {symbol} 期望{expected_currency}，但Yahoo Finance返回{yahoo_currency}")
+                    return None
+            
             return {
                 'symbol': symbol,
                 'price': float(current_price),
-                'currency': meta.get('currency', 'USD'),
+                'currency': yahoo_currency,
                 'exchange': meta.get('exchangeName', ''),
                 'name': meta.get('longName', ''),
                 'updated_at': datetime.utcnow()
@@ -59,8 +77,18 @@ class StockPriceService:
     
     def update_stock_price(self, symbol: str, currency: str) -> bool:
         """更新数据库中的股票价格"""
+        # 验证符号不为空
+        if not symbol or not symbol.strip():
+            print(f"无效的股票代码：'{symbol}'，跳过更新")
+            return False
+            
+       
+
         try:
+            # 不传入期望货币进行验证，让Yahoo Finance返回实际货币信息
             price_data = self.get_stock_price(symbol)
+
+            
             
             # 使用联合主键查询
             stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
@@ -68,24 +96,30 @@ class StockPriceService:
                 # 如果stocks_cache中没有该股票，创建新记录，使用指定的currency
                 stock = StocksCache(symbol=symbol, currency=currency)
                 db.session.add(stock)
+
             
             # 更新时间戳，无论是否获取到价格
             stock.price_updated_at = datetime.utcnow()
             
             if price_data:
-                # 成功获取到价格数据
-                stock.current_price = Decimal(str(price_data['price']))
-                # 注意：不要从price_data覆盖currency，因为Yahoo返回的可能不准确
-                # stock.currency保持调用时传入的值
+                # 获取到价格数据，但不检查货币匹配
+                # 重要：保持stock.currency不变，使用传入的currency参数
+                yahoo_currency = price_data.get('currency', 'USD').upper()
+                if yahoo_currency != currency.upper():
+                    print(f"⚠️  货币不匹配: {symbol} Yahoo Finance返回{yahoo_currency}，但保持数据库中的{currency}")
+                    stock.current_price = Decimal('0')
+                else:
+                    stock.current_price = Decimal(str(price_data['price']))
+                    # 重要：不更新stock.currency，保持原有货币设置
                 
-                # 如果有新的名称或交易所信息，也更新
-                if price_data.get('name') and not stock.name:
-                    stock.name = price_data['name']
-                if price_data.get('exchange') and not stock.exchange:
-                    stock.exchange = price_data['exchange']
+                    # 如果有新的名称或交易所信息，也更新
+                    if price_data.get('name') and not stock.name:
+                        stock.name = price_data['name']
+                    if price_data.get('exchange') and not stock.exchange:
+                        stock.exchange = price_data['exchange']
                 
                 db.session.commit()
-                print(f"更新{symbol}价格: {currency} ${price_data['price']:.2f}")
+                
                 return True
             else:
                 # 无法从Yahoo Finance获取价格，设置为0并更新时间戳
@@ -93,7 +127,7 @@ class StockPriceService:
                 # currency已经在创建时设置，不需要再次设置
                 
                 db.session.commit()
-                print(f"无法获取{symbol}({currency})价格，设置为0并更新时间戳")
+                print(f"❌ 无法获取{symbol}({currency})价格，设置为0并更新时间戳")
                 return True  # 仍返回True，因为我们成功处理了这种情况
             
         except Exception as e:
@@ -104,7 +138,12 @@ class StockPriceService:
     
     def update_all_stock_prices(self) -> Dict:
         """更新所有股票价格"""
-        stocks = StocksCache.query.all()
+        # 只选择有效的股票符号（非空且不为空白）
+        stocks = StocksCache.query.filter(
+            StocksCache.symbol.isnot(None),
+            StocksCache.symbol != '',
+            StocksCache.symbol.notlike('')
+        ).all()
         results = {
             'total': len(stocks),
             'updated': 0,
@@ -113,7 +152,6 @@ class StockPriceService:
         }
         
         for stock in stocks:
-            print(f"正在更新 {stock.symbol}({stock.currency})...")
             try:
                 if self.update_stock_price(stock.symbol, stock.currency):
                     results['updated'] += 1
@@ -138,7 +176,6 @@ class StockPriceService:
         }
         
         for symbol, currency in symbol_currency_pairs:
-            print(f"正在更新 {symbol}({currency})...")
             try:
                 if self.update_stock_price(symbol, currency):
                     results['updated'] += 1
@@ -160,6 +197,12 @@ class StockPriceService:
         返回:
             Decimal: 股票当前价格，如果无法获取则返回0
         """
+        # 验证符号不为空
+        if not symbol or not symbol.strip():
+            print(f"无效的股票代码：'{symbol}'，返回0价格")
+            return Decimal('0')
+
+            
         try:
             # 从缓存获取 - 使用联合主键(symbol, currency)
             stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
@@ -227,11 +270,6 @@ class StockPriceService:
             
             result = data['chart']['result'][0]
             
-            # 调试输出：查看实际的数据结构
-            print(f"调试: {symbol} Yahoo Finance数据结构:")
-            print(f"  - result keys: {list(result.keys())}")
-            if 'meta' in result:
-                print(f"  - meta keys: {list(result['meta'].keys())}")
             
             # 检查是否有价格数据
             if 'indicators' not in result or 'quote' not in result['indicators'] or not result['indicators']['quote']:
@@ -255,7 +293,6 @@ class StockPriceService:
                         'close': float(prices[i])
                     }
             
-            print(f"成功获取{symbol}的{len(history)}天历史价格数据")
             return history
             
         except requests.RequestException as e:

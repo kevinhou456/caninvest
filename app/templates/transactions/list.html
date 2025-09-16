@@ -1,7 +1,6 @@
 {% extends "base/investment_base.html" %}
 
 {% block content %}
-{% if transactions.items %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h2 class="mb-1">
@@ -47,6 +46,30 @@
         {% endif %}
     </div>
 </div>
+
+<!-- Stock Symbol Filter -->
+<div class="mb-3">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="input-group">
+                <span class="input-group-text">
+                    <i class="fas fa-filter"></i>
+                </span>
+                <input type="text" class="form-control" id="stockFilter" placeholder="筛选股票代码 (如: AAPL, TD.TO)" 
+                       value="{{ request.args.get('stock', '') }}" 
+                       onkeyup="filterTransactions(event)">
+                {% if request.args.get('stock') %}
+                <button class="btn btn-outline-secondary" type="button" onclick="clearStockFilter()">
+                    <i class="fas fa-times"></i>
+                </button>
+                {% endif %}
+            </div>
+            <small class="form-text text-muted">支持输入股票代码的一部分进行筛选</small>
+        </div>
+    </div>
+</div>
+
+{% if transactions.items %}
 
 <div class="table-responsive">
     <table class="table table-striped">
@@ -121,7 +144,7 @@
     <ul class="pagination justify-content-center">
         {% if transactions.has_prev %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.prev_num, account_id=request.args.get('account_id')) }}">{{ _('Previous') }}</a>
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.prev_num, account_id=request.args.get('account_id'), stock=request.args.get('stock')) }}">{{ _('Previous') }}</a>
             </li>
         {% endif %}
         
@@ -129,7 +152,7 @@
             {% if page_num %}
                 {% if page_num != transactions.page %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('main.transactions', page=page_num, account_id=request.args.get('account_id')) }}">{{ page_num }}</a>
+                        <a class="page-link" href="{{ url_for('main.transactions', page=page_num, account_id=request.args.get('account_id'), stock=request.args.get('stock')) }}">{{ page_num }}</a>
                     </li>
                 {% else %}
                     <li class="page-item active">
@@ -145,60 +168,26 @@
         
         {% if transactions.has_next %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.next_num, account_id=request.args.get('account_id')) }}">{{ _('Next') }}</a>
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.next_num, account_id=request.args.get('account_id'), stock=request.args.get('stock')) }}">{{ _('Next') }}</a>
             </li>
         {% endif %}
     </ul>
 </nav>
 {% endif %}
-{% else %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
-        <h2 class="mb-1">
-            {% if request.args.get('account_id') %}
-                {% for account in accounts %}
-                    {% if account.id == request.args.get('account_id')|int %}
-                        {{ account.name }} - {{ _('Transactions') }}
-                    {% endif %}
-                {% endfor %}
-            {% else %}
-                {{ _('All Transactions') }}
-            {% endif %}
-        </h2>
-        <p class="text-muted mb-0">
-            共有 <strong>0</strong> 条交易记录
-        </p>
-    </div>
-    <div class="btn-group">
-        <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
-            <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
-        </button>
-        {% if request.args.get('account_id') %}
-        <a href="{{ url_for('main.import_transactions', account_id=request.args.get('account_id')) }}" class="btn btn-success">
-            <i class="fas fa-file-import me-2"></i>{{ _('Import CSV') }}
-        </a>
-        <a href="{{ url_for('main.export_transactions', account_id=request.args.get('account_id')) }}" class="btn btn-info">
-            <i class="fas fa-file-export me-2"></i>{{ _('Export CSV') }}
-        </a>
-        <button type="button" class="btn btn-danger" onclick="deleteAccountTransactions({{ request.args.get('account_id') }})">
-            <i class="fas fa-trash me-2"></i>{{ _('Delete Account Transactions') }}
-        </button>
-        {% else %}
-        <a href="{{ url_for('main.import_transactions') }}" class="btn btn-success">
-            <i class="fas fa-file-import me-2"></i>{{ _('Import CSV') }}
-        </a>
-        <button type="button" class="btn btn-info" onclick="exportAllTransactions()">
-            <i class="fas fa-file-export me-2"></i>{{ _('Export CSV') }}
-        </button>
-        {% endif %}
-    </div>
-</div>
 
+<!-- No Transactions Message (shown when filter results are empty) -->
+{% if not transactions.items %}
 <div class="text-center py-5">
     <i class="fas fa-exchange-alt fa-3x text-muted mb-3"></i>
-    <h4>{{ _('No transactions recorded yet') }}</h4>
-    <p class="text-muted">{{ _('Add your first transaction to get started') }}</p>
+    {% if request.args.get('stock') %}
+        <h4>{{ _('No transactions found for stock symbol') }}: "{{ request.args.get('stock') }}"</h4>
+        <p class="text-muted">{{ _('Try adjusting your filter criteria') }}</p>
+    {% else %}
+        <h4>{{ _('No transactions recorded yet') }}</h4>
+        <p class="text-muted">{{ _('Add your first transaction to get started') }}</p>
+    {% endif %}
 </div>
+{% endif %}
 {% endif %}
 
 <script>
@@ -340,6 +329,49 @@ function handleEditTransactionSubmit(event) {
 }
 
 // Removed - now using unified import interface
+
+// Stock symbol filter functions
+function filterTransactions(event) {
+    // Check if Enter key was pressed or it's from input event
+    if (event.type === 'keyup' && event.key !== 'Enter') {
+        return;
+    }
+    
+    const stockSymbol = document.getElementById('stockFilter').value.trim();
+    const currentUrl = new URL(window.location);
+    
+    if (stockSymbol) {
+        currentUrl.searchParams.set('stock', stockSymbol);
+    } else {
+        currentUrl.searchParams.delete('stock');
+    }
+    
+    // Keep existing parameters (account_id, page, etc.)
+    currentUrl.searchParams.delete('page'); // Reset to first page
+    
+    window.location.href = currentUrl.toString();
+}
+
+function clearStockFilter() {
+    const currentUrl = new URL(window.location);
+    currentUrl.searchParams.delete('stock');
+    currentUrl.searchParams.delete('page'); // Reset to first page
+    
+    window.location.href = currentUrl.toString();
+}
+
+// Auto-submit on Enter key
+document.addEventListener('DOMContentLoaded', function() {
+    const stockFilterInput = document.getElementById('stockFilter');
+    if (stockFilterInput) {
+        stockFilterInput.addEventListener('keyup', function(event) {
+            if (event.key === 'Enter') {
+                filterTransactions(event);
+            }
+        });
+    }
+});
+
 </script>
 
 <!-- Include Transaction Creation Modal -->
