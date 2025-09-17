@@ -53,17 +53,27 @@
                             <div class="d-flex flex-wrap gap-4" style="font-size: 1rem;">
                                 <span>shares: <strong class="text-dark">{{ "{:,.0f}".format(stock_stats.current_shares) }}</strong></span>
                                 <span>price: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.current_price) if stock_stats.current_price > 0 else 'N/A' }}</strong></span>
-                                <span>value: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.market_value) if stock_stats.market_value > 0 else 'N/A' }}</strong></span>
-                                <span>unrealized: <strong class="{{ 'text-success' if stock_stats.unrealized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.unrealized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.unrealized_pnl) }}</strong></span>
-                                <span>realized: <strong class="{{ 'text-success' if stock_stats.realized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.realized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.realized_pnl) }}</strong></span>
-                                <span>div: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.total_dividends) }}</strong></span>
-                                <span>int: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.0f}".format(stock_stats.total_interest) }}</strong></span>
+                                <span>value: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.market_value) if stock_stats.market_value > 0 else 'N/A' }}</strong></span>
+                                <span>unrealized: <strong class="{{ 'text-success' if stock_stats.unrealized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.unrealized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.unrealized_pnl) }}</strong></span>
+                                <span>realized: <strong class="{{ 'text-success' if stock_stats.realized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.realized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.realized_pnl) }}</strong></span>
+                                <span>div: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_dividends) }}</strong></span>
+                                <span>int: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_interest) }}</strong></span>
                             </div>
                             {% elif current_holding %}
                             <div class="d-flex gap-4" style="font-size: 1rem;">
                                 <span>shares: <strong class="text-dark">{{ "{:,.0f}".format(current_holding.shares) }}</strong></span>
                                 <span>avg cost: <strong class="text-dark">{{ current_holding.currency }}${{ "{:,.2f}".format(current_holding.avg_cost) }}</strong></span>
                                 <span>total cost: <strong class="text-dark">{{ current_holding.currency }}${{ "{:,.2f}".format(current_holding.total_cost) }}</strong></span>
+                                <span>return rate: <strong class="{{ 'text-success' if (stock_stats.total_return_rate or 0) >= 0 else 'text-danger' }}">{{ "+" if (stock_stats.total_return_rate or 0) >= 0 else "" }}{{ "{:.2f}".format(stock_stats.total_return_rate or 0) }}%</strong></span>
+                            </div>
+                            {% elif stock_stats %}
+                            <!-- Show summary for zero holdings -->
+                            <div class="d-flex flex-wrap gap-4" style="font-size: 1rem;">
+                                <span>Total Invested: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_invested or 0) }}</strong></span>
+                                <span>Realized Gain: <strong class="{{ 'text-success' if (stock_stats.realized_pnl or 0) >= 0 else 'text-danger' }}">{{ "+" if (stock_stats.realized_pnl or 0) >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.realized_pnl or 0) }}</strong></span>
+                                <span>Dividend: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_dividends or 0) }}</strong></span>
+                                <span>Interest: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_interest or 0) }}</strong></span>
+                                <span>Return Rate: <strong class="{{ 'text-success' if (stock_stats.zero_holding_return_rate or 0) >= 0 else 'text-danger' }}">{{ "+" if (stock_stats.zero_holding_return_rate or 0) >= 0 else "" }}{{ "{:.2f}".format(stock_stats.zero_holding_return_rate or 0) }}%</strong></span>
                             </div>
                             {% endif %}
                         </div>
@@ -108,7 +118,9 @@
                     <h5 class="mb-0">
                         <i class="fas fa-list me-2"></i>{{ _('Transaction History') }}
                     </h5>
-                    <span class="badge bg-primary">{{ transactions|length }} {{ _('transactions') }}</span>
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="badge bg-primary">{{ transactions|length }} {{ _('transactions') }}</span>
+                    </div>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
@@ -124,6 +136,7 @@
                                     <th class="text-end">{{ _('Fee') }}</th>
                                     <th>{{ _('Currency') }}</th>
                                     <th>{{ _('Notes') }}</th>
+                                    <th>{{ _('Actions') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -187,6 +200,14 @@
                                         {% else %}
                                             <span class="text-muted">-</span>
                                         {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" 
+                                                    onclick="editTransactionNotes({{ transaction.id }}, '{{ transaction.notes or '' }}')">
+                                                <i class="fas fa-edit me-1"></i>{{ _('Edit Notes') }}
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                                 {% endfor %}
@@ -612,6 +633,321 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('修正按钮未找到');
     }
 });
+
+// Transaction management functions (reused from transactions page)
+function editTransaction(transactionId) {
+    fetch(`/api/v1/transactions/${transactionId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                openEditTransactionModal(data.transaction);
+            } else {
+                alert('{{ _("Error loading transaction: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('{{ _("Error loading transaction. Please try again.") }}');
+        });
+}
+
+function deleteTransaction(transactionId) {
+    if (confirm('{{ _("Are you sure you want to delete this transaction? This action cannot be undone.") }}')) {
+        fetch(`/api/v1/transactions/${transactionId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('{{ _("Error deleting transaction: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('{{ _("Error deleting transaction. Please try again.") }}');
+        });
+    }
+}
+
+function openEditTransactionModal(transaction) {
+    const modal = new bootstrap.Modal(document.getElementById('editTransactionModal'));
+    
+    document.getElementById('editTransactionId').value = transaction.id;
+    document.getElementById('editTradeDate').value = transaction.trade_date;
+    document.getElementById('editType').value = transaction.type;
+    document.getElementById('editStock').value = transaction.stock;
+    document.getElementById('editQuantity').value = transaction.quantity;
+    document.getElementById('editPrice').value = transaction.price;
+    document.getElementById('editCurrency').value = transaction.currency;
+    document.getElementById('editFee').value = transaction.fee;
+    document.getElementById('editAccountId').value = transaction.account_id;
+    document.getElementById('editNotes').value = transaction.notes || '';
+    
+    modal.show();
+}
+
+function handleEditTransactionSubmit(event) {
+    event.preventDefault();
+    const form = event.target;
+    const formData = new FormData(form);
+    const transactionId = formData.get('transaction_id');
+    
+    const data = {
+        trade_date: formData.get('trade_date'),
+        type: formData.get('type'),
+        stock: formData.get('stock'),
+        quantity: formData.get('quantity'),
+        price: formData.get('price'),
+        currency: formData.get('currency'),
+        fee: formData.get('fee'),
+        account_id: formData.get('account_id'),
+        notes: formData.get('notes')
+    };
+    
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>{{ _("Updating...") }}';
+    submitBtn.disabled = true;
+    
+    fetch(`/api/v1/transactions/${transactionId}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('{{ _("Error updating transaction: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Error updating transaction. Please try again.") }}');
+    })
+    .finally(() => {
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+    });
+}
+
+// Function to open add transaction modal with stock symbol pre-filled
+function openStockTransactionModal(stockSymbol) {
+    // Check if we need to create the function that's in the transactions page
+    if (typeof openAddTransactionModal === 'function') {
+        // Reset the form first
+        resetTransactionForm();
+        
+        // Pre-fill stock symbol
+        document.getElementById('modal_stock_symbol').value = stockSymbol;
+        
+        // Check if holding quantity > 0 for pre-fill logic
+        {% if stock_stats and stock_stats.current_shares > 0 %}
+        // Pre-fill with SELL type and current quantity for stocks with holdings
+        document.getElementById('modal_transaction_type').value = 'SELL';
+        document.getElementById('modal_quantity').value = '{{ stock_stats.current_shares }}';
+        
+        // Trigger the transaction type change to adjust form visibility
+        handleTransactionTypeChange();
+        {% endif %}
+        
+        // Trigger stock lookup
+        lookupStockInfo();
+        
+        // Open the modal
+        const modal = new bootstrap.Modal(document.getElementById('addTransactionModal'));
+        modal.show();
+    } else {
+        alert('{{ _("Transaction modal not available. Please check the page setup.") }}');
+    }
+}
+
+// Notes editing functions
+function editTransactionNotes(transactionId, currentNotes) {
+    document.getElementById('editNotesTransactionId').value = transactionId;
+    document.getElementById('editNotesField').value = currentNotes;
+    
+    const modal = new bootstrap.Modal(document.getElementById('editNotesModal'));
+    modal.show();
+}
+
+function handleEditNotesSubmit(event) {
+    event.preventDefault();
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    
+    fetch('{{ url_for("main.update_transaction_notes") }}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('editNotesModal'));
+            modal.hide();
+            
+            // Reload page to show updated notes
+            location.reload();
+        } else {
+            alert(data.error || '{{ _("Failed to update notes") }}');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Failed to update notes") }}');
+    });
+}
 </script>
+
+<!-- Include Transaction Modals -->
+{% include 'transactions/create.html' %}
+
+<!-- Notes Edit Modal -->
+<div class="modal fade" id="editNotesModal" tabindex="-1" aria-labelledby="editNotesModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editNotesModalLabel">
+                    <i class="fas fa-edit me-2"></i>{{ _('Edit Notes') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <form onsubmit="handleEditNotesSubmit(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="editNotesTransactionId" name="transaction_id">
+                    <div class="mb-3">
+                        <label for="editNotesField" class="form-label">{{ _('Notes') }}</label>
+                        <textarea class="form-control" id="editNotesField" name="notes" rows="3" placeholder="{{ _('Enter notes...') }}"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>{{ _('Save Notes') }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Transaction Modal (reused from transactions page) -->
+<div class="modal fade" id="editTransactionModal" tabindex="-1" aria-labelledby="editTransactionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editTransactionModalLabel">
+                    <i class="fas fa-edit me-2"></i>{{ _('Edit Transaction') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <form onsubmit="handleEditTransactionSubmit(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="editTransactionId" name="transaction_id">
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editTradeDate" class="form-label">{{ _('Trade Date') }} <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" id="editTradeDate" name="trade_date" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editType" class="form-label">{{ _('Transaction Type') }} <span class="text-danger">*</span></label>
+                                <select class="form-select" id="editType" name="type" required>
+                                    <option value="">{{ _('Select Type') }}</option>
+                                    <option value="BUY">{{ _('Buy') }}</option>
+                                    <option value="SELL">{{ _('Sell') }}</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editStock" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="editStock" name="stock" placeholder="AAPL" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editAccountId" class="form-label">{{ _('Account') }} <span class="text-danger">*</span></label>
+                                <select class="form-select" id="editAccountId" name="account_id" required>
+                                    <option value="">{{ _('Select Account') }}</option>
+                                    {% if accounts %}
+                                        {% for account in accounts %}
+                                        <option value="{{ account.id }}">{{ account.name }} ({{ account.account_type.name if account.account_type else 'Unknown' }})</option>
+                                        {% endfor %}
+                                    {% endif %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="editQuantity" class="form-label">{{ _('Quantity') }} <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="editQuantity" name="quantity" step="0.0001" min="0" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="editPrice" class="form-label">{{ _('Price per Share') }} <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="editPrice" name="price" step="0.01" min="0" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="editCurrency" class="form-label">{{ _('Currency') }} <span class="text-danger">*</span></label>
+                                <select class="form-select" id="editCurrency" name="currency" required>
+                                    <option value="">{{ _('Select Currency') }}</option>
+                                    <option value="USD">USD</option>
+                                    <option value="CAD">CAD</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editFee" class="form-label">{{ _('Transaction Fee') }}</label>
+                                <input type="number" class="form-control" id="editFee" name="fee" step="0.01" min="0" value="0">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editNotes" class="form-label">{{ _('Notes') }}</label>
+                        <textarea class="form-control" id="editNotes" name="notes" rows="3" placeholder="{{ _('Optional notes...') }}"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>{{ _('Cancel') }}
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>{{ _('Update Transaction') }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 {% endblock %}

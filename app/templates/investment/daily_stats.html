@@ -142,7 +142,9 @@
     width: 100%;
     box-sizing: border-box;
     min-height: 50px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    white-space: nowrap;
 }
 
 .legend-item {
@@ -151,7 +153,7 @@
     align-items: center;
     gap: 8px;
     white-space: nowrap;
-    flex-shrink: 0;
+    flex: 0 0 auto;
 }
 
 .legend-color {
@@ -216,13 +218,17 @@
     width: 100vw !important;
     height: 100vh !important;
     background-color: rgba(0, 0, 0, 0.6) !important;
-    display: none;
+    display: none !important;
     align-items: center !important;
     justify-content: center !important;
     z-index: 99999 !important;
     pointer-events: all !important;
     margin: 0 !important;
     padding: 0 !important;
+}
+
+.loading-overlay.show {
+    display: flex !important;
 }
 
 .loading-dialog {
@@ -362,21 +368,21 @@
                 <div id="calendar"></div>
                 
                 <!-- Legend -->
-                <div class="calendar-legend">
-                    <div class="legend-item">
-                        <div class="legend-color trading"></div>
+                <div class="calendar-legend d-flex flex-nowrap align-items-center justify-content-center" style="display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 25px; white-space: nowrap;">
+                    <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
+                        <div class="legend-color trading" style="display: inline-block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin-right: 6px; background-color: #1cc88a; border: 3px solid #1cc88a;"></div>
                         <span>{{ _('Trading Day') }}</span>
                     </div>
-                    <div class="legend-item">
-                        <div class="legend-color transaction"></div>
+                    <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
+                        <div class="legend-color transaction" style="display: inline-block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin-right: 6px; background-color: #f6c23e; border: 3px solid #f6c23e;"></div>
                         <span>{{ _('Has Transactions') }}</span>
                     </div>
-                    <div class="legend-item">
-                        <div class="legend-color positive"></div>
+                    <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
+                        <div class="legend-color positive" style="display: inline-block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin-right: 6px; background-color: #d4edda; border: 1px solid #1cc88a;"></div>
                         <span>{{ _('Positive P&L') }}</span>
                     </div>
-                    <div class="legend-item">
-                        <div class="legend-color negative"></div>
+                    <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
+                        <div class="legend-color negative" style="display: inline-block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin-right: 6px; background-color: #f8d7da; border: 1px solid #e74a3b;"></div>
                         <span>{{ _('Negative P&L') }}</span>
                     </div>
                 </div>
@@ -439,7 +445,10 @@ function showLoadingDialog() {
     console.log('Showing loading dialog...');
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
-        overlay.style.display = 'flex';
+        if (!overlay.parentElement || overlay.parentElement !== document.body) {
+            document.body.appendChild(overlay);
+        }
+        overlay.classList.add('show');
         console.log('Loading dialog shown successfully');
     } else {
         console.error('Loading overlay element not found!');
@@ -450,7 +459,7 @@ function hideLoadingDialog() {
     console.log('Hiding loading dialog...');
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
-        overlay.style.display = 'none';
+        overlay.classList.remove('show');
         console.log('Loading dialog hidden successfully');
     } else {
         console.error('Loading overlay element not found!');
