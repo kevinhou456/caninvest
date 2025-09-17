@@ -83,6 +83,9 @@ def overview():
         raw_holdings = portfolio_data.get('current_holdings', [])
         raw_cleared_holdings = portfolio_data.get('cleared_holdings', [])
         
+        # 创建账户名到账户对象的映射字典，用于获取成员信息
+        account_name_to_obj = {acc.name: acc for acc in accounts}
+        
         # 多账户股票合并逻辑 - 将相同股票(symbol+currency)合并显示
         def merge_holdings_by_stock(holdings_list):
             """合并相同股票的持仓数据"""
@@ -98,10 +101,18 @@ def overview():
                 if key not in merged:
                     # 第一次遇到这个股票，直接添加
                     merged[key] = holding.copy()
+                    merged[key]['shares'] = merged[key].get('current_shares', 0)  # 确保shares字段存在
                     merged[key]['merged_accounts'] = [holding.get('account_name', '')]
-                    # 保存每个账户的详细信息用于悬停提示
+                    # 保存每个账户的详细信息用于悬停提示，包含成员信息
+                    account_name = holding.get('account_name', '')
+                    account_obj = account_name_to_obj.get(account_name)
+                    account_name_with_members = account_name
+                    if account_obj and account_obj.account_members:
+                        member_names = [am.member.name for am in account_obj.account_members]
+                        account_name_with_members = f"{account_name} - {', '.join(member_names)}"
+                    
                     merged[key]['account_details'] = [{
-                        'account_name': holding.get('account_name', ''),
+                        'account_name': account_name_with_members,
                         'shares': holding.get('current_shares', 0),
                         'cost': holding.get('total_cost', 0),
                         'cost_cad': holding.get('total_cost_cad', 0),
@@ -114,6 +125,7 @@ def overview():
                     
                     # 合并数量相关字段
                     existing['current_shares'] = float(existing.get('current_shares', 0)) + float(holding.get('current_shares', 0))
+                    existing['shares'] = existing['current_shares']  # 确保shares字段与current_shares同步
                     existing['total_cost'] = float(existing.get('total_cost', 0)) + float(holding.get('total_cost', 0))
                     existing['current_value'] = float(existing.get('current_value', 0)) + float(holding.get('current_value', 0))
                     existing['unrealized_gain'] = float(existing.get('unrealized_gain', 0)) + float(holding.get('unrealized_gain', 0))
@@ -126,9 +138,16 @@ def overview():
                     # 记录涉及的账户
                     existing['merged_accounts'].append(holding.get('account_name', ''))
                     
-                    # 添加当前账户的详细信息
+                    # 添加当前账户的详细信息，包含成员信息
+                    account_name = holding.get('account_name', '')
+                    account_obj = account_name_to_obj.get(account_name)
+                    account_name_with_members = account_name
+                    if account_obj and account_obj.account_members:
+                        member_names = [am.member.name for am in account_obj.account_members]
+                        account_name_with_members = f"{account_name} - {', '.join(member_names)}"
+                    
                     existing['account_details'].append({
-                        'account_name': holding.get('account_name', ''),
+                        'account_name': account_name_with_members,
                         'shares': holding.get('current_shares', 0),
                         'cost': holding.get('total_cost', 0),
                         'cost_cad': holding.get('total_cost_cad', 0),

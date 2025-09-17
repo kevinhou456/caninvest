@@ -273,6 +273,51 @@ body {
     font-size: 0.875rem;
 }
 
+/* 自定义 Bootstrap tooltip 样式 */
+.tooltip-inner {
+    max-width: 400px !important; /* 增加最大宽度 */
+    width: auto !important;
+    padding: 12px 16px !important; /* 增加内边距 */
+    text-align: left !important; /* 左对齐文本 */
+    white-space: pre-wrap !important; /* 保持换行 */
+    font-size: 0.85rem !important;
+    line-height: 1.4 !important;
+    background-color: rgba(0, 0, 0, 0.95) !important; /* 深色背景，增加透明度 */
+    border-radius: 8px !important; /* 圆角 */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important; /* 阴影效果 */
+}
+
+/* 确保颜色在 tooltip 中正确显示 */
+.tooltip-inner span {
+    color: inherit !important;
+}
+
+/* 为盈亏数字添加强制颜色 */
+.tooltip-inner .gain-positive {
+    color: #28a745 !important;
+    font-weight: 600 !important;
+}
+
+.tooltip-inner .gain-negative {
+    color: #dc3545 !important;
+    font-weight: 600 !important;
+}
+
+/* 响应式 tooltip 宽度 */
+@media (max-width: 768px) {
+    .tooltip-inner {
+        max-width: 300px !important;
+        font-size: 0.8rem !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .tooltip-inner {
+        max-width: 250px !important;
+        font-size: 0.75rem !important;
+    }
+}
+
 /* 分页样式 */
 .pagination {
     border-radius: 8px;

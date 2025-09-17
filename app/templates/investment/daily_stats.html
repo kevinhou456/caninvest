@@ -127,82 +127,136 @@
     border-color: #858796;
 }
 
-/* Legend styles - Ultra-forceful approach to ensure visibility */
+/* Legend styles - Simplified and more robust */
 .calendar-legend {
-    display: flex !important;
-    flex-direction: row !important;
-    justify-content: center !important;
-    align-items: center !important;
-    flex-wrap: nowrap !important;
-    gap: 30px !important;
-    padding: 20px !important;
-    background-color: #f8f9fc !important;
-    border-top: 2px solid #e3e6f0 !important;
-    font-size: 14px !important;
-    margin-top: 15px !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-    min-height: 60px !important;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 25px;
+    padding: 15px;
+    background-color: #f8f9fc;
+    border-top: 2px solid #e3e6f0;
+    font-size: 14px;
+    margin-top: 15px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 50px;
+    flex-wrap: wrap;
 }
 
 .legend-item {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    justify-content: flex-start !important;
-    gap: 10px !important;
-    white-space: nowrap !important;
-    flex-shrink: 0 !important;
-    flex-grow: 0 !important;
-    min-width: auto !important;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .legend-color {
-    width: 20px !important;
-    height: 20px !important;
-    min-width: 20px !important;
-    min-height: 20px !important;
-    border-radius: 3px !important;
-    border: 1px solid #333 !important;
-    flex-shrink: 0 !important;
-    display: block !important;
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    border-radius: 2px;
+    border: 1px solid #333;
+    flex-shrink: 0;
+    display: inline-block;
 }
 
 .legend-color.trading {
-    background-color: #1cc88a !important;
-    border-color: #0d6334 !important;
+    background-color: #1cc88a;
+    border: 3px solid #1cc88a;
 }
 
 .legend-color.transaction {
-    background-color: #f6c23e !important;
-    border-color: #c49619 !important;
+    background-color: #f6c23e;
+    border: 3px solid #f6c23e;
 }
 
 .legend-color.positive {
-    background-color: #d4edda !important;
-    border-color: #1cc88a !important;
+    background-color: #d4edda;
+    border: 1px solid #1cc88a;
 }
 
 .legend-color.negative {
-    background-color: #f8d7da !important;
-    border-color: #e74a3b !important;
+    background-color: #f8d7da;
+    border: 1px solid #e74a3b;
 }
 
-/* Text styling with explicit control */
 .legend-item span {
-    font-weight: 600 !important;
-    color: #333 !important;
-    white-space: nowrap !important;
-    display: inline-block !important;
-    line-height: 20px !important;
+    font-weight: 500;
+    color: #333;
+    font-size: 13px;
+    line-height: 16px;
 }
 
 @media (max-width: 768px) {
     .calendar-legend {
-        flex-wrap: wrap !important;
-        gap: 15px !important;
-        justify-content: flex-start !important;
+        gap: 15px;
+        justify-content: flex-start;
+        padding: 12px;
     }
+    
+    .legend-item {
+        gap: 6px;
+    }
+    
+    .legend-item span {
+        font-size: 12px;
+    }
+}
+
+/* Loading dialog styles */
+.loading-overlay {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    background-color: rgba(0, 0, 0, 0.6) !important;
+    display: none;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 99999 !important;
+    pointer-events: all !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.loading-dialog {
+    background-color: white !important;
+    border-radius: 12px !important;
+    padding: 40px !important;
+    text-align: center !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4) !important;
+    min-width: 300px !important;
+    max-width: 450px !important;
+    position: relative !important;
+    transform: translateY(0) !important;
+    border: 2px solid #e3e6f0 !important;
+}
+
+.loading-spinner {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #4e73df;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-text {
+    color: #5a5c69;
+    font-weight: 600;
+    font-size: 16px;
 }
 </style>
 {% endblock %}
@@ -362,6 +416,14 @@
         </div>
     </div>
 </div>
+
+<!-- Loading Dialog -->
+<div id="loading-overlay" class="loading-overlay">
+    <div class="loading-dialog">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在加载月历数据...</div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -371,6 +433,29 @@
 <script>
 let calendarData = null;
 let calendar = null;
+
+// Loading dialog functions
+function showLoadingDialog() {
+    console.log('Showing loading dialog...');
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.style.display = 'flex';
+        console.log('Loading dialog shown successfully');
+    } else {
+        console.error('Loading overlay element not found!');
+    }
+}
+
+function hideLoadingDialog() {
+    console.log('Hiding loading dialog...');
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+        console.log('Loading dialog hidden successfully');
+    } else {
+        console.error('Loading overlay element not found!');
+    }
+}
 
 // Get current family ID and other parameters
 const familyId = {{ family.id if family else 'null' }};
@@ -396,71 +481,13 @@ function initializeCalendar() {
         showNonCurrentDates: true,
         fixedWeekCount: false,
         
-        // Custom day cell content
+        // Custom day cell content - will be updated after data loads
         dayCellDidMount: function(info) {
             const dateStr = info.date.toISOString().split('T')[0];
-            const dayData = calendarData && calendarData.daily_stats ? calendarData.daily_stats[dateStr] : null;
+            console.log(`Calendar cell mounted: ${dateStr}, dayOfWeek=${info.date.getDay()}`);
             
-            // Display all days with data, including zero changes
-            if (!dayData) {
-                return; // Skip days without any data
-            }
-            
-            const dailyChange = dayData.daily_change || 0;
-            const dailyReturnPct = dayData.daily_return_pct || 0;
-            
-            console.log(`${dateStr}: change=${dailyChange.toFixed(2)}, return=${dailyReturnPct.toFixed(2)}%`);
-            
-            // Add CSS classes for styling
-            if (Math.abs(dailyChange) > 0) {
-                if (dailyChange > 0) {
-                    info.el.classList.add('positive-change');
-                } else {
-                    info.el.classList.add('negative-change');
-                }
-            }
-            
-            if (Math.abs(dailyReturnPct) > 5) {
-                info.el.classList.add('significant-change');
-            }
-            
-            // Add trading day and transaction indicators from real data if available
-            if (dayData && dayData.is_trading_day) {
-                info.el.classList.add('trading-day');
-            }
-            
-            if (dayData && dayData.has_transactions) {
-                info.el.classList.add('has-transactions');
-            }
-            
-            // Always show P&L data for testing
-            const pnlContainer = document.createElement('div');
-            pnlContainer.className = 'pnl-data';
-            
-            // Format as "value(percentage)"
-            const formattedAmount = `${dailyChange >= 0 ? '+' : ''}$${Math.abs(dailyChange).toLocaleString('en-US', { 
-                minimumFractionDigits: 0, 
-                maximumFractionDigits: 0 
-            })}`;
-            const formattedPercent = `${dailyReturnPct >= 0 ? '+' : ''}${dailyReturnPct.toFixed(2)}%`;
-            
-            // Combined display: value(percentage)
-            const pnlDiv = document.createElement('div');
-            pnlDiv.className = `pnl-amount ${dailyChange >= 0 ? 'positive' : 'negative'}`;
-            pnlDiv.textContent = `${formattedAmount}(${formattedPercent})`;
-            
-            // Force color style directly
-            if (dailyChange >= 0) {
-                pnlDiv.style.color = '#1cc88a';
-                pnlDiv.style.fontWeight = 'bold';
-            } else {
-                pnlDiv.style.color = '#e74a3b';
-                pnlDiv.style.fontWeight = 'bold';
-            }
-            
-            pnlContainer.appendChild(pnlDiv);
-            
-            info.el.querySelector('.fc-daygrid-day-frame').appendChild(pnlContainer);
+            // Store cell reference for later update
+            info.el.setAttribute('data-date-cell', dateStr);
         },
         
         // Handle date clicks
@@ -473,7 +500,15 @@ function initializeCalendar() {
             const startDate = info.view.currentStart;
             const year = startDate.getFullYear();
             const month = startDate.getMonth() + 1;
+            
+            // Show loading dialog when month changes
+            showLoadingDialog();
             loadCalendarData(year, month);
+        },
+        
+        // Make sure events are refetched after data loads
+        eventDidMount: function(info) {
+            console.log('Event mounted:', info);
         }
     });
     
@@ -508,15 +543,44 @@ function loadCalendarData(year, month) {
                 updateDailyPnlTable(calendarData.daily_stats);
                 // Re-render calendar to show new data
                 if (calendar) {
-                    calendar.refetchEvents();
+                    // Force re-render of day cells to show P&L data
                     calendar.render();
+                    
+                    // Manually trigger day cell updates after data is loaded
+                    setTimeout(() => {
+                        const dayElements = document.querySelectorAll('.fc-daygrid-day');
+                        const today = new Date().toISOString().split('T')[0]; // 获取今天的日期 YYYY-MM-DD 格式
+                        
+                        dayElements.forEach(dayEl => {
+                            const dateStr = dayEl.getAttribute('data-date');
+                            console.log(`Checking day element: ${dateStr}, has data: ${!!(calendarData && calendarData.daily_stats && calendarData.daily_stats[dateStr])}`);
+                            
+                            // 直接使用原始日期匹配数据，不进行任何调整
+                            const dayData = calendarData && calendarData.daily_stats && calendarData.daily_stats[dateStr] 
+                                ? calendarData.daily_stats[dateStr] 
+                                : null;
+                            
+                            console.log(`Using data for: ${dateStr}, data exists: ${!!dayData}`);
+                            
+                            // 只显示今天及之前的数据，未来日期不显示盈亏数据
+                            if (dateStr && dateStr <= today && dayData) {
+                                console.log(`Updating day cell ${dateStr} with data:`, dayData);
+                                updateDayCell(dayEl, dateStr, dayData);
+                            }
+                        });
+                    }, 100);
                 }
+                
+                // Hide loading dialog after data is loaded and rendered
+                hideLoadingDialog();
             } else {
                 console.error('Failed to load calendar data:', data.error);
+                hideLoadingDialog();
             }
         })
         .catch(error => {
             console.error('Error loading calendar data:', error);
+            hideLoadingDialog();
         });
 }
 
@@ -539,6 +603,72 @@ function updateMonthSummaryCards(summary) {
     returnElement.className = 'h5 mb-0 font-weight-bold ' + (returnPct >= 0 ? 'text-success' : 'text-danger');
     
     // Summary cards are always visible now
+}
+
+// Function to update individual day cell with P&L data
+function updateDayCell(dayEl, dateStr, dayData) {
+    // Remove existing P&L data if any
+    const existingPnl = dayEl.querySelector('.pnl-data');
+    if (existingPnl) {
+        existingPnl.remove();
+    }
+    
+    const dailyChange = dayData.daily_change || 0;
+    const dailyReturnPct = dayData.daily_return_pct || 0;
+    
+    console.log(`Manual update ${dateStr}: change=${dailyChange.toFixed(2)}, return=${dailyReturnPct.toFixed(2)}%`);
+    
+    // Add CSS classes for styling
+    dayEl.classList.remove('positive-change', 'negative-change', 'significant-change', 'trading-day', 'has-transactions');
+    
+    if (Math.abs(dailyChange) > 0) {
+        if (dailyChange > 0) {
+            dayEl.classList.add('positive-change');
+        } else {
+            dayEl.classList.add('negative-change');
+        }
+    }
+    
+    if (Math.abs(dailyReturnPct) > 5) {
+        dayEl.classList.add('significant-change');
+    }
+    
+    if (dayData.is_trading_day) {
+        dayEl.classList.add('trading-day');
+    }
+    
+    if (dayData.has_transactions) {
+        dayEl.classList.add('has-transactions');
+    }
+    
+    // Add P&L data display
+    const pnlContainer = document.createElement('div');
+    pnlContainer.className = 'pnl-data';
+    
+    const formattedAmount = `${dailyChange >= 0 ? '+' : ''}$${Math.abs(dailyChange).toLocaleString('en-US', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+    })}`;
+    const formattedPercent = `${dailyReturnPct >= 0 ? '+' : ''}${dailyReturnPct.toFixed(2)}%`;
+    
+    const pnlDiv = document.createElement('div');
+    pnlDiv.className = `pnl-amount ${dailyChange >= 0 ? 'positive' : 'negative'}`;
+    pnlDiv.textContent = `${formattedAmount}(${formattedPercent})`;
+    
+    if (dailyChange >= 0) {
+        pnlDiv.style.color = '#1cc88a';
+        pnlDiv.style.fontWeight = 'bold';
+    } else {
+        pnlDiv.style.color = '#e74a3b';
+        pnlDiv.style.fontWeight = 'bold';
+    }
+    
+    pnlContainer.appendChild(pnlDiv);
+    
+    const dayFrame = dayEl.querySelector('.fc-daygrid-day-frame');
+    if (dayFrame) {
+        dayFrame.appendChild(pnlContainer);
+    }
 }
 
 // Update daily P&L table with data
@@ -574,12 +704,15 @@ function updateDailyPnlTable(dailyStats) {
     sortedStats.forEach(day => {
         const row = document.createElement('tr');
         
-        // Format date
-        const date = new Date(day.date);
-        const formattedDate = date.toLocaleDateString('zh-CN', {
-            month: '2-digit',
-            day: '2-digit'
-        });
+        // Format date - avoid timezone issues by parsing manually
+        const dateParts = day.date.split('-');
+        const year = parseInt(dateParts[0]);
+        const month = parseInt(dateParts[1]);
+        const dayOfMonth = parseInt(dateParts[2]);
+        
+        // Create date using local timezone to avoid UTC conversion issues
+        const date = new Date(year, month - 1, dayOfMonth);
+        const formattedDate = `${month.toString().padStart(2, '0')}/${dayOfMonth.toString().padStart(2, '0')}`;
         
         // Get P&L data - the data structure is directly in the day object
         const totalAssets = day.total_assets || 0;
@@ -595,7 +728,7 @@ function updateDailyPnlTable(dailyStats) {
         const returnSign = returnPct >= 0 ? '+' : '';
         
         row.innerHTML = `
-            <td><strong>${formattedDate}</strong></td>
+            <td><strong>${formattedDate} (${day.date})</strong></td>
             <td>$${totalAssets.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             <td class="${changeClass}">${changeSign}$${dailyChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             <td class="${returnClass}">${returnSign}${returnPct.toFixed(2)}%</td>
@@ -638,6 +771,9 @@ function showDayDetails(dayData) {
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
+    // Show loading dialog for initial load
+    showLoadingDialog();
+    
     initializeCalendar();
     
     // Load initial data for current month

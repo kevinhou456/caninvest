@@ -930,6 +930,7 @@ class AssetValuationService:
     def _calculate_historical_cash_balance(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
         """
         通过交易记录计算历史现金余额
+        采用更安全的方法：如果计算出现负余额，则从当前余额反推
         """
         # 获取目标日期及之前的所有现金相关交易
         transactions = Transaction.query.filter(
@@ -938,7 +939,7 @@ class AssetValuationService:
             Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
         ).order_by(Transaction.trade_date.asc()).all()
         
-        # 累计计算现金余额
+        # 方法1：从零开始累计计算
         cad_balance = Decimal('0')
         usd_balance = Decimal('0')
         
@@ -947,8 +948,108 @@ class AssetValuationService:
                 cad_balance, usd_balance, transaction
             )
         
+        # 检查是否出现负余额，如果是则使用方法2
+        if cad_balance < 0 or usd_balance < 0:
+            logger.warning(f"账户{account_id}在{target_date}计算出负余额(CAD={cad_balance}, USD={usd_balance})，采用反推方法")
+            return self._calculate_cash_balance_reverse(account_id, target_date)
+        
         logger.info(f"账户{account_id}历史现金({target_date}): CAD=${cad_balance}, USD=${usd_balance}")
         return cad_balance, usd_balance
+    
+    def _calculate_cash_balance_reverse(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
+        """
+        反推方法：从当前现金余额出发，减去目标日期后的交易影响
+        """
+        # 获取当前现金余额
+        cash_record = Cash.get_account_cash(account_id)
+        if not cash_record:
+            logger.warning(f"账户{account_id}没有现金记录，无法反推历史余额")
+            return Decimal('0'), Decimal('0')
+        
+        current_cad = Decimal(str(cash_record.cad or 0))
+        current_usd = Decimal(str(cash_record.usd or 0))
+        
+        # 获取目标日期后的所有交易
+        future_transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.trade_date > target_date,
+            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
+        ).order_by(Transaction.trade_date.desc()).all()
+        
+        # 从当前余额反推到目标日期
+        historical_cad = current_cad
+        historical_usd = current_usd
+        
+        for transaction in future_transactions:
+            # 反向应用交易影响
+            historical_cad, historical_usd = self._reverse_transaction_impact(
+                historical_cad, historical_usd, transaction
+            )
+        
+        # 确保不出现负余额
+        historical_cad = max(historical_cad, Decimal('0'))
+        historical_usd = max(historical_usd, Decimal('0'))
+        
+        logger.info(f"账户{account_id}反推历史现金({target_date}): CAD=${historical_cad}, USD=${historical_usd}")
+        return historical_cad, historical_usd
+    
+    def _reverse_transaction_impact(self, cad: Decimal, usd: Decimal, transaction: Transaction) -> tuple[Decimal, Decimal]:
+        """反向应用交易对现金的影响（用于反推历史余额）"""
+        currency = transaction.currency or 'USD'
+        
+        if transaction.type == 'DEPOSIT':
+            # 存入的逆操作：减少现金
+            amount = Decimal(str(transaction.amount or 0))
+            if currency == 'CAD':
+                cad -= amount
+            else:
+                usd -= amount
+                
+        elif transaction.type == 'WITHDRAW':
+            # 取出的逆操作：增加现金
+            amount = Decimal(str(transaction.amount or 0))
+            if currency == 'CAD':
+                cad += amount
+            else:
+                usd += amount
+                
+        elif transaction.type == 'BUY':
+            # 买入的逆操作：增加现金
+            quantity = Decimal(str(transaction.quantity or 0))
+            price = Decimal(str(transaction.price or 0))
+            total_cost = quantity * price + Decimal(str(transaction.fee or 0))
+            if currency == 'CAD':
+                cad += total_cost
+            else:
+                usd += total_cost
+                
+        elif transaction.type == 'SELL':
+            # 卖出的逆操作：减少现金
+            quantity = Decimal(str(transaction.quantity or 0))
+            price = Decimal(str(transaction.price or 0))
+            net_proceeds = quantity * price - Decimal(str(transaction.fee or 0))
+            if currency == 'CAD':
+                cad -= net_proceeds
+            else:
+                usd -= net_proceeds
+                
+        elif transaction.type == 'DIVIDEND':
+            # 分红的逆操作：减少现金
+            amount = Decimal(str(transaction.amount or 0))
+            if currency == 'CAD':
+                cad -= amount
+            else:
+                usd -= amount
+                
+        elif transaction.type == 'INTEREST':
+            # 利息的逆操作：减少现金
+            amount = Decimal(str(transaction.amount or 0))
+            if currency == 'CAD':
+                cad -= amount
+            else:
+                usd -= amount
+        
+        return cad, usd
     
     def _apply_transaction_impact(self, cad: Decimal, usd: Decimal, transaction: Transaction) -> tuple[Decimal, Decimal]:
         """应用交易对现金的影响"""
