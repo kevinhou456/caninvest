@@ -1110,8 +1110,8 @@ class PortfolioService:
             
             # 4. 按账户分布
             by_account = defaultdict(lambda: {'value': 0, 'holdings_count': 0})
-            account_names = {}
-            
+            account_info = {}
+
             for holding in current_holdings:
                 account_id = holding['account_id']
                 current_value = float(holding['current_value'])
@@ -1120,18 +1120,42 @@ class PortfolioService:
                     by_account[account_id]['value'] += current_value
                     by_account[account_id]['holdings_count'] += 1
                     
-                    # 获取账户名称
-                    if account_id not in account_names:
+                    # 获取账户信息
+                    if account_id not in account_info:
                         from app.models import Account
                         account = Account.query.get(account_id)
-                        account_names[account_id] = account.name if account else f'Account {account_id}'
-            
+                        members = []
+                        if account and account.account_members:
+                            for account_member in account.account_members:
+                                member_name = account_member.member.name if account_member.member else 'Unknown'
+                                ownership = float(account_member.ownership_percentage or 0)
+                                members.append({
+                                    'member_id': account_member.member_id,
+                                    'name': member_name,
+                                    'ownership_percentage': ownership
+                                })
+                        account_info[account_id] = {
+                            'name': account.name if account else f'Account {account_id}',
+                            'is_joint': account.is_joint if account else False,
+                            'members': members
+                        }
+
             by_account_list = [
                 {
                     'account_id': account_id,
-                    'account_name': account_names[account_id],
+                    'account_name': account_info.get(account_id, {}).get('name', f'Account {account_id}'),
                     'value': data['value'],
-                    'holdings_count': data['holdings_count']
+                    'holdings_count': data['holdings_count'],
+                    'is_joint': account_info.get(account_id, {}).get('is_joint', False),
+                    'members': [
+                        {
+                            'member_id': member.get('member_id'),
+                            'name': member.get('name'),
+                            'ownership_percentage': member.get('ownership_percentage', 0),
+                            'value': data['value'] * (member.get('ownership_percentage', 0) / 100.0)
+                        }
+                        for member in account_info.get(account_id, {}).get('members', [])
+                    ]
                 }
                 for account_id, data in by_account.items()
                 if data['value'] > 0

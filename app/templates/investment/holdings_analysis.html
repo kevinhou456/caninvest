@@ -98,8 +98,8 @@
     <!-- Holdings by Stock Chart -->
     <div class="col-xl-6 col-lg-6 mb-4">
         <div class="card shadow h-100">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Stock') }}</h6>
+            <div class="card-header py-3 bg-primary text-white">
+                <h6 class="m-0 font-weight-bold">{{ _('Holdings by Stock') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="position: relative; height: 400px;">
@@ -112,8 +112,8 @@
     <!-- Holdings by Category Chart -->
     <div class="col-xl-6 col-lg-6 mb-4">
         <div class="card shadow h-100">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Category') }}</h6>
+            <div class="card-header py-3 bg-primary text-white">
+                <h6 class="m-0 font-weight-bold">{{ _('Holdings by Category') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="position: relative; height: 400px;">
@@ -128,8 +128,8 @@
     <!-- Holdings by Currency Chart -->
     <div class="col-xl-6 col-lg-6 mb-4">
         <div class="card shadow h-100">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Currency') }}</h6>
+            <div class="card-header py-3 bg-primary text-white">
+                <h6 class="m-0 font-weight-bold">{{ _('Holdings by Currency') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="position: relative; height: 400px;">
@@ -142,8 +142,8 @@
     <!-- Holdings by Account Chart -->
     <div class="col-xl-6 col-lg-6 mb-4">
         <div class="card shadow h-100">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold" style="color: #2c3e50;">{{ _('Holdings by Account') }}</h6>
+            <div class="card-header py-3 bg-primary text-white">
+                <h6 class="m-0 font-weight-bold" id="accountChartTitle" data-default-title="{{ _('Holdings by Account') }}">{{ _('Holdings by Account') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="position: relative; height: 400px;">
@@ -431,9 +431,37 @@ function updateAccountChart() {
         return;
     }
     
-    const labels = distributionData.by_account.map(acc => acc.account_name);
-    const data = distributionData.by_account.map(acc => acc.value);
-    
+    const accountData = distributionData.by_account;
+    const titleEl = document.getElementById('accountChartTitle');
+    const defaultTitle = titleEl ? titleEl.dataset.defaultTitle : null;
+
+    const singleJointAccount = accountData.length === 1 && accountData[0].is_joint && accountData[0].members && accountData[0].members.length > 1;
+
+    let labels;
+    let data;
+    let tooltipSource = accountData;
+
+    if (singleJointAccount) {
+        const account = accountData[0];
+        labels = account.members.map(member => member.name);
+        data = account.members.map(member => {
+            if (typeof member.value === 'number' && !Number.isNaN(member.value)) {
+                return member.value;
+            }
+            return account.value * (member.ownership_percentage || 0) / 100;
+        });
+        tooltipSource = account.members;
+        if (titleEl && defaultTitle) {
+            titleEl.textContent = `${defaultTitle} - ${account.account_name}`;
+        }
+    } else {
+        labels = accountData.map(acc => acc.account_name);
+        data = accountData.map(acc => acc.value);
+        if (titleEl && defaultTitle) {
+            titleEl.textContent = defaultTitle;
+        }
+    }
+
     accountChart = new Chart(ctx, {
         type: 'pie',
         data: {
@@ -459,7 +487,10 @@ function updateAccountChart() {
                             const value = context.parsed;
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
                             const percentage = ((value / total) * 100).toFixed(1);
-                            const holdingsCount = distributionData.by_account[context.dataIndex].holdings_count;
+                            if (singleJointAccount) {
+                                return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                            }
+                            const holdingsCount = tooltipSource[context.dataIndex].holdings_count;
                             return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%) - ' + holdingsCount + ' holdings';
                         }
                     }
