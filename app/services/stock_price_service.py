@@ -2,6 +2,7 @@
 股票价格获取和缓存服务 - 使用Yahoo Finance
 """
 
+import logging
 import requests
 import json
 from datetime import datetime, timedelta
@@ -10,6 +11,8 @@ from decimal import Decimal
 from flask import current_app
 from app import db
 from app.models.stocks_cache import StocksCache
+
+logger = logging.getLogger(__name__)
 
 
 class StockPriceService:
@@ -59,7 +62,7 @@ class StockPriceService:
             if expected_currency:
                 expected_currency = expected_currency.upper()
                 if yahoo_currency != expected_currency:
-                    print(f"货币不匹配: {symbol} 期望{expected_currency}，但Yahoo Finance返回{yahoo_currency}")
+                    logger.warning(f"货币不匹配: {symbol} 期望{expected_currency}，但Yahoo Finance返回{yahoo_currency}")
                     return None
             
             return {
@@ -72,14 +75,14 @@ class StockPriceService:
             }
             
         except Exception as e:
-            print(f"获取{symbol}价格失败: {str(e)}")
+            logger.error(f"获取{symbol}价格失败: {str(e)}")
             return None
     
     def update_stock_price(self, symbol: str, currency: str) -> bool:
         """更新数据库中的股票价格"""
         # 验证符号不为空
         if not symbol or not symbol.strip():
-            print(f"无效的股票代码：'{symbol}'，跳过更新")
+            logger.warning(f"无效的股票代码：'{symbol}'，跳过更新")
             return False
             
        
@@ -106,7 +109,7 @@ class StockPriceService:
                 # 重要：保持stock.currency不变，使用传入的currency参数
                 yahoo_currency = price_data.get('currency', 'USD').upper()
                 if yahoo_currency != currency.upper():
-                    print(f"⚠️  货币不匹配: {symbol} Yahoo Finance返回{yahoo_currency}，但保持数据库中的{currency}")
+                    logger.warning(f"货币不匹配: {symbol} Yahoo Finance返回{yahoo_currency}，但保持数据库中的{currency}")
                     stock.current_price = Decimal('0')
                 else:
                     stock.current_price = Decimal(str(price_data['price']))
@@ -127,11 +130,11 @@ class StockPriceService:
                 # currency已经在创建时设置，不需要再次设置
                 
                 db.session.commit()
-                print(f"❌ 无法获取{symbol}({currency})价格，设置为0并更新时间戳")
+                logger.warning(f"无法获取{symbol}({currency})价格，设置为0并更新时间戳")
                 return True  # 仍返回True，因为我们成功处理了这种情况
             
         except Exception as e:
-            print(f"更新{symbol}({currency})价格失败: {str(e)}")
+            logger.error(f"更新{symbol}({currency})价格失败: {str(e)}")
             db.session.rollback()
             
         return False
@@ -199,7 +202,7 @@ class StockPriceService:
         """
         # 验证符号不为空
         if not symbol or not symbol.strip():
-            print(f"无效的股票代码：'{symbol}'，返回0价格")
+            logger.warning(f"无效的股票代码：'{symbol}'，返回0价格")
             return Decimal('0')
 
             
@@ -231,7 +234,7 @@ class StockPriceService:
             return Decimal('0')
             
         except Exception as e:
-            print(f"获取{symbol}缓存价格失败: {str(e)}")
+            logger.error(f"获取{symbol}缓存价格失败: {str(e)}")
             return Decimal('0')
     
     def get_stock_history(self, symbol: str, start_date, end_date) -> Dict:
@@ -260,12 +263,13 @@ class StockPriceService:
             }
             
             response = requests.get(url, headers=self.headers, params=params, timeout=self.timeout)
+            print(f"[Yahoo API] 请求 {symbol} {start_date}->{end_date} params={params}")
             response.raise_for_status()
-            
+
             data = response.json()
             
             if 'chart' not in data or not data['chart']['result']:
-                print(f"无法获取{symbol}的历史价格数据")
+                logger.warning(f"无法获取{symbol}的历史价格数据 ({start_date} -> {end_date})")
                 return {}
             
             result = data['chart']['result'][0]
@@ -273,12 +277,12 @@ class StockPriceService:
             
             # 检查是否有价格数据
             if 'indicators' not in result or 'quote' not in result['indicators'] or not result['indicators']['quote']:
-                print(f"{symbol}历史数据中无价格信息")
+                logger.warning(f"{symbol}历史数据中无价格信息 ({start_date} -> {end_date})")
                 return {}
             
             # 检查timestamp数据是否存在
             if 'timestamp' not in result:
-                print(f"{symbol}历史数据中无时间戳信息")
+                logger.warning(f"{symbol}历史数据中无时间戳信息 ({start_date} -> {end_date})")
                 return {}
                 
             timestamps = result['timestamp']
@@ -296,8 +300,8 @@ class StockPriceService:
             return history
             
         except requests.RequestException as e:
-            print(f"获取{symbol}历史价格失败: {str(e)}")
+            logger.error(f"获取{symbol}历史价格失败 ({start_date} -> {end_date}): {str(e)}")
             return {}
         except Exception as e:
-            print(f"解析{symbol}历史价格数据失败: {str(e)}")
+            logger.error(f"解析{symbol}历史价格数据失败: {str(e)}")
             return {}

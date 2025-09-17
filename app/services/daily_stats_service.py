@@ -22,6 +22,7 @@ from enum import Enum
 from app.services.asset_valuation_service import AssetValuationService
 from app.services.report_service import ReportService
 from app.services.smart_history_manager import SmartHistoryManager
+from app.services.stock_history_cache_service import StockHistoryCacheService
 from app.services.daily_stats_cache_service import daily_stats_cache_service
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,7 @@ class DailyStatsService:
         self.asset_service = AssetValuationService()
         self.report_service = ReportService()
         self.history_manager = SmartHistoryManager()
+        self.history_cache_service = StockHistoryCacheService()
         
     def get_monthly_calendar_data(self, account_ids: List[int], 
                                   year: int, month: int) -> MonthlyCalendarData:
@@ -140,7 +142,9 @@ class DailyStatsService:
         logger.info(f"生成{year}年{month}月的月历数据，账户: {account_ids}")
         
         # 计算月份日期范围
-        start_date, end_date = self._get_month_date_range(year, month)
+        start_date, month_end = self._get_month_date_range(year, month)
+        today = date.today()
+        effective_end = min(month_end, today)
         
         # 创建月历数据对象
         calendar_data = MonthlyCalendarData(
@@ -151,11 +155,11 @@ class DailyStatsService:
         )
         
         # 批量计算每日统计
-        daily_stats = self._calculate_daily_stats_batch(account_ids, start_date, end_date)
+        daily_stats = self._calculate_daily_stats_batch(account_ids, start_date, effective_end)
         calendar_data.daily_stats = daily_stats
-        
+
         # 计算月度汇总
-        self._calculate_monthly_summary(calendar_data, start_date, end_date)
+        self._calculate_monthly_summary(calendar_data, start_date, effective_end)
         
         logger.info(f"月历数据生成完成，包含{len(daily_stats)}天的数据")
         return calendar_data
@@ -216,6 +220,20 @@ class DailyStatsService:
         # 逐日计算（这里可以进一步优化为批量计算）
         current_date = start_date
         prev_stats = None
+
+        prev_trading_date = self._get_previous_trading_day(start_date)
+        if prev_trading_date:
+            prev_snapshot = self._get_combined_asset_snapshot(account_ids, prev_trading_date)
+            prev_stats = DailyStatsPoint(
+                date=prev_trading_date,
+                account_id=0,
+                total_assets=prev_snapshot['total_assets'],
+                stock_market_value=prev_snapshot['stock_market_value'],
+                cash_balance=prev_snapshot['cash_balance_total_cad'],
+                unrealized_gain=prev_snapshot.get('unrealized_gain', Decimal('0')),
+                is_trading_day=self._is_trading_day(prev_trading_date),
+                has_transactions=False
+            )
         
         while current_date <= end_date:
             date_str = current_date.isoformat()
@@ -236,11 +254,12 @@ class DailyStatsService:
             )
             
             # 计算日变化（相对于前一个有数据的日期）
-            if prev_stats:
+            if prev_stats and stats_point.is_trading_day:
                 self._calculate_daily_change_for_point(stats_point, prev_stats)
-            
+
             daily_stats[date_str] = stats_point
-            prev_stats = stats_point
+            if stats_point.is_trading_day:
+                prev_stats = stats_point
             
             current_date += timedelta(days=1)
         
@@ -379,8 +398,23 @@ class DailyStatsService:
         return start_date, end_date
     
     def _is_trading_day(self, target_date: date) -> bool:
-        """判断是否为交易日（简化版，排除周末）"""
-        return target_date.weekday() < 5  # 0-4 为周一到周五
+        """判断是否为交易日（排除周末以及美加双休市日）"""
+        if target_date.weekday() >= 5:
+            return False
+
+        us_closed = self.history_cache_service._is_market_holiday_by_market('US', target_date)
+        ca_closed = self.history_cache_service._is_market_holiday_by_market('CA', target_date)
+
+        return not (us_closed and ca_closed)
+
+    def _get_previous_trading_day(self, target_date: date) -> Optional[date]:
+        """获取目标日期之前最近的交易日"""
+        current = target_date - timedelta(days=1)
+        for _ in range(365):  # 最多回溯一年
+            if self._is_trading_day(current):
+                return current
+            current -= timedelta(days=1)
+        return None
     
     def _get_transaction_dates_in_range(self, account_ids: List[int], 
                                        start_date: date, end_date: date) -> set:

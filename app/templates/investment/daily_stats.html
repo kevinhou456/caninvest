@@ -194,6 +194,14 @@
     line-height: 16px;
 }
 
+.pnl-amount.has-transactions::after {
+    content: '*';
+    color: #f6c23e;
+    font-weight: 700;
+    margin-left: 4px;
+    font-size: 0.75rem;
+}
+
 @media (max-width: 768px) {
     .calendar-legend {
         gap: 15px;
@@ -208,55 +216,6 @@
     .legend-item span {
         font-size: 12px;
     }
-}
-
-/* Loading dialog styles */
-.loading-overlay {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    background-color: rgba(0, 0, 0, 0.6) !important;
-    display: none !important;
-    align-items: center !important;
-    justify-content: center !important;
-    z-index: 99999 !important;
-    pointer-events: all !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-.loading-overlay.show {
-    display: flex !important;
-}
-
-.loading-dialog {
-    background-color: white !important;
-    border-radius: 12px !important;
-    padding: 40px !important;
-    text-align: center !important;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4) !important;
-    min-width: 300px !important;
-    max-width: 450px !important;
-    position: relative !important;
-    transform: translateY(0) !important;
-    border: 2px solid #e3e6f0 !important;
-}
-
-.loading-spinner {
-    border: 3px solid #f3f3f3;
-    border-top: 3px solid #4e73df;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    animation: spin 1s linear infinite;
-    margin: 0 auto 20px;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
 }
 
 .loading-text {
@@ -360,13 +319,13 @@
     </div>
 </div>
 
-<!-- FullCalendar View -->
+<!-- FullCalendar View + Daily P&L Chart -->
 <div class="row mb-4">
-    <div class="col-12">
-        <div class="card shadow">
+    <div class="col-lg-6 mb-4 mb-lg-0">
+        <div class="card shadow h-100">
             <div class="card-body">
                 <div id="calendar"></div>
-                
+
                 <!-- Legend -->
                 <div class="calendar-legend d-flex flex-nowrap align-items-center justify-content-center" style="display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 25px; white-space: nowrap;">
                     <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
@@ -389,80 +348,49 @@
             </div>
         </div>
     </div>
-</div>
-
-<!-- Daily P&L Table -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card shadow">
+    <div class="col-lg-6">
+        <div class="card shadow h-100">
             <div class="card-header">
-                <h6 class="m-0 font-weight-bold text-primary">每日盈亏数据表格 (调试用)</h6>
+                <h6 class="m-0 font-weight-bold text-primary">{{ _('Daily P&L') }}</h6>
             </div>
             <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover" id="daily-pnl-table">
-                        <thead class="thead-light">
-                            <tr>
-                                <th>日期</th>
-                                <th>总资产</th>
-                                <th>当日变化</th>
-                                <th>回报率(%)</th>
-                                <th>是否交易日</th>
-                                <th>有交易</th>
-                            </tr>
-                        </thead>
-                        <tbody id="daily-pnl-tbody">
-                            <tr>
-                                <td colspan="6" class="text-center">加载中...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <canvas id="dailyPnlChart" height="320"></canvas>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Loading Dialog -->
-<div id="loading-overlay" class="loading-overlay">
-    <div class="loading-dialog">
-        <div class="loading-spinner"></div>
-        <div class="loading-text">正在加载月历数据...</div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <!-- FullCalendar JavaScript -->
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
 <script>
 let calendarData = null;
 let calendar = null;
+let dailyPnlChart = null;
 
-// Loading dialog functions
+// Loading dialog helpers (integrated with global loader)
 function showLoadingDialog() {
-    console.log('Showing loading dialog...');
-    const overlay = document.getElementById('loading-overlay');
-    if (overlay) {
-        if (!overlay.parentElement || overlay.parentElement !== document.body) {
-            document.body.appendChild(overlay);
-        }
-        overlay.classList.add('show');
-        console.log('Loading dialog shown successfully');
+    const message = '正在加载数据...';
+
+    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
+        GlobalLoading.manualShow(message);
+    } else if (window.GlobalLoading && typeof GlobalLoading.show === 'function') {
+        GlobalLoading.show(message);
     } else {
-        console.error('Loading overlay element not found!');
+        console.log('Loading dialog fallback:', message);
     }
 }
 
 function hideLoadingDialog() {
-    console.log('Hiding loading dialog...');
-    const overlay = document.getElementById('loading-overlay');
-    if (overlay) {
-        overlay.classList.remove('show');
-        console.log('Loading dialog hidden successfully');
-    } else {
-        console.error('Loading overlay element not found!');
+    if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
+        GlobalLoading.manualHide(300);
+    } else if (window.GlobalLoading && typeof GlobalLoading.hide === 'function') {
+        GlobalLoading.hide(300);
     }
 }
 
@@ -524,6 +452,31 @@ function initializeCalendar() {
     calendar.render();
 }
 
+function applyCalendarDataToView() {
+    if (!calendarData) {
+        return;
+    }
+
+    const dayElements = document.querySelectorAll('.fc-daygrid-day');
+    const today = new Date().toISOString().split('T')[0];
+
+    dayElements.forEach(dayEl => {
+        const dateStr = dayEl.getAttribute('data-date');
+        const hasData = !!(calendarData && calendarData.daily_stats && calendarData.daily_stats[dateStr]);
+        console.log(`Checking day element: ${dateStr}, has data: ${hasData}`);
+
+        const dayData = hasData ? calendarData.daily_stats[dateStr] : null;
+
+        dayEl.classList.remove('positive-change', 'negative-change', 'significant-change', 'trading-day', 'has-transactions');
+
+        if (dateStr && dateStr <= today && dayData && dayData.is_trading_day) {
+            updateDayCell(dayEl, dateStr, dayData);
+        } else {
+            clearDayIndicators(dayEl);
+        }
+    });
+}
+
 // Load calendar data from API
 function loadCalendarData(year, month) {
     let apiUrl = `/api/v1/daily-stats/calendar?year=${year}&month=${month}`;
@@ -549,39 +502,16 @@ function loadCalendarData(year, month) {
             if (data.success) {
                 calendarData = data.data;
                 updateMonthSummaryCards(calendarData.month_summary);
-                updateDailyPnlTable(calendarData.daily_stats);
-                // Re-render calendar to show new data
+                // Hide loading dialog after calendar cells updated
                 if (calendar) {
-                    // Force re-render of day cells to show P&L data
-                    calendar.render();
-                    
-                    // Manually trigger day cell updates after data is loaded
                     setTimeout(() => {
-                        const dayElements = document.querySelectorAll('.fc-daygrid-day');
-                        const today = new Date().toISOString().split('T')[0]; // 获取今天的日期 YYYY-MM-DD 格式
-                        
-                        dayElements.forEach(dayEl => {
-                            const dateStr = dayEl.getAttribute('data-date');
-                            console.log(`Checking day element: ${dateStr}, has data: ${!!(calendarData && calendarData.daily_stats && calendarData.daily_stats[dateStr])}`);
-                            
-                            // 直接使用原始日期匹配数据，不进行任何调整
-                            const dayData = calendarData && calendarData.daily_stats && calendarData.daily_stats[dateStr] 
-                                ? calendarData.daily_stats[dateStr] 
-                                : null;
-                            
-                            console.log(`Using data for: ${dateStr}, data exists: ${!!dayData}`);
-                            
-                            // 只显示今天及之前的数据，未来日期不显示盈亏数据
-                            if (dateStr && dateStr <= today && dayData) {
-                                console.log(`Updating day cell ${dateStr} with data:`, dayData);
-                                updateDayCell(dayEl, dateStr, dayData);
-                            }
-                        });
-                    }, 100);
+                        applyCalendarDataToView();
+                        renderDailyPnlChart(calendarData.daily_stats);
+                        hideLoadingDialog();
+                    }, 150);
+                } else {
+                    hideLoadingDialog();
                 }
-                
-                // Hide loading dialog after data is loaded and rendered
-                hideLoadingDialog();
             } else {
                 console.error('Failed to load calendar data:', data.error);
                 hideLoadingDialog();
@@ -622,14 +552,23 @@ function updateDayCell(dayEl, dateStr, dayData) {
         existingPnl.remove();
     }
     
+    if (!dayData || !dayData.is_trading_day) {
+        clearDayIndicators(dayEl);
+        return;
+    }
+
     const dailyChange = dayData.daily_change || 0;
     const dailyReturnPct = dayData.daily_return_pct || 0;
     
     console.log(`Manual update ${dateStr}: change=${dailyChange.toFixed(2)}, return=${dailyReturnPct.toFixed(2)}%`);
-    
+
     // Add CSS classes for styling
     dayEl.classList.remove('positive-change', 'negative-change', 'significant-change', 'trading-day', 'has-transactions');
-    
+    dayEl.classList.add('trading-day');
+    if (dayData.has_transactions) {
+        dayEl.classList.add('has-transactions');
+    }
+
     if (Math.abs(dailyChange) > 0) {
         if (dailyChange > 0) {
             dayEl.classList.add('positive-change');
@@ -641,15 +580,6 @@ function updateDayCell(dayEl, dateStr, dayData) {
     if (Math.abs(dailyReturnPct) > 5) {
         dayEl.classList.add('significant-change');
     }
-    
-    if (dayData.is_trading_day) {
-        dayEl.classList.add('trading-day');
-    }
-    
-    if (dayData.has_transactions) {
-        dayEl.classList.add('has-transactions');
-    }
-    
     // Add P&L data display
     const pnlContainer = document.createElement('div');
     pnlContainer.className = 'pnl-data';
@@ -663,6 +593,9 @@ function updateDayCell(dayEl, dateStr, dayData) {
     const pnlDiv = document.createElement('div');
     pnlDiv.className = `pnl-amount ${dailyChange >= 0 ? 'positive' : 'negative'}`;
     pnlDiv.textContent = `${formattedAmount}(${formattedPercent})`;
+    if (dayData.has_transactions) {
+        pnlDiv.classList.add('has-transactions');
+    }
     
     if (dailyChange >= 0) {
         pnlDiv.style.color = '#1cc88a';
@@ -680,75 +613,84 @@ function updateDayCell(dayEl, dateStr, dayData) {
     }
 }
 
-// Update daily P&L table with data
-function updateDailyPnlTable(dailyStats) {
-    const tbody = document.getElementById('daily-pnl-tbody');
-    if (!tbody || !dailyStats) {
-        console.log('Table body or daily stats not found');
-        return;
+function clearDayIndicators(dayEl) {
+    const existing = dayEl.querySelector('.pnl-data');
+    if (existing) {
+        existing.remove();
     }
-    
-    // Convert daily_stats object to array if it's an object
-    let statsArray = [];
-    if (Array.isArray(dailyStats)) {
-        statsArray = dailyStats;
-    } else if (typeof dailyStats === 'object') {
-        // Convert object to array
-        statsArray = Object.values(dailyStats);
+    dayEl.classList.remove('positive-change', 'negative-change', 'significant-change', 'trading-day', 'has-transactions');
+}
+
+function renderDailyPnlChart(dailyStats) {
+    if (!dailyStats) return;
+    const todayISO = new Date().toISOString().split('T')[0];
+
+    const statsArray = Object.values(dailyStats)
+        .filter(day => day.is_trading_day && day.date <= todayISO)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const labels = statsArray.map(day => day.date.slice(-5));
+    const values = statsArray.map(day => day.daily_change || 0);
+
+    const ctx = document.getElementById('dailyPnlChart');
+    if (!ctx) return;
+
+    if (dailyPnlChart) {
+        dailyPnlChart.destroy();
     }
-    
-    console.log('Updating daily P&L table with', statsArray.length, 'days of data');
-    
-    // Clear existing rows
-    tbody.innerHTML = '';
-    
-    if (statsArray.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center">暂无数据</td></tr>';
-        return;
-    }
-    
-    // Sort by date (most recent first)
-    const sortedStats = [...statsArray].sort((a, b) => new Date(b.date) - new Date(a.date));
-    
-    sortedStats.forEach(day => {
-        const row = document.createElement('tr');
-        
-        // Format date - avoid timezone issues by parsing manually
-        const dateParts = day.date.split('-');
-        const year = parseInt(dateParts[0]);
-        const month = parseInt(dateParts[1]);
-        const dayOfMonth = parseInt(dateParts[2]);
-        
-        // Create date using local timezone to avoid UTC conversion issues
-        const date = new Date(year, month - 1, dayOfMonth);
-        const formattedDate = `${month.toString().padStart(2, '0')}/${dayOfMonth.toString().padStart(2, '0')}`;
-        
-        // Get P&L data - the data structure is directly in the day object
-        const totalAssets = day.total_assets || 0;
-        const dailyChange = day.daily_change || 0;
-        const returnPct = day.daily_return_pct || 0;
-        const isTradingDay = day.is_trading_day || false;
-        const hasTransactions = day.has_transactions || false;
-        
-        // Create row HTML
-        const changeClass = dailyChange >= 0 ? 'text-success' : 'text-danger';
-        const changeSign = dailyChange >= 0 ? '+' : '';
-        const returnClass = returnPct >= 0 ? 'text-success' : 'text-danger';
-        const returnSign = returnPct >= 0 ? '+' : '';
-        
-        row.innerHTML = `
-            <td><strong>${formattedDate} (${day.date})</strong></td>
-            <td>$${totalAssets.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            <td class="${changeClass}">${changeSign}$${dailyChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            <td class="${returnClass}">${returnSign}${returnPct.toFixed(2)}%</td>
-            <td><span class="badge ${isTradingDay ? 'badge-success' : 'badge-secondary'}">${isTradingDay ? '是' : '否'}</span></td>
-            <td><span class="badge ${hasTransactions ? 'badge-primary' : 'badge-light'}">${hasTransactions ? '有' : '无'}</span></td>
-        `;
-        
-        tbody.appendChild(row);
+
+    dailyPnlChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: '{{ _('Daily Change') }}',
+                data: values,
+                backgroundColor: values.map(v => v >= 0 ? 'rgba(28, 200, 138, 0.8)' : 'rgba(231, 74, 59, 0.8)'),
+                borderRadius: 4,
+                borderSkipped: false,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    ticks: {
+                        color: '#6e707e',
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 12
+                    },
+                    grid: {
+                        display: false
+                    }
+                },
+                y: {
+                    ticks: {
+                        color: '#6e707e',
+                        callback: value => `$${value.toLocaleString()}`
+                    },
+                    grid: {
+                        color: 'rgba(234, 236, 244, 0.4)'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: context => {
+                            const value = context.parsed.y || 0;
+                            return `${value >= 0 ? '+' : ''}$${value.toLocaleString()}`;
+                        }
+                    }
+                }
+            }
+        }
     });
-    
-    console.log('Daily P&L table updated successfully');
 }
 
 // Handle day click to show details
@@ -780,14 +722,7 @@ function showDayDetails(dayData) {
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    // Show loading dialog for initial load
-    showLoadingDialog();
-    
     initializeCalendar();
-    
-    // Load initial data for current month
-    const today = new Date();
-    loadCalendarData(today.getFullYear(), today.getMonth() + 1);
 });
 </script>
 {% endblock %}

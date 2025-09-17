@@ -3,15 +3,19 @@
 高度可扩展且易于维护的设计
 """
 
+import logging
 import requests
 import time
 from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple
+from functools import lru_cache
 from decimal import Decimal
 from flask import current_app
 from app import db
 from app.models.stock_price_history import StockPriceHistory
 from app.services.stock_price_service import StockPriceService
+
+logger = logging.getLogger(__name__)
 
 
 class StockHistoryCacheService:
@@ -25,9 +29,18 @@ class StockHistoryCacheService:
     4. 无重复代码：统一的数据处理和缓存逻辑
     """
     
+    _GLOBAL_FETCH_REGISTRY: Dict[tuple, Dict] = {}
+    _GLOBAL_FAILURE_REGISTRY: Dict[tuple, Dict] = {}
+
     def __init__(self):
         self.stock_service = StockPriceService()
         self.cache_days_threshold = 7  # 缓存过期天数
+        self.fetch_cooldown_hours = 6  # 同一股票重复抓取的冷却时间
+        self.fetch_failure_cooldown_hours = 12  # 失败后等待时间
+        self._recent_fetch_registry = self._GLOBAL_FETCH_REGISTRY
+        self._recent_failure_registry = self._GLOBAL_FAILURE_REGISTRY
+        self.prefetch_buffer_days = 30  # 向两侧预取的缓冲天数
+        self.min_prefetch_span_days = 365  # 每次至少抓取一年的数据
         
     def get_cached_history(self, symbol: str, start_date: date, end_date: date, 
                           currency: str = 'USD', force_refresh: bool = False) -> List[Dict]:
@@ -48,18 +61,26 @@ class StockHistoryCacheService:
         currency = currency.upper()
         
         try:
+            today = date.today()
+            adjusted_start = min(start_date, today)
+            adjusted_end = min(end_date, today)
+
+            if adjusted_start > adjusted_end:
+                return []
+
             # 1. 评估缓存状态
-            cache_gaps = self._analyze_cache_gaps(symbol, start_date, end_date, currency)
-            
+            cache_gaps = self._analyze_cache_gaps(symbol, adjusted_start, adjusted_end, currency)
+
             # 2. 如果需要刷新或有缺失，获取新数据
             if force_refresh or cache_gaps['needs_update']:
-                self._update_cache_data(symbol, cache_gaps, currency)
-            
+                self._update_cache_data(symbol, cache_gaps, currency, force_refresh=force_refresh)
+
             # 3. 从缓存返回数据
-            return self._get_cached_data(symbol, start_date, end_date, currency)
+            cached_data = self._get_cached_data(symbol, adjusted_start, adjusted_end, currency)
+            return cached_data
             
         except Exception as e:
-            print(f"获取缓存历史数据失败 {symbol}: {str(e)}")
+            logger.error(f"获取缓存历史数据失败 {symbol}: {str(e)}")
             return []
     
     def _analyze_cache_gaps(self, symbol: str, start_date: date, end_date: date, 
@@ -89,40 +110,289 @@ class StockHistoryCacheService:
             'missing_ranges': [],
             'latest_cached_date': latest_cached_date,
             'total_cached_days': len(cached_dates),
-            'cache_coverage': 0.0
+            'cache_coverage': 0.0,
+            'requested_range': (start_date, end_date)
         }
         
-        # 计算应该有的交易日数量（简化计算，实际应考虑节假日）
-        total_days = (end_date - start_date).days + 1
-        expected_trading_days = total_days * 5 // 7  # 粗略估算交易日
-        
-        if expected_trading_days > 0:
-            analysis['cache_coverage'] = len(cached_dates) / expected_trading_days
-        
+        # 计算应该有的交易日数量（仅考虑工作日）
+        total_trading_days = self._count_trading_days(symbol, currency, start_date, end_date)
+        if total_trading_days > 0:
+            analysis['cache_coverage'] = len(cached_dates) / total_trading_days
+
+        # 精确识别缺失的日期区间
+        missing_ranges = self._detect_missing_ranges(symbol, currency, start_date, end_date, cached_dates)
+
+        # 如果没有任何缓存数据，整段都视为缺失
+        if not latest_cached_date and not missing_ranges:
+            missing_ranges = [(start_date, end_date)]
+
+        # 对缺失区间进行去噪：忽略距离最新缓存日期在3天以内的未来区间
+        today = date.today()
+        pruned_ranges = []
+        for m_start, m_end in missing_ranges:
+            # 调整区间，确保不包含未来日期
+            adjusted_end = min(m_end, today)
+            if adjusted_end < m_start:
+                continue
+
+            # 若仅缺失最近的几个交易日，则忽略（通常是当天尚未收盘）
+            if latest_cached_date and m_start > latest_cached_date and (adjusted_end - latest_cached_date).days <= 3:
+                continue
+
+            pruned_ranges.append((m_start, adjusted_end))
+
+        analysis['missing_ranges'] = pruned_ranges
+
         # 判断是否需要更新
-        if not latest_cached_date:
-            # 没有任何缓存数据
+        if pruned_ranges:
             analysis['needs_update'] = True
-            analysis['missing_ranges'].append((start_date, end_date))
-        elif latest_cached_date < end_date:
-            # 检查是否只是缺少最近几天的数据（可能是因为今天还没收盘）
-            days_gap = (end_date - latest_cached_date).days
-            if days_gap <= 3:  # 如果只差3天以内，认为历史数据已经足够
-                print(f"历史数据缓存已足够，最晚日期: {latest_cached_date}, 请求结束: {end_date}, 差距: {days_gap}天")
-                analysis['needs_update'] = False
-            else:
-                # 缓存数据确实不够新
-                analysis['needs_update'] = True
-                update_start = max(start_date, latest_cached_date + timedelta(days=1))
-                analysis['missing_ranges'].append((update_start, end_date))
-        elif analysis['cache_coverage'] < 0.6:  # 降低覆盖率要求从80%到60%
-            # 缓存覆盖率不足
-            analysis['needs_update'] = True
-            analysis['missing_ranges'].append((start_date, end_date))
-        
+        else:
+            analysis['needs_update'] = False
+
         return analysis
+
+    def _count_trading_days(self, symbol: str, currency: str, start_date: date, end_date: date) -> int:
+        """计算指定日期范围内的工作日数量（周一至周五）"""
+        market = self._get_market(symbol, currency)
+        count = 0
+        current = start_date
+        while current <= end_date:
+            if current.weekday() < 5 and not self._is_market_holiday_by_market(market, current):
+                count += 1
+            current += timedelta(days=1)
+        return count
+
+    def _detect_missing_ranges(self, symbol: str, currency: str, start_date: date, end_date: date, cached_dates: set) -> List[Tuple[date, date]]:
+        """识别指定范围内缺失的交易日区间"""
+        market = self._get_market(symbol, currency)
+        missing_ranges = []
+        current_start = None
+        last_missing_day = None
+
+        current = start_date
+        while current <= end_date:
+            if current.weekday() < 5 and not self._is_market_holiday_by_market(market, current):
+                if current not in cached_dates:
+                    if current_start is None:
+                        current_start = current
+                    last_missing_day = current
+                else:
+                    if current_start is not None and last_missing_day is not None:
+                        missing_ranges.append((current_start, last_missing_day))
+                        current_start = None
+                        last_missing_day = None
+            current += timedelta(days=1)
+
+        if current_start is not None and last_missing_day is not None:
+            missing_ranges.append((current_start, last_missing_day))
+
+        return missing_ranges
+
+    def _get_market(self, symbol: str, currency: str) -> str:
+        symbol = (symbol or '').upper()
+        currency = (currency or '').upper()
+
+        tsx_suffixes = ('.TO', '.TSX', '.TSXV', '.V', '.CN', '-T')
+        if any(symbol.endswith(suffix) for suffix in tsx_suffixes):
+            return 'CA'
+        if currency == 'CAD':
+            return 'CA'
+        return 'US'
+
+    def _is_market_holiday_by_market(self, market: str, target_date: date) -> bool:
+        market = (market or 'US').upper()
+        if market == 'CA':
+            return target_date in self._get_canadian_holidays(target_date.year)
+        return target_date in self._get_us_holidays(target_date.year)
+
+    @staticmethod
+    @lru_cache(maxsize=16)
+    def _get_us_holidays(year: int) -> set:
+        from datetime import date
+        holidays = set()
+
+        def observed(day: date) -> date:
+            if day.weekday() == 5:  # Saturday
+                return day - timedelta(days=1)
+            if day.weekday() == 6:  # Sunday
+                return day + timedelta(days=1)
+            return day
+
+        def nth_weekday(month: int, weekday: int, n: int) -> date:
+            d = date(year, month, 1)
+            while d.weekday() != weekday:
+                d += timedelta(days=1)
+            d += timedelta(weeks=n - 1)
+            return d
+
+        def last_weekday(month: int, weekday: int) -> date:
+            if month == 12:
+                d = date(year, month, 31)
+            else:
+                d = date(year, month + 1, 1) - timedelta(days=1)
+            while d.weekday() != weekday:
+                d -= timedelta(days=1)
+            return d
+
+        # Fixed / observed days
+        holidays.add(observed(date(year, 1, 1)))   # New Year's Day
+        holidays.add(nth_weekday(1, 0, 3))         # Martin Luther King Jr. Day (3rd Monday Jan)
+        holidays.add(nth_weekday(2, 0, 3))         # Presidents' Day (3rd Monday Feb)
+        holidays.add(last_weekday(5, 0))           # Memorial Day (last Monday May)
+        holidays.add(observed(date(year, 7, 4)))   # Independence Day
+        holidays.add(nth_weekday(9, 0, 1))         # Labor Day
+        holidays.add(nth_weekday(11, 3, 4))        # Thanksgiving (4th Thursday Nov)
+        holidays.add(observed(date(year, 12, 25))) # Christmas Day
+
+        # Good Friday
+        holidays.add(StockHistoryCacheService._good_friday(year))
+
+        return holidays
+
+    @staticmethod
+    @lru_cache(maxsize=16)
+    def _get_canadian_holidays(year: int) -> set:
+        from datetime import date
+        holidays = set()
+
+        def observed(day: date) -> date:
+            if day.weekday() == 5:
+                return day + timedelta(days=2)
+            if day.weekday() == 6:
+                return day + timedelta(days=1)
+            return day
+
+        def nth_weekday(month: int, weekday: int, n: int) -> date:
+            d = date(year, month, 1)
+            while d.weekday() != weekday:
+                d += timedelta(days=1)
+            d += timedelta(weeks=n - 1)
+            return d
+
+        def last_weekday_before(month: int, day: int, weekday: int) -> date:
+            d = date(year, month, day)
+            while d.weekday() != weekday:
+                d -= timedelta(days=1)
+            return d
+
+        holidays.add(observed(date(year, 1, 1)))           # New Year's Day
+        holidays.add(nth_weekday(2, 0, 3))                 # Family Day (3rd Monday Feb)
+        holidays.add(StockHistoryCacheService._good_friday(year))
+        holidays.add(last_weekday_before(5, 25, 0))         # Victoria Day (Monday preceding May 25)
+        holidays.add(observed(date(year, 7, 1)))           # Canada Day
+        holidays.add(nth_weekday(8, 0, 1))                 # Civic Holiday (1st Monday Aug)
+        holidays.add(nth_weekday(9, 0, 1))                 # Labour Day
+        holidays.add(nth_weekday(10, 0, 2))                # Thanksgiving (2nd Monday Oct)
+        holidays.add(observed(date(year, 12, 25)))         # Christmas
+        holidays.add(observed(date(year, 12, 26)))         # Boxing Day
+
+        return holidays
+
+    @staticmethod
+    def _good_friday(year: int) -> date:
+        """计算西方教会的耶稣受难日（Good Friday）"""
+        # Anonymous Gregorian algorithm for Easter
+        a = year % 19
+        b = year // 100
+        c = year % 100
+        d = b // 4
+        e = b % 4
+        f = (b + 8) // 25
+        g = (b - f + 1) // 3
+        h = (19 * a + b - d - g + 15) % 30
+        i = c // 4
+        k = c % 4
+        l = (32 + 2 * e + 2 * i - h - k) % 7
+        m = (a + 11 * h + 22 * l) // 451
+        month = (h + l - 7 * m + 114) // 31
+        day = ((h + l - 7 * m + 114) % 31) + 1
+
+        easter = date(year, month, day)
+        return easter - timedelta(days=2)
     
-    def _update_cache_data(self, symbol: str, cache_gaps: Dict, currency: str):
+    def _merge_ranges(self, ranges: List[Tuple[date, date]]) -> List[Tuple[date, date]]:
+        """合并重叠或相邻的日期区间，减少外部请求次数"""
+        if not ranges:
+            return []
+
+        sorted_ranges = sorted(ranges, key=lambda r: r[0])
+        merged = [sorted_ranges[0]]
+
+        for current_start, current_end in sorted_ranges[1:]:
+            last_start, last_end = merged[-1]
+            if current_start <= last_end + timedelta(days=1):
+                merged[-1] = (last_start, max(last_end, current_end))
+            else:
+                merged.append((current_start, current_end))
+
+        return merged
+
+    def _should_skip_fetch(self, symbol: str, currency: str, start_date: date,
+                           end_date: date, force_refresh: bool) -> bool:
+        """判断是否应跳过重复的外部抓取"""
+        if force_refresh:
+            return False
+
+        key = (symbol, currency)
+        record = self._recent_fetch_registry.get(key)
+        if not record or not record.get('timestamp'):
+            return False
+
+        if datetime.utcnow() - record['timestamp'] > timedelta(hours=self.fetch_cooldown_hours):
+            return False
+
+        if record.get('start') is None or record.get('end') is None:
+            return False
+
+        # 若上次抓取的范围已覆盖此次范围，则跳过
+        if record['start'] <= start_date and record['end'] >= end_date:
+            return True
+
+        failure_record = self._recent_failure_registry.get(key)
+        if failure_record and failure_record.get('timestamp'):
+            if datetime.utcnow() - failure_record['timestamp'] <= timedelta(hours=self.fetch_failure_cooldown_hours):
+                if failure_record['start'] <= start_date and failure_record['end'] >= end_date:
+                    return True
+
+        return False
+
+    def _record_fetch(self, symbol: str, currency: str, start_date: date, end_date: date, success: bool):
+        key = (symbol, currency)
+        target_registry = self._recent_fetch_registry if success else self._recent_failure_registry
+        record = target_registry.get(key, {'start': None, 'end': None, 'timestamp': None})
+
+        record['start'] = start_date if record['start'] is None else min(record['start'], start_date)
+        record['end'] = end_date if record['end'] is None else max(record['end'], end_date)
+        record['timestamp'] = datetime.utcnow()
+
+        target_registry[key] = record
+
+        if success and key in self._recent_failure_registry:
+            del self._recent_failure_registry[key]
+
+    def _expand_fetch_range(self, start_date: date, end_date: date) -> Tuple[date, date]:
+        """扩大需要抓取的区间，确保每次至少抓取一年并带缓冲"""
+        today = date.today()
+        buffer = timedelta(days=self.prefetch_buffer_days)
+
+        effective_end = min(end_date, today)
+        effective_start = min(start_date, today)
+
+        fetch_end = min(today, effective_end + buffer)
+        fetch_start = fetch_end - timedelta(days=self.min_prefetch_span_days - 1)
+
+        buffered_start = effective_start - buffer
+        fetch_start = min(fetch_start, buffered_start)
+
+        if fetch_end > today:
+            fetch_end = today
+        if fetch_start > fetch_end:
+            fetch_start = fetch_end
+
+        return fetch_start, fetch_end
+
+    def _update_cache_data(self, symbol: str, cache_gaps: Dict, currency: str,
+                           force_refresh: bool = False):
         """
         更新缓存数据
         
@@ -131,25 +401,41 @@ class StockHistoryCacheService:
             cache_gaps: 缓存分析结果
             currency: 货币代码
         """
-        for start_date, end_date in cache_gaps['missing_ranges']:
+        missing_ranges = cache_gaps.get('missing_ranges', [])
+
+        # 如果强制刷新但没有明确缺口，则覆盖整个请求范围
+        if force_refresh and not missing_ranges:
+            requested_range = cache_gaps.get('requested_range')
+            if requested_range:
+                missing_ranges = [requested_range]
+
+        merged_ranges = self._merge_ranges(missing_ranges)
+
+        for start_date, end_date in merged_ranges:
             try:
+                fetch_start, fetch_end = self._expand_fetch_range(start_date, end_date)
+
+                if self._should_skip_fetch(symbol, currency, fetch_start, fetch_end, force_refresh):
+                    continue
+
+                print(f"[Yahoo Fetch] {symbol}({currency}) {fetch_start} -> {fetch_end} (原始缺口 {start_date}->{end_date})")
                 # 从Yahoo Finance获取数据
-                raw_data = self.stock_service.get_stock_history(symbol, start_date, end_date)
-                
+                raw_data = self.stock_service.get_stock_history(symbol, fetch_start, fetch_end)
+
                 if raw_data:
                     # 转换并保存数据
                     processed_data = self._process_raw_data(symbol, raw_data, currency)
                     success = StockPriceHistory.bulk_upsert(processed_data)
-                    
+
                     if success:
-                        print(f"成功缓存 {symbol} 从 {start_date} 到 {end_date} 的 {len(processed_data)} 条记录")
+                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=True)
                     else:
-                        print(f"缓存 {symbol} 数据失败")
+                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=False)
                 else:
-                    print(f"无法获取 {symbol} 的历史数据")
-                    
-            except Exception as e:
-                print(f"更新 {symbol} 缓存数据失败: {str(e)}")
+                    self._record_fetch(symbol, currency, fetch_start, fetch_end, success=False)
+
+            except Exception:
+                continue
     
     def _process_raw_data(self, symbol: str, raw_data: Dict, currency: str) -> List[Dict]:
         """
@@ -190,7 +476,7 @@ class StockHistoryCacheService:
                 processed_data.append(record)
                 
             except (ValueError, TypeError) as e:
-                print(f"处理日期 {date_str} 的数据失败: {str(e)}")
+                logger.debug(f"处理日期 {date_str} 的数据失败: {str(e)}")
                 continue
         
         return processed_data
@@ -229,7 +515,7 @@ class StockHistoryCacheService:
             return result
             
         except Exception as e:
-            print(f"从缓存获取数据失败 {symbol}: {str(e)}")
+            logger.error(f"从缓存获取数据失败 {symbol}: {str(e)}")
             return []
     
     def get_cache_statistics(self, symbol: str = None, currency: str = 'USD') -> Dict:
@@ -291,7 +577,7 @@ class StockHistoryCacheService:
             }
             
         except Exception as e:
-            print(f"获取缓存统计失败: {str(e)}")
+            logger.error(f"获取缓存统计失败: {str(e)}")
             return {}
     
     def cleanup_old_cache(self, days_to_keep: int = 365) -> Dict:
@@ -320,7 +606,7 @@ class StockHistoryCacheService:
                     db.session.delete(record)
                 
                 db.session.commit()
-                print(f"清理了 {deleted_count} 条旧缓存记录")
+                logger.debug(f"清理了 {deleted_count} 条旧缓存记录")
             
             return {
                 'success': True,
@@ -330,7 +616,7 @@ class StockHistoryCacheService:
             
         except Exception as e:
             db.session.rollback()
-            print(f"清理缓存失败: {str(e)}")
+            logger.error(f"清理缓存失败: {str(e)}")
             return {
                 'success': False,
                 'error': str(e),

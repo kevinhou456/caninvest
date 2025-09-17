@@ -16,6 +16,7 @@ from app.models.account import Account
 from app.models.cash import Cash
 from app.services.stock_price_service import StockPriceService
 from app.services.currency_service import CurrencyService
+from app.services.stock_history_cache_service import StockHistoryCacheService
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class AssetValuationService:
     def __init__(self):
         self.stock_price_service = StockPriceService()
         self.currency_service = CurrencyService()
+        self.history_cache_service = StockHistoryCacheService()
         
     def get_asset_snapshot(self, account_id: int, target_date: Optional[date] = None) -> AssetSnapshot:
         """
@@ -828,7 +830,7 @@ class AssetValuationService:
             # 根据日期选择价格获取方式
             if is_historical:
                 # 使用历史价格
-                price = self._get_historical_stock_price(symbol, target_date)
+                price = self._get_historical_stock_price(symbol, target_date, currency)
             else:
                 # 使用当前缓存价格
                 price = self.stock_price_service.get_cached_stock_price(symbol, currency)
@@ -860,7 +862,7 @@ class AssetValuationService:
             
         return total_market_value, holdings_detail
     
-    def _get_historical_stock_price(self, symbol: str, target_date: date) -> Optional[Decimal]:
+    def _get_historical_stock_price(self, symbol: str, target_date: date, currency: str) -> Optional[Decimal]:
         """
         获取指定日期的历史股票价格
         
@@ -874,24 +876,32 @@ class AssetValuationService:
         try:
             # 使用StockPriceService获取历史价格
             # 获取包含目标日期的历史数据范围
-            start_date = target_date - timedelta(days=7)  # 获取一周的数据以防某天没有数据
+            start_date = target_date - timedelta(days=7)
             end_date = target_date + timedelta(days=1)
-            
-            history = self.stock_price_service.get_stock_history(symbol, start_date, end_date)
-            
-            # 查找目标日期的价格
+
+            history_records = self.history_cache_service.get_cached_history(
+                symbol,
+                start_date,
+                end_date,
+                currency=currency
+            )
+
+            history_map = {record['date']: record for record in history_records}
+
             date_str = target_date.strftime('%Y-%m-%d')
-            if date_str in history and 'close' in history[date_str]:
-                return Decimal(str(history[date_str]['close']))
-            
+            record = history_map.get(date_str)
+            if record and record.get('close') is not None:
+                return Decimal(str(record['close']))
+
             # 如果目标日期没有数据，查找最近的前一个交易日
             current_date = target_date
             for i in range(7):  # 最多向前查找7天
                 current_date -= timedelta(days=1)
                 date_str = current_date.strftime('%Y-%m-%d')
-                if date_str in history and 'close' in history[date_str]:
+                record = history_map.get(date_str)
+                if record and record.get('close') is not None:
                     logger.debug(f"使用{current_date}的价格作为{target_date}的历史价格: {symbol}")
-                    return Decimal(str(history[date_str]['close']))
+                    return Decimal(str(record['close']))
             
             # 如果都没有找到，返回None
             logger.warning(f"无法获取{symbol}在{target_date}附近的历史价格")
@@ -950,7 +960,7 @@ class AssetValuationService:
         
         # 检查是否出现负余额，如果是则使用方法2
         if cad_balance < 0 or usd_balance < 0:
-            logger.warning(f"账户{account_id}在{target_date}计算出负余额(CAD={cad_balance}, USD={usd_balance})，采用反推方法")
+            # logger.warning(f"账户{account_id}在{target_date}计算出负余额(CAD={cad_balance}, USD={usd_balance})，采用反推方法")
             return self._calculate_cash_balance_reverse(account_id, target_date)
         
         logger.info(f"账户{account_id}历史现金({target_date}): CAD=${cad_balance}, USD=${usd_balance}")

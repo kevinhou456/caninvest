@@ -11,6 +11,20 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js - 使用UMD版本避免ES6模块问题 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.js"></script>
+
+    <script>
+        window.paceOptions = {
+            ajax: {
+                trackMethods: ['POST', 'GET'],
+                trackWebSockets: false
+            },
+            restartOnPushState: false,
+            restartOnRequestAfter: 50,
+            startOnPageLoad: true
+        };
+    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/themes/blue/pace-theme-minimal.css">
+    <script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script>
     
     <!-- Additional scripts for child templates -->
     {% block extra_head %}{% endblock %}
@@ -234,6 +248,39 @@
                 padding: 15px;
             }
         }
+
+        .global-loading-toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.95);
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 16px 28px;
+            background: rgba(33, 37, 41, 0.92);
+            color: #fff;
+            border-radius: 14px;
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+            z-index: 2000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.28s ease, transform 0.28s ease;
+            max-width: 90vw;
+            text-align: center;
+        }
+
+        .global-loading-toast.visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .global-loading-text {
+            font-size: 1.05rem;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
     </style>
     
     <!-- Custom CSS -->
@@ -243,6 +290,10 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    <div id="global-loading-toast" class="global-loading-toast" role="status" aria-live="polite" aria-atomic="true">
+        <div class="spinner-border text-light" style="width: 2.5rem; height: 2.5rem;" role="presentation"></div>
+        <span class="global-loading-text">正在加载数据...</span>
+    </div>
     <!-- Top Header Bar -->
     <div class="top-header">
         <div class="container-fluid d-flex justify-content-between align-items-center">
@@ -463,6 +514,69 @@
     </script>
     
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+        (function() {
+            const toast = document.getElementById('global-loading-toast');
+            const textEl = toast ? toast.querySelector('.global-loading-text') : null;
+            let hideTimer = null;
+            let manualDepth = 0;
+
+            function showToast(message) {
+                if (!toast) return;
+                if (message && textEl) {
+                    textEl.textContent = message;
+                }
+                if (hideTimer) {
+                    clearTimeout(hideTimer);
+                    hideTimer = null;
+                }
+                toast.classList.add('visible');
+            }
+
+            function scheduleHide(delay = 150) {
+                if (!toast || manualDepth > 0) return;
+                if (hideTimer) {
+                    clearTimeout(hideTimer);
+                }
+                hideTimer = setTimeout(() => {
+                    toast.classList.remove('visible');
+                    hideTimer = null;
+                }, delay);
+            }
+
+            window.GlobalLoading = {
+                show(message) {
+                    showToast(message || '正在加载数据...');
+                },
+                hide(delay) {
+                    scheduleHide(typeof delay === 'number' ? delay : 150);
+                },
+                manualShow(message) {
+                    manualDepth += 1;
+                    showToast(message || '正在加载数据...');
+                },
+                manualHide(delay) {
+                    if (manualDepth > 0) {
+                        manualDepth -= 1;
+                    }
+                    if (manualDepth === 0) {
+                        scheduleHide(typeof delay === 'number' ? delay : 150);
+                    }
+                }
+            };
+
+            if (window.Pace) {
+                Pace.on('start', () => {
+                    if (manualDepth === 0) {
+                        showToast('{{ _('Loading data...') }}');
+                    }
+                });
+                Pace.on('done', () => scheduleHide());
+                Pace.on('stop', () => scheduleHide());
+                Pace.on('error', () => scheduleHide());
+            }
+        })();
+    </script>
     
     <script>
         // Flash 消息正常工作，添加一些改进
