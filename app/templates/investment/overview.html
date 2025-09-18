@@ -312,6 +312,7 @@
                                 <th class="text-end">{{ _('Shares') }}</th>
                                 <th class="text-end">{{ _('Avg Cost') }}</th>
                                 <th class="text-end">{{ _('Current Price') }}</th>
+                                <th class="text-end">{{ _('Daily Change') }}</th>
                                 <th class="text-end">{{ _('Market Value') }}</th>
                                 <th class="text-end">{{ _('Unrealized P&L') }}</th>
                                 <th class="text-end">{{ _('Realized Gains') }}</th>
@@ -367,7 +368,22 @@
                                     <span class="fw-medium">${{ "{:.2f}".format(holding['current_price'] or 0) }}</span>
                                     <br><small class="text-muted">{{ holding['currency'] }}</small>
                                 </td>
-                                
+
+                                <!-- Daily Change -->
+                                <td class="text-end">
+                                    {% set daily_value = holding.get('daily_change_value', 0) %}
+                                    {% set daily_percent = holding.get('daily_change_percent', 0) %}
+                                    <span class="fw-medium {{ 'text-success' if daily_value >= 0 else 'text-danger' }}">
+                                        {% if daily_value >= 0 %}+{% endif %}
+                                        ${{ "{:,.2f}".format(daily_value) }}
+                                    </span>
+                                    <br>
+                                    <small class="{{ 'text-success' if daily_percent >= 0 else 'text-danger' }}">
+                                        {% if daily_percent >= 0 %}+{% endif %}
+                                        {{ "{:.2f}".format(daily_percent) }}%
+                                    </small>
+                                </td>
+
                                 <!-- Market Value -->
                                 <td class="text-end">
                                     <span class="fw-bold">${{ "{:,.2f}".format(holding['current_value'] or 0) }}</span>

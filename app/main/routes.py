@@ -144,6 +144,9 @@ def overview():
                     merged_holding['unrealized_gain_cad'] = safe_float(holding.get('unrealized_gain_cad'))
                     merged_holding['total_bought_shares'] = safe_float(holding.get('total_bought_shares'))
                     merged_holding['total_sold_shares'] = safe_float(holding.get('total_sold_shares'))
+                    merged_holding['daily_change_value'] = safe_float(holding.get('daily_change_value'))
+                    merged_holding['previous_value'] = safe_float(holding.get('previous_value'))
+                    merged_holding['daily_change_percent'] = safe_float(holding.get('daily_change_percent'))
                     merged_holding['merged_accounts'] = [holding.get('account_name', '')]
                     
                     # 保存每个账户的详细信息用于悬停提示，包含成员信息
@@ -180,6 +183,8 @@ def overview():
                     # 合并交易数量统计
                     existing['total_bought_shares'] = safe_float(existing.get('total_bought_shares')) + safe_float(holding.get('total_bought_shares'))
                     existing['total_sold_shares'] = safe_float(existing.get('total_sold_shares')) + safe_float(holding.get('total_sold_shares'))
+                    existing['daily_change_value'] = safe_float(existing.get('daily_change_value')) + safe_float(holding.get('daily_change_value'))
+                    existing['previous_value'] = safe_float(existing.get('previous_value')) + safe_float(holding.get('previous_value'))
 
                     # 记录涉及的账户
                     existing['merged_accounts'].append(holding.get('account_name', ''))
@@ -214,6 +219,19 @@ def overview():
                         existing['average_cost_cad'] = 0
 
                     # 保持其他字段不变（价格、汇率等）
+
+            # 重新计算合并后的衍生指标，确保百分比基于汇总数据
+            for merged_holding in merged.values():
+                daily_change_value = safe_float(merged_holding.get('daily_change_value'))
+                previous_value = safe_float(merged_holding.get('previous_value'))
+
+                if previous_value:
+                    merged_holding['daily_change_percent'] = (daily_change_value / previous_value) * 100
+                else:
+                    current_value = safe_float(merged_holding.get('current_value'))
+                    base_value = current_value - daily_change_value
+                    merged_holding['daily_change_percent'] = ((daily_change_value / base_value) * 100
+                                                              if base_value else 0.0)
 
             return list(merged.values())
         

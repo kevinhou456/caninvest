@@ -86,6 +86,11 @@ class PositionSnapshot:
     current_value: Decimal = Decimal('0')
     unrealized_gain: Decimal = Decimal('0')
     unrealized_gain_percent: Decimal = Decimal('0')
+
+    previous_close: Decimal = Decimal('0')
+    previous_value: Decimal = Decimal('0')
+    daily_change_value: Decimal = Decimal('0')
+    daily_change_percent: Decimal = Decimal('0')
     
     # FIFO批次（内部使用）
     _fifo_lots: List[FIFOLot] = None
@@ -125,6 +130,10 @@ class PositionSnapshot:
             'current_value': float(self.current_value),
             'unrealized_gain': float(self.unrealized_gain),
             'unrealized_gain_percent': float(self.unrealized_gain_percent),
+            'previous_close': float(self.previous_close),
+            'previous_value': float(self.previous_value),
+            'daily_change_value': float(self.daily_change_value),
+            'daily_change_percent': float(self.daily_change_percent),
             'as_of_date': self.as_of_date.isoformat()
         }
 
@@ -389,7 +398,26 @@ class PortfolioService:
             
             if snapshot.total_cost > 0:
                 snapshot.unrealized_gain_percent = (snapshot.unrealized_gain / snapshot.total_cost) * 100
-    
+
+            prev_date = snapshot.as_of_date - timedelta(days=1)
+            previous_price = self._get_last_trading_price(snapshot.symbol, snapshot.currency, prev_date)
+            if previous_price is None:
+                previous_price = self._get_last_trading_price(snapshot.symbol, snapshot.currency, snapshot.as_of_date)
+
+            if previous_price is not None:
+                snapshot.previous_close = previous_price
+                snapshot.previous_value = snapshot.current_shares * previous_price
+                snapshot.daily_change_value = snapshot.current_shares * (snapshot.current_price - previous_price)
+                if previous_price > 0:
+                    snapshot.daily_change_percent = ((snapshot.current_price - previous_price) / previous_price) * 100
+                else:
+                    snapshot.daily_change_percent = Decimal('0')
+            else:
+                snapshot.previous_close = Decimal('0')
+                snapshot.previous_value = Decimal('0')
+                snapshot.daily_change_value = Decimal('0')
+                snapshot.daily_change_percent = Decimal('0')
+        
     def _update_stock_info(self, snapshot: PositionSnapshot):
         """更新股票信息"""
         stock_info = StocksCache.query.filter_by(symbol=snapshot.symbol, currency=snapshot.currency).first()

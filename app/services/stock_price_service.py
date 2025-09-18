@@ -91,53 +91,47 @@ class StockPriceService:
             # 不传入期望货币进行验证，让Yahoo Finance返回实际货币信息
             price_data = self.get_stock_price(symbol)
 
-            
-            
             # 使用联合主键查询
             stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+            created_new = False
             if not stock:
                 # 如果stocks_cache中没有该股票，创建新记录，使用指定的currency
                 stock = StocksCache(symbol=symbol, currency=currency)
                 db.session.add(stock)
+                created_new = True
 
-            
-            # 更新时间戳，无论是否获取到价格
-            stock.price_updated_at = datetime.utcnow()
-            
             if price_data:
-                # 获取到价格数据，但不检查货币匹配
-                # 重要：保持stock.currency不变，使用传入的currency参数
                 yahoo_currency = price_data.get('currency', 'USD').upper()
                 if yahoo_currency != currency.upper():
-                    logger.warning(f"货币不匹配: {symbol} Yahoo Finance返回{yahoo_currency}，但保持数据库中的{currency}")
-                    stock.current_price = Decimal('0')
-                else:
-                    stock.current_price = Decimal(str(price_data['price']))
-                    # 重要：不更新stock.currency，保持原有货币设置
-                
-                    # 如果有新的名称或交易所信息，也更新
-                    if price_data.get('name') and not stock.name:
-                        stock.name = price_data['name']
-                    if price_data.get('exchange') and not stock.exchange:
-                        stock.exchange = price_data['exchange']
-                
+                    logger.warning(
+                        f"货币不匹配: {symbol} Yahoo Finance返回{yahoo_currency}，保留缓存中的{currency}"
+                    )
+                    db.session.rollback()
+                    return False
+
+                stock.current_price = Decimal(str(price_data['price']))
+                stock.price_updated_at = datetime.utcnow()
+
+                if price_data.get('name') and not stock.name:
+                    stock.name = price_data['name']
+                if price_data.get('exchange') and not stock.exchange:
+                    stock.exchange = price_data['exchange']
+
                 db.session.commit()
-                
                 return True
+
+            # 请求失败，恢复到之前的状态，避免将价格置零
+            db.session.rollback()
+            if created_new:
+                logger.warning(f"无法获取{symbol}({currency})价格，未能建立缓存记录")
             else:
-                # 无法从Yahoo Finance获取价格，设置为0并更新时间戳
-                stock.current_price = Decimal('0')
-                # currency已经在创建时设置，不需要再次设置
-                
-                db.session.commit()
-                logger.warning(f"无法获取{symbol}({currency})价格，设置为0并更新时间戳")
-                return True  # 仍返回True，因为我们成功处理了这种情况
-            
+                logger.warning(f"无法获取{symbol}({currency})价格，保持现有缓存")
+            return False
+
         except Exception as e:
             logger.error(f"更新{symbol}({currency})价格失败: {str(e)}")
             db.session.rollback()
-            
-        return False
+            return False
     
     def update_all_stock_prices(self) -> Dict:
         """更新所有股票价格"""
