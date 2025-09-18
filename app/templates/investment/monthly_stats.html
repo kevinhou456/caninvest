@@ -10,89 +10,6 @@
     </div>
 </div>
 
-<!-- Summary Cards -->
-<div class="row mb-4">
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-primary shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            {{ _('Months Covered') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            <span id="months-covered">-</span>
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-calendar fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-success shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            {{ _('Total Returns') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            $<span id="total-returns">-</span>
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-info shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            {{ _('Average Monthly Return') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            <span id="avg-monthly-return">-</span>%
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-percentage fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-warning shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            {{ _('Current Assets') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            $<span id="current-assets">-</span>
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-wallet fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Charts Row -->
 <div class="row mb-4">
     <!-- Total Assets Chart -->
@@ -128,18 +45,9 @@
 <div class="card shadow mb-4">
     <div class="card-header py-3 d-flex justify-content-between align-items-center bg-info">
         <h6 class="m-0 font-weight-bold text-white">{{ _('Monthly Data Analysis') }}</h6>
-        <div class="dropdown">
-            <button class="btn btn-primary dropdown-toggle btn-sm" type="button" id="exportDropdown" data-toggle="dropdown">
-                <i class="fas fa-download me-1"></i>{{ _('Export') }}
-            </button>
-            <div class="dropdown-menu">
-                <a class="dropdown-item" href="#" onclick="exportTableToCSV()">
-                    <i class="fas fa-file-csv me-2"></i>{{ _('CSV') }}
-                </a>
-                <a class="dropdown-item" href="#" onclick="exportTableToPDF()">
-                    <i class="fas fa-file-pdf me-2"></i>{{ _('PDF') }}
-                </a>
-            </div>
+        <div class="form-check form-switch text-white mb-0">
+            <input class="form-check-input" type="checkbox" id="toggleCurrencyBreakdown">
+            <label class="form-check-label" for="toggleCurrencyBreakdown">{{ _('显示货币明细') }}</label>
         </div>
     </div>
     <div class="card-body">
@@ -151,6 +59,7 @@
                         <th>{{ _('Total Assets') }}</th>
                         <th>{{ _('Realized Gain/Loss') }}</th>
                         <th>{{ _('Unrealized Gain/Loss') }}</th>
+                        <th>{{ _('Return Percent') }}</th>
                         <th>{{ _('Total Dividends') }}</th>
                         <th>{{ _('Total Interest') }}</th>
                         <th>{{ _('Transactions') }}</th>
@@ -167,6 +76,7 @@
                         <td id="total-assets-footer">-</td>
                         <td id="total-realized-footer">-</td>
                         <td id="total-unrealized-footer">-</td>
+                        <td id="total-return-percent-footer">--</td>
                         <td id="total-dividends-footer">-</td>
                         <td id="total-interest-footer">-</td>
                         <td id="total-transactions-footer">-</td>
@@ -193,6 +103,7 @@
 let monthlyData = [];
 let monthlyAssetsChart = null;
 let monthlyReturnsChart = null;
+let showCurrencyBreakdown = false;
 
 function showLoadingOverlay(message) {
     const msg = message || '正在加载数据...';
@@ -242,7 +153,6 @@ function loadMonthlyAnalysis() {
         .then(data => {
             if (data.analysis) {
                 monthlyData = data.analysis.monthly_data || [];
-                updateSummaryCards(data.analysis.summary || {});
                 updateMonthlyAssetsChart();
                 updateMonthlyReturnsChart();
                 updateMonthlyTable();
@@ -258,23 +168,6 @@ function loadMonthlyAnalysis() {
         .finally(() => {
             hideLoadingOverlay();
         });
-}
-
-function updateSummaryCards(summary) {
-    document.getElementById('months-covered').textContent = summary.months_covered || 0;
-    document.getElementById('total-returns').textContent = formatNumber(summary.total_months_gain || 0);
-    document.getElementById('avg-monthly-return').textContent = formatNumber(summary.average_monthly_return || 0, 2);
-
-    let currentAssets = 0;
-    if (monthlyData.length > 0) {
-        const latestMonth = monthlyData.reduce((latest, current) => {
-            const currentDate = new Date(current.year, current.month - 1);
-            const latestDate = new Date(latest.year, latest.month - 1);
-            return currentDate > latestDate ? current : latest;
-        });
-        currentAssets = latestMonth.total_assets || 0;
-    }
-    document.getElementById('current-assets').textContent = formatNumber(currentAssets);
 }
 
 function updateMonthlyAssetsChart() {
@@ -468,6 +361,15 @@ function updateMonthlyTable() {
     let totalAssets = 0, totalRealized = 0, totalUnrealized = 0;
     let totalDividends = 0, totalInterest = 0, totalTransactions = 0;
     let totalBuy = 0, totalSell = 0;
+    let totalAssetsCad = 0, totalAssetsUsd = 0;
+    let totalRealizedCad = 0, totalRealizedUsd = 0;
+    let totalUnrealizedCad = 0, totalUnrealizedUsd = 0;
+    let totalDividendsCad = 0, totalDividendsUsd = 0;
+    let totalInterestCad = 0, totalInterestUsd = 0;
+    let totalBuyCad = 0, totalBuyUsd = 0;
+    let totalSellCad = 0, totalSellUsd = 0;
+    let compoundReturnFactor = 1;
+    let hasReturnBase = false;
 
     const tableData = [...monthlyData].sort((a, b) => {
         if (a.year !== b.year) return b.year - a.year;
@@ -479,38 +381,43 @@ function updateMonthlyTable() {
 
         const realizedClass = item.monthly_realized_gain >= 0 ? 'text-success' : 'text-danger';
         const unrealizedClass = item.monthly_unrealized_gain >= 0 ? 'text-success' : 'text-danger';
+        const returnPercent = item.monthly_return_percent || 0;
+        const returnClass = returnPercent >= 0 ? 'text-success' : 'text-danger';
         const currencyBreakdown = item.currency_breakdown || {};
 
         row.innerHTML = `
             <td class="font-weight-bold">${item.year}-${String(item.month).padStart(2, '0')}</td>
             <td>
-                $${formatNumber(item.total_assets)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
+                $${formatNumber(item.total_assets, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
             </td>
             <td class="${realizedClass}">
                 $${formatNumber(item.monthly_realized_gain, 2, true)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
             </td>
             <td class="${unrealizedClass}">
                 $${formatNumber(item.monthly_unrealized_gain, 2, true)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.unrealized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.unrealized_gain_usd || 0, 2, true)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.unrealized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.unrealized_gain_usd || 0, 2, true)}</small>
+            </td>
+            <td class="${returnClass}">
+                ${formatNumber(returnPercent, 2, true)}%
             </td>
             <td class="text-info">
-                $${formatNumber(item.monthly_dividends)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
+                $${formatNumber(item.monthly_dividends, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
             </td>
             <td class="text-info">
-                $${formatNumber(item.monthly_interest)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.interest_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.interest_usd || 0, 2)}</small>
+                $${formatNumber(item.monthly_interest, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.interest_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.interest_usd || 0, 2)}</small>
             </td>
             <td class="text-center">${item.transaction_count}</td>
             <td class="text-success">
                 $${formatNumber(item.buy_amount, 2)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.buy_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.buy_usd || 0, 2)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.buy_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.buy_usd || 0, 2)}</small>
             </td>
             <td class="text-danger">
                 $${formatNumber(item.sell_amount, 2)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.sell_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.sell_usd || 0, 2)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.sell_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.sell_usd || 0, 2)}</small>
             </td>
         `;
 
@@ -526,16 +433,61 @@ function updateMonthlyTable() {
         totalTransactions += item.transaction_count;
         totalBuy += item.buy_amount;
         totalSell += item.sell_amount;
+        totalAssetsCad += Number(currencyBreakdown.total_assets_cad || 0);
+        totalAssetsUsd += Number(currencyBreakdown.total_assets_usd || 0);
+        totalRealizedCad += Number(currencyBreakdown.realized_gain_cad || 0);
+        totalRealizedUsd += Number(currencyBreakdown.realized_gain_usd || 0);
+        totalUnrealizedCad += Number(currencyBreakdown.unrealized_gain_cad || 0);
+        totalUnrealizedUsd += Number(currencyBreakdown.unrealized_gain_usd || 0);
+        totalDividendsCad += Number(currencyBreakdown.dividends_cad || 0);
+        totalDividendsUsd += Number(currencyBreakdown.dividends_usd || 0);
+        totalInterestCad += Number(currencyBreakdown.interest_cad || 0);
+        totalInterestUsd += Number(currencyBreakdown.interest_usd || 0);
+        totalBuyCad += Number(currencyBreakdown.buy_cad || 0);
+        totalBuyUsd += Number(currencyBreakdown.buy_usd || 0);
+        totalSellCad += Number(currencyBreakdown.sell_cad || 0);
+        totalSellUsd += Number(currencyBreakdown.sell_usd || 0);
+        if (item.total_assets) {
+            const periodReturn = (item.monthly_realized_gain + item.monthly_unrealized_gain) / item.total_assets;
+            compoundReturnFactor *= (1 + periodReturn);
+            hasReturnBase = true;
+        }
     });
 
-    document.getElementById('total-assets-footer').textContent = '$' + formatNumber(totalAssets);
-    document.getElementById('total-realized-footer').textContent = '$' + formatNumber(totalRealized, 2, true);
-    document.getElementById('total-unrealized-footer').textContent = '$' + formatNumber(totalUnrealized, 2, true);
-    document.getElementById('total-dividends-footer').textContent = '$' + formatNumber(totalDividends);
-    document.getElementById('total-interest-footer').textContent = '$' + formatNumber(totalInterest);
+    document.getElementById('total-assets-footer').innerHTML = '$' + formatNumber(totalAssets, 2) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalAssetsCad, 2)} | USD: $${formatNumber(totalAssetsUsd, 2)}</small>`;
+    document.getElementById('total-realized-footer').innerHTML = '$' + formatNumber(totalRealized, 2, true) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalRealizedCad, 2, true)} | USD: $${formatNumber(totalRealizedUsd, 2, true)}</small>`;
+    document.getElementById('total-unrealized-footer').innerHTML = '$' + formatNumber(totalUnrealized, 2, true) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalUnrealizedCad, 2, true)} | USD: $${formatNumber(totalUnrealizedUsd, 2, true)}</small>`;
+    if (hasReturnBase) {
+        const cumulativeReturn = (compoundReturnFactor - 1) * 100;
+        document.getElementById('total-return-percent-footer').textContent = formatNumber(cumulativeReturn, 2, true) + '%';
+    } else {
+        document.getElementById('total-return-percent-footer').textContent = '--';
+    }
+    document.getElementById('total-dividends-footer').innerHTML = '$' + formatNumber(totalDividends, 2) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalDividendsCad, 2)} | USD: $${formatNumber(totalDividendsUsd, 2)}</small>`;
+    document.getElementById('total-interest-footer').innerHTML = '$' + formatNumber(totalInterest, 2) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalInterestCad, 2)} | USD: $${formatNumber(totalInterestUsd, 2)}</small>`;
     document.getElementById('total-transactions-footer').textContent = totalTransactions;
-    document.getElementById('total-buy-footer').textContent = '$' + formatNumber(totalBuy, 2);
-    document.getElementById('total-sell-footer').textContent = '$' + formatNumber(totalSell, 2);
+    document.getElementById('total-buy-footer').innerHTML = '$' + formatNumber(totalBuy, 2) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalBuyCad, 2)} | USD: $${formatNumber(totalBuyUsd, 2)}</small>`;
+    document.getElementById('total-sell-footer').innerHTML = '$' + formatNumber(totalSell, 2) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalSellCad, 2)} | USD: $${formatNumber(totalSellUsd, 2)}</small>`;
+
+    updateCurrencyBreakdownVisibility();
+}
+
+function updateCurrencyBreakdownVisibility() {
+    const breakdownElements = document.querySelectorAll('.currency-breakdown');
+    breakdownElements.forEach(el => {
+        if (showCurrencyBreakdown) {
+            el.classList.remove('d-none');
+        } else {
+            el.classList.add('d-none');
+        }
+    });
 }
 
 function formatNumber(num, decimals = 0, showSign = false) {
@@ -560,35 +512,15 @@ function showError(message) {
     `;
 }
 
-function exportTableToCSV() {
-    const table = document.getElementById('monthlyAnalysisTable');
-    const rows = table.querySelectorAll('tr');
-    const csv = [];
-
-    for (let i = 0; i < rows.length; i++) {
-        const row = [], cols = rows[i].querySelectorAll('td, th');
-        for (let j = 0; j < cols.length; j++) {
-            row.push('"' + cols[j].innerText.replace(/"/g, '""') + '"');
-        }
-        csv.push(row.join(','));
-    }
-
-    const csvFile = new Blob([csv.join('\n')], { type: 'text/csv' });
-    const downloadLink = document.createElement('a');
-    downloadLink.download = 'monthly_analysis.csv';
-    downloadLink.href = window.URL.createObjectURL(csvFile);
-    downloadLink.style.display = 'none';
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    document.body.removeChild(downloadLink);
-}
-
-function exportTableToPDF() {
-    window.print();
-}
-
 document.addEventListener('DOMContentLoaded', function() {
     loadMonthlyAnalysis();
+    const toggle = document.getElementById('toggleCurrencyBreakdown');
+    if (toggle) {
+        toggle.addEventListener('change', function(event) {
+            showCurrencyBreakdown = event.target.checked;
+            updateCurrencyBreakdownVisibility();
+        });
+    }
 });
 </script>
 {% endblock %}

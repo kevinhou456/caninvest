@@ -10,89 +10,6 @@
     </div>
 </div>
 
-<!-- Summary Cards -->
-<div class="row mb-4">
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-primary shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            {{ _('Years Covered') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            <span id="years-covered">-</span>
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-calendar-alt fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-success shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            {{ _('Total Returns') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            $<span id="total-returns">-</span>
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-info shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            {{ _('Average Annual Return') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            <span id="avg-annual-return">-</span>%
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-percentage fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card border-left-warning shadow h-100 py-2">
-            <div class="card-body">
-                <div class="row no-gutters align-items-center">
-                    <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            {{ _('Current Assets') }}
-                        </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800">
-                            $<span id="current-assets">-</span>
-                        </div>
-                    </div>
-                    <div class="col-auto">
-                        <i class="fas fa-wallet fa-2x text-gray-300"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Charts Row -->
 <div class="row mb-4">
     <!-- Total Assets Chart -->
@@ -246,7 +163,6 @@ function loadAnnualAnalysis() {
             console.log('Annual analysis data:', data);
             if (data.analysis) {
                 annualData = data.analysis.annual_data || [];
-                updateSummaryCards(data.analysis.summary || {});
                 updateAnnualAssetsChart();
                 updateAnnualReturnsChart();
                 updateAnnualTable();
@@ -262,22 +178,6 @@ function loadAnnualAnalysis() {
         .finally(() => {
             hideLoadingOverlay();
         });
-}
-
-// Update summary cards
-function updateSummaryCards(summary) {
-    document.getElementById('years-covered').textContent = summary.years_covered || 0;
-    document.getElementById('total-returns').textContent = formatNumber(summary.total_years_gain || 0);
-    document.getElementById('avg-annual-return').textContent = formatNumber(summary.average_annual_return || 0, 2);
-    
-    // Calculate current assets from latest year (find latest year's assets)
-    let currentAssets = 0;
-    if (annualData.length > 0) {
-        const latestYear = Math.max(...annualData.map(item => item.year));
-        const latestData = annualData.find(item => item.year === latestYear);
-        currentAssets = latestData ? latestData.total_assets : 0;
-    }
-    document.getElementById('current-assets').textContent = formatNumber(currentAssets);
 }
 
 // Update annual assets chart

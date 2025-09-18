@@ -167,6 +167,9 @@ let stocksChart = null;
 let categoryChart = null;
 let currencyChart = null;
 let accountChart = null;
+const STOCKS_LABEL_SUFFIX = ' stocks';
+const BASE_CHART_COLORS = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'];
+const CASH_SLICE_COLOR = '#d6d8db';
 
 // Get current family ID and other parameters
 const familyId = {{ family.id if family else 'null' }};
@@ -221,24 +224,43 @@ function updateStocksChart() {
         return;
     }
     
-    // Sort by value and take top 10
-    const sortedStocks = distributionData.by_stocks
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 10);
-    
-    const labels = sortedStocks.map(stock => `${stock.symbol} ($${stock.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
-    const data = sortedStocks.map(stock => stock.value);
-    
+    const stocksData = distributionData.by_stocks.slice();
+    const cashIndex = stocksData.findIndex(item => item.is_cash || item.symbol === 'Cash');
+    let cashItem = null;
+    if (cashIndex >= 0) {
+        cashItem = stocksData.splice(cashIndex, 1)[0];
+    }
+
+    const sortedRegular = stocksData.sort((a, b) => b.value - a.value);
+    let displayedStocks;
+    if (cashItem) {
+        const limit = 9;
+        displayedStocks = sortedRegular.slice(0, limit);
+        displayedStocks.push(cashItem);
+    } else {
+        displayedStocks = sortedRegular.slice(0, 10);
+    }
+
+    const labels = displayedStocks.map(stock => {
+        const labelKey = stock.symbol || stock.name || 'Item';
+        return `${labelKey} ($${stock.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+    });
+    const data = displayedStocks.map(stock => stock.value);
+
+    const backgroundColors = displayedStocks.map((stock, idx) => {
+        if (stock.is_cash || stock.symbol === 'Cash' || stock.name === 'Cash') {
+            return CASH_SLICE_COLOR;
+        }
+        return BASE_CHART_COLORS[idx % BASE_CHART_COLORS.length];
+    });
+
     stocksChart = new Chart(ctx, {
         type: 'pie',
         data: {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: [
-                    '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b',
-                    '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
-                ],
+                backgroundColor: backgroundColors,
                 hoverBorderColor: "rgba(234, 236, 244, 1)",
                 borderWidth: 2
             }]
@@ -293,19 +315,30 @@ function updateCategoryChart() {
         return;
     }
     
-    const labels = distributionData.by_category.map(cat => `${cat.category} ($${cat.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
-    const data = distributionData.by_category.map(cat => cat.value);
-    
+    const categoriesData = distributionData.by_category.slice();
+    const cashCategoryIndex = categoriesData.findIndex(cat => cat.is_cash || cat.category === 'Cash');
+    let cashCategory = null;
+    if (cashCategoryIndex >= 0) {
+        cashCategory = categoriesData.splice(cashCategoryIndex, 1)[0];
+    }
+    const arrangedCategories = cashCategory ? categoriesData.concat([cashCategory]) : categoriesData;
+
+    const labels = arrangedCategories.map(cat => `${cat.category} ($${cat.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
+    const data = arrangedCategories.map(cat => cat.value);
+    const categoryBackgrounds = arrangedCategories.map((cat, idx) => {
+        if (cat.is_cash || cat.category === 'Cash') {
+            return CASH_SLICE_COLOR;
+        }
+        return BASE_CHART_COLORS[idx % BASE_CHART_COLORS.length];
+    });
+
     categoryChart = new Chart(ctx, {
         type: 'pie',
         data: {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: [
-                    '#1cc88a', '#4e73df', '#36b9cc', '#f6c23e', '#e74a3b',
-                    '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'
-                ],
+                backgroundColor: categoryBackgrounds,
                 hoverBorderColor: "rgba(234, 236, 244, 1)",
                 borderWidth: 2
             }]
@@ -321,8 +354,10 @@ function updateCategoryChart() {
                             const value = context.parsed;
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
                             const percentage = ((value / total) * 100).toFixed(1);
-                            const stocksCount = distributionData.by_category[context.dataIndex].stocks_count;
-                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%) - ' + stocksCount + ' stocks';
+                            const categoryEntry = arrangedCategories[context.dataIndex];
+                            const stocksCount = categoryEntry ? categoryEntry.stocks_count : null;
+                            const suffix = (typeof stocksCount === 'number') ? ' - ' + stocksCount + STOCKS_LABEL_SUFFIX : '';
+                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)' + suffix;
                         }
                     }
                 },

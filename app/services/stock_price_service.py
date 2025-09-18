@@ -5,12 +5,13 @@
 import logging
 import requests
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from decimal import Decimal
 from flask import current_app
 from app import db
 from app.models.stocks_cache import StocksCache
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -267,8 +268,16 @@ class StockPriceService:
                 return {}
             
             result = data['chart']['result'][0]
-            
-            
+            meta = result.get('meta', {})
+            timezone_name = meta.get('timezone') or meta.get('exchangeTimezoneName')
+            target_tz = timezone.utc
+            if timezone_name:
+                try:
+                    target_tz = ZoneInfo(timezone_name)
+                except Exception:
+                    logger.debug(f"未识别的时区 {timezone_name}，使用UTC")
+
+
             # 检查是否有价格数据
             if 'indicators' not in result or 'quote' not in result['indicators'] or not result['indicators']['quote']:
                 logger.warning(f"{symbol}历史数据中无价格信息 ({start_date} -> {end_date})")
@@ -286,11 +295,16 @@ class StockPriceService:
             history = {}
             for i, timestamp in enumerate(timestamps):
                 if i < len(prices) and prices[i] is not None:
-                    date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+                    try:
+                        utc_dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                        localized_dt = utc_dt.astimezone(target_tz)
+                        date_str = localized_dt.strftime('%Y-%m-%d')
+                    except Exception:
+                        date_str = datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d')
                     history[date_str] = {
                         'close': float(prices[i])
                     }
-            
+
             return history
             
         except requests.RequestException as e:

@@ -489,6 +489,13 @@ class PortfolioService:
                 except (InvalidOperation, TypeError):
                     ownership_map[membership.account_id] = Decimal('0')
 
+        asset_service = AssetValuationService()
+        usd_to_cad_rate = currency_service.get_current_rate('USD', 'CAD') or 1
+        try:
+            usd_to_cad_decimal = Decimal(str(usd_to_cad_rate))
+        except (InvalidOperation, TypeError):
+            usd_to_cad_decimal = Decimal('1')
+
         def get_proportion(account_id: int) -> Decimal:
             return ownership_map.get(account_id, Decimal('1')) if ownership_map else Decimal('1')
 
@@ -1073,12 +1080,16 @@ class PortfolioService:
         Returns:
             包含月度统计数据的字典
         """
-        if not months:
-            months = 12
-
         today = date.today()
         base_month_start = today.replace(day=1)
         monthly_data = []
+
+        asset_service = AssetValuationService()
+        usd_to_cad_rate = currency_service.get_current_rate('USD', 'CAD') or 1
+        try:
+            usd_to_cad_decimal = Decimal(str(usd_to_cad_rate))
+        except (InvalidOperation, TypeError):
+            usd_to_cad_decimal = Decimal('1')
 
         ownership_map: Dict[int, Decimal] = {}
         if member_id:
@@ -1089,10 +1100,33 @@ class PortfolioService:
                 except (InvalidOperation, TypeError):
                     ownership_map[membership.account_id] = Decimal('0')
 
-        for offset in range(months):
+        earliest_month_start: Optional[date] = None
+        months_span = 1
+        earliest_transaction = Transaction.query.filter(
+            Transaction.account_id.in_(account_ids)
+        ).order_by(Transaction.trade_date.asc()).first()
+        if earliest_transaction and earliest_transaction.trade_date:
+            earliest_trade_date = earliest_transaction.trade_date
+            earliest_month_start = earliest_trade_date.replace(day=1)
+            months_span = ((base_month_start.year - earliest_month_start.year) * 12 +
+                           (base_month_start.month - earliest_month_start.month) + 1)
+            if months_span < 1:
+                months_span = 1
+        else:
+            earliest_month_start = base_month_start
+            months_span = max(1, months or 1 if months else 1)
+
+        total_months = max(months or 0, months_span)
+        if total_months <= 0:
+            total_months = months_span
+
+        for offset in range(total_months):
             target_start = self._shift_month(base_month_start, offset)
             if not target_start:
                 continue
+
+            if earliest_month_start and target_start < earliest_month_start:
+                break
 
             _, days_in_month = monthrange(target_start.year, target_start.month)
             month_end = date(target_start.year, target_start.month, days_in_month)
@@ -1125,6 +1159,32 @@ class PortfolioService:
 
             def get_proportion(account_id: int) -> Decimal:
                 return ownership_map.get(account_id, Decimal('1')) if ownership_map else Decimal('1')
+
+            def calculate_realized_totals(portfolio_summary: Optional[Dict]) -> Dict[str, Decimal]:
+                totals = {
+                    'total': Decimal('0'),
+                    'cad': Decimal('0'),
+                    'usd': Decimal('0')
+                }
+                if not portfolio_summary:
+                    return totals
+
+                for collection in ('current_holdings', 'cleared_holdings'):
+                    for holding in (portfolio_summary.get(collection, []) or []):
+                        try:
+                            proportion_dec = get_proportion(holding.get('account_id'))
+                        except Exception:
+                            proportion_dec = Decimal('1')
+                        if proportion_dec <= 0:
+                            continue
+                        realized_value = Decimal(str(holding.get('realized_gain', 0) or 0)) * proportion_dec
+                        totals['total'] += realized_value
+                        currency = (holding.get('currency') or 'USD').upper()
+                        if currency == 'CAD':
+                            totals['cad'] += realized_value
+                        elif currency == 'USD':
+                            totals['usd'] += realized_value
+                return totals
 
             for tx in month_transactions:
                 tx_type = (tx.type or '').upper()
@@ -1165,30 +1225,40 @@ class PortfolioService:
                     elif tx_currency == 'USD':
                         interest_usd += interest_value
             
-            # 计算月度已实现收益
-            monthly_realized_gain = 0
-            monthly_realized_gain_cad = 0
-            monthly_realized_gain_usd = 0
-            for holding in month_portfolio.get('cleared_holdings', []):
-                realized_gain = holding.get('realized_gain', 0) * float(get_proportion(holding.get('account_id')))
-                monthly_realized_gain += realized_gain
-                if holding.get('currency') == 'CAD':
-                    monthly_realized_gain_cad += realized_gain
-                elif holding.get('currency') == 'USD':
-                    monthly_realized_gain_usd += realized_gain
+            current_realized_totals = calculate_realized_totals(month_portfolio)
+            previous_end = target_start - timedelta(days=1)
+            previous_realized_totals = {
+                'total': Decimal('0'),
+                'cad': Decimal('0'),
+                'usd': Decimal('0')
+            }
+            if previous_end.year >= 1:
+                previous_portfolio = self.get_portfolio_summary(
+                    account_ids,
+                    TimePeriod.CUSTOM,
+                    end_date=previous_end
+                )
+                previous_realized_totals = calculate_realized_totals(previous_portfolio)
+
+            monthly_realized_gain_dec = current_realized_totals['total'] - previous_realized_totals['total']
+            monthly_realized_gain_cad_dec = current_realized_totals['cad'] - previous_realized_totals['cad']
+            monthly_realized_gain_usd_dec = current_realized_totals['usd'] - previous_realized_totals['usd']
             
-            # 计算按货币分组的总资产和浮动收益
-            total_assets_cad = 0
-            total_assets_usd = 0
-            unrealized_gain_cad = 0
-            unrealized_gain_usd = 0
-            
+            # 计算按货币分组的总资产和浮动收益（含现金）
+            total_assets_cad = 0.0
+            total_assets_usd = 0.0
+            unrealized_gain_cad = 0.0
+            unrealized_gain_usd = 0.0
+            cash_total_cad_dec = Decimal('0')
+            cash_total_usd_dec = Decimal('0')
+            total_assets_stock_dec = Decimal('0')
+            total_assets_with_cash_dec = Decimal('0')
+
             current_holdings = month_portfolio.get('current_holdings', [])
-            total_assets = Decimal('0')
             for holding in current_holdings:
                 proportion_dec = get_proportion(holding.get('account_id'))
                 value_dec = Decimal(str(holding.get('current_value', 0))) * proportion_dec
-                total_assets += value_dec
+                total_assets_stock_dec += value_dec
                 if (holding.get('currency') or '').upper() == 'CAD':
                     total_assets_cad += float(value_dec)
                     unrealized_gain_cad += float(Decimal(str(holding.get('unrealized_gain', 0))) * proportion_dec)
@@ -1202,17 +1272,55 @@ class PortfolioService:
                 effective_end,
                 ownership_map
             )
+            monthly_realized_gain = float(monthly_realized_gain_dec)
+            monthly_realized_gain_cad = float(monthly_realized_gain_cad_dec)
+            monthly_realized_gain_usd = float(monthly_realized_gain_usd_dec)
             monthly_unrealized_gain = float(monthly_unrealized_gain_dec)
             unrealized_gain_cad = float(currency_gain_map.get('CAD', Decimal('0')))
             unrealized_gain_usd = float(currency_gain_map.get('USD', Decimal('0')))
+
+            # 统计现金余额（按月末快照）
+            for account_id in account_ids:
+                proportion_dec = get_proportion(account_id)
+                if proportion_dec <= 0:
+                    continue
+                try:
+                    snapshot = asset_service.get_asset_snapshot(account_id, effective_end)
+                except Exception:
+                    continue
+
+                cash_cad_dec = Decimal(str(snapshot.cash_balance_cad or 0)) * proportion_dec
+                cash_usd_dec = Decimal(str(snapshot.cash_balance_usd or 0)) * proportion_dec
+                cash_total_cad_dec += cash_cad_dec
+                cash_total_usd_dec += cash_usd_dec
+                total_assets_with_cash_dec += Decimal(str(snapshot.total_assets or 0)) * proportion_dec
+
+            total_assets_dec = total_assets_stock_dec + cash_total_cad_dec + (cash_total_usd_dec * usd_to_cad_decimal)
+
+            if total_assets_with_cash_dec > 0:
+                total_assets_dec = total_assets_with_cash_dec
+
+            if cash_total_cad_dec < 0:
+                cash_total_cad_dec = Decimal('0')
+            if cash_total_usd_dec < 0:
+                cash_total_usd_dec = Decimal('0')
+
+            total_assets_float = float(total_assets_dec)
+            total_assets_cad += float(cash_total_cad_dec)
+            total_assets_usd += float(cash_total_usd_dec * usd_to_cad_decimal)
+
+            monthly_return_percent = 0.0
+            if total_assets_float > 0:
+                monthly_return_percent = ((monthly_realized_gain + monthly_unrealized_gain) / total_assets_float) * 100
             
             monthly_data.append({
                 'year': target_start.year,
                 'month': target_start.month,
                 'month_name': target_start.strftime('%Y-%m'),
-                'total_assets': float(total_assets),
+                'total_assets': total_assets_float,
                 'monthly_realized_gain': monthly_realized_gain,
                 'monthly_unrealized_gain': monthly_unrealized_gain,
+                'monthly_return_percent': monthly_return_percent,
                 'monthly_dividends': dividends,
                 'monthly_interest': interest,
                 'transaction_count': transaction_count,
@@ -1225,6 +1333,8 @@ class PortfolioService:
                     'realized_gain_usd': monthly_realized_gain_usd,
                     'unrealized_gain_cad': unrealized_gain_cad,
                     'unrealized_gain_usd': unrealized_gain_usd,
+                    'cash_cad': float(cash_total_cad_dec),
+                    'cash_usd': float(cash_total_usd_dec),
                     'buy_cad': buy_cad,
                     'buy_usd': buy_usd,
                     'sell_cad': sell_cad,
@@ -1648,11 +1758,13 @@ class PortfolioService:
         try:
             # 获取当前时间点的投资组合汇总
             current_date = datetime.now().date()
-            summary = self.get_portfolio_summary(account_ids, TimePeriod.CUSTOM, end_date=current_date)
+            portfolio_summary = self.get_portfolio_summary(account_ids, TimePeriod.CUSTOM, end_date=current_date)
             
             # 使用正确的数据结构：current_holdings是直接的持仓列表
-            current_holdings = summary.get('current_holdings', [])
+            current_holdings = portfolio_summary.get('current_holdings', [])
             
+            asset_service = AssetValuationService()
+
             # 1. 按股票分布
             by_stocks = []
             stock_aggregation = {}
@@ -1673,7 +1785,8 @@ class PortfolioService:
                         }
             
             by_stocks = list(stock_aggregation.values())
-            
+            unique_stock_count = len(by_stocks)
+
             # 2. 按类别分布
             by_category = defaultdict(lambda: {'value': 0, 'stocks': set()})
             
@@ -1697,14 +1810,18 @@ class PortfolioService:
                 }
                 for category, data in by_category.items()
             ]
-            
+
             # 3. 按货币分布 - 通过汇率计算
-            total_value = float(summary['summary']['total_current_value'])
-            
+            total_value_base = portfolio_summary.get('summary', {}).get('total_current_value', 0)
+            try:
+                total_value_decimal = Decimal(str(total_value_base or 0))
+            except (InvalidOperation, TypeError):
+                total_value_decimal = Decimal('0')
+
             # 计算各币种占比
             cad_value = 0
             usd_value = 0
-            
+
             for holding in current_holdings:
                 current_value = float(holding['current_value'])
                 if current_value > 0:
@@ -1716,22 +1833,30 @@ class PortfolioService:
                         cad_value += current_value
                     else:  # USD
                         usd_value += current_value
-            
-            by_currency = []
-            if cad_value > 0:
-                by_currency.append({
-                    'currency': 'CAD',
-                    'value': cad_value
-                })
-            if usd_value > 0:
-                by_currency.append({
-                    'currency': 'USD', 
-                    'value': usd_value
-                })
-            
+
             # 4. 按账户分布
             by_account = defaultdict(lambda: {'value': 0, 'holdings_count': 0})
             account_info = {}
+
+            def ensure_account_info(account_identifier: int):
+                if account_identifier in account_info:
+                    return
+                account = Account.query.get(account_identifier)
+                members = []
+                if account and account.account_members:
+                    for account_member in account.account_members:
+                        member_name = account_member.member.name if account_member.member else 'Unknown'
+                        ownership = float(account_member.ownership_percentage or 0)
+                        members.append({
+                            'member_id': account_member.member_id,
+                            'name': member_name,
+                            'ownership_percentage': ownership
+                        })
+                account_info[account_identifier] = {
+                    'name': account.name if account else f'Account {account_identifier}',
+                    'is_joint': account.is_joint if account else False,
+                    'members': members
+                }
 
             for holding in current_holdings:
                 account_id = holding['account_id']
@@ -1742,24 +1867,28 @@ class PortfolioService:
                     by_account[account_id]['holdings_count'] += 1
                     
                     # 获取账户信息
-                    if account_id not in account_info:
-                        from app.models import Account
-                        account = Account.query.get(account_id)
-                        members = []
-                        if account and account.account_members:
-                            for account_member in account.account_members:
-                                member_name = account_member.member.name if account_member.member else 'Unknown'
-                                ownership = float(account_member.ownership_percentage or 0)
-                                members.append({
-                                    'member_id': account_member.member_id,
-                                    'name': member_name,
-                                    'ownership_percentage': ownership
-                                })
-                        account_info[account_id] = {
-                            'name': account.name if account else f'Account {account_id}',
-                            'is_joint': account.is_joint if account else False,
-                            'members': members
-                        }
+                    ensure_account_info(account_id)
+
+            cash_total_cad = Decimal('0')
+            cash_cad_total = Decimal('0')
+            cash_usd_total = Decimal('0')
+
+            for account_id in account_ids:
+                try:
+                    snapshot = asset_service.get_asset_snapshot(account_id, current_date)
+                except Exception as exc:
+                    logger.warning(f"无法获取账户{account_id}的现金余额: {exc}")
+                    continue
+
+                ensure_account_info(account_id)
+
+                cash_total_cad += snapshot.cash_balance_total_cad
+                cash_cad_total += snapshot.cash_balance_cad
+                cash_usd_total += snapshot.cash_balance_usd
+
+                cash_value_cad = float(snapshot.cash_balance_total_cad)
+                if cash_value_cad > 0:
+                    by_account[account_id]['value'] += cash_value_cad
 
             by_account_list = [
                 {
@@ -1781,11 +1910,41 @@ class PortfolioService:
                 for account_id, data in by_account.items()
                 if data['value'] > 0
             ]
-            
+
+            cash_total_cad_float = float(cash_total_cad)
+            if cash_total_cad_float > 0:
+                by_stocks.append({
+                    'symbol': 'Cash',
+                    'name': 'Cash',
+                    'value': cash_total_cad_float,
+                    'is_cash': True
+                })
+                by_category_list.append({
+                    'category': 'Cash',
+                    'value': cash_total_cad_float,
+                    'stocks_count': None,
+                    'is_cash': True
+                })
+
+            if cash_cad_total > 0:
+                cad_value += float(cash_cad_total)
+            if cash_usd_total > 0:
+                usd_value += float(cash_usd_total)
+
+            # 重新构建币种列表，确保现金也被计入
+            by_currency = []
+            if cad_value > 0:
+                by_currency.append({'currency': 'CAD', 'value': cad_value})
+            if usd_value > 0:
+                by_currency.append({'currency': 'USD', 'value': usd_value})
+
+            total_value_decimal += cash_total_cad
+            total_value = float(total_value_decimal)
+
             return {
                 'summary': {
                     'total_value_cad': total_value,  # 所有值已经转换为CAD
-                    'unique_stocks': len(by_stocks),
+                    'unique_stocks': unique_stock_count,
                     'categories_count': len(by_category_list),
                     'accounts_count': len(by_account_list)
                 },
