@@ -162,6 +162,7 @@ class PortfolioService:
     
     def __init__(self):
         self.history_cache_service = StockHistoryCacheService()
+        self._benchmark_cache: Dict[Tuple[str, date, date], List[float]] = {}
     
     def get_time_period_dates(self, period: TimePeriod, 
                             start_date: Optional[date] = None,
@@ -1346,9 +1347,227 @@ class PortfolioService:
             }
         }
     
-    def get_recent_30_days_analysis(self, account_ids: List[int]) -> Dict:
-        """获取最近30天分析数据 - 调用日度分析"""
-        return self.get_daily_analysis(account_ids, 30)
+    def get_performance_comparison(self, account_ids: List[int],
+                                   period: str = '1m',
+                                   member_id: Optional[int] = None,
+                                   return_type: str = 'mwr') -> Dict:
+        """获取收益对比数据，支持多种时间范围"""
+        if not account_ids:
+            return {
+                'performance_series': [],
+                'summary': {
+                    'start_date': date.today().isoformat(),
+                    'end_date': date.today().isoformat(),
+                    'range': period,
+                    'portfolio_return_percent': 0.0,
+                    'portfolio_total_return': 0.0,
+                    'portfolio_final_value': 0.0,
+                    'portfolio_base_value': 0.0,
+                    'sp500_return_percent': 0.0,
+                    'nasdaq_return_percent': 0.0
+                }
+            }
+
+        period = (period or '1m').lower()
+
+        def resolve_start_date(label: str, today: date) -> date:
+            if label == '1m':
+                return today - timedelta(days=29)
+            if label == '3m':
+                return today - timedelta(days=89)
+            if label == '6m':
+                return today - timedelta(days=179)
+            if label == 'ytd':
+                return date(today.year, 1, 1)
+            if label == '1y':
+                return today - timedelta(days=364)
+            if label == '2y':
+                return today - timedelta(days=729)
+            if label == '5y':
+                return today - timedelta(days=1824)
+            if label == 'all':
+                min_trade = db.session.query(db.func.min(Transaction.trade_date))\
+                    .filter(Transaction.account_id.in_(account_ids)).scalar()
+                if min_trade:
+                    return min_trade
+                return today - timedelta(days=29)
+            # default fallback
+            return today - timedelta(days=29)
+
+        today = date.today()
+        start_date = resolve_start_date(period, today)
+        if start_date > today:
+            start_date = today
+
+        ownership_map: Dict[int, Decimal] = {}
+        if member_id:
+            memberships = AccountMember.query.filter_by(member_id=member_id).all()
+            for membership in memberships:
+                try:
+                    ownership_map[membership.account_id] = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+                except (InvalidOperation, TypeError):
+                    ownership_map[membership.account_id] = Decimal('0')
+
+        def get_proportion(account_id: int) -> Decimal:
+            return ownership_map.get(account_id, Decimal('1')) if ownership_map else Decimal('1')
+
+        days_count = (today - start_date).days + 1
+        if days_count <= 0:
+            days_count = 1
+        date_range = [start_date + timedelta(days=i) for i in range(days_count)]
+
+        use_twr = (return_type or 'mwr').lower() == 'twr'
+
+        asset_service = AssetValuationService()
+
+        portfolio_values: List[Tuple[date, Decimal]] = []
+        daily_flows: List[Tuple[date, Decimal]] = []  # date, net flow
+
+        for current_date in date_range:
+            total_value = Decimal('0')
+            for account_id in account_ids:
+                proportion = get_proportion(account_id)
+                if proportion <= 0:
+                    continue
+                snapshot = asset_service.get_asset_snapshot(account_id, current_date)
+                total_value += Decimal(str(snapshot.total_assets)) * proportion
+            portfolio_values.append((current_date, total_value))
+
+            day_flows = Decimal('0')
+            for tx in Transaction.query.filter(
+                Transaction.account_id.in_(account_ids),
+                Transaction.trade_date == current_date
+            ).all():
+                tx_type = (tx.type or '').upper()
+                if tx_type in ('DEPOSIT', 'WITHDRAWAL'):
+                    proportion = get_proportion(tx.account_id)
+                    if proportion <= 0:
+                        continue
+                    amount = Decimal(str(tx.amount or 0)) * proportion
+                    if tx_type == 'WITHDRAWAL':
+                        amount *= Decimal('-1')
+                    day_flows += amount
+            daily_flows.append((current_date, day_flows))
+
+        portfolio_returns: List[float] = []
+        actual_base_value = next((value for _, value in portfolio_values if value > 0), Decimal('0'))
+
+        if actual_base_value <= 0:
+            portfolio_returns = [0.0 for _ in portfolio_values]
+            base_value = Decimal('1')
+        else:
+            base_value = actual_base_value
+            if use_twr:
+                previous_value = None
+                for i, (current_date, value) in enumerate(portfolio_values):
+                    flow = daily_flows[i][1]
+                    if previous_value is None or previous_value <= 0:
+                        portfolio_returns.append(0.0)
+                    else:
+                        adjusted_prev = previous_value - flow
+                        if adjusted_prev <= 0:
+                            portfolio_returns.append(0.0)
+                        else:
+                            period_return = (value - flow - adjusted_prev) / adjusted_prev
+                            cumulative = (Decimal('1') + Decimal(str(portfolio_returns[-1] / 100))) if portfolio_returns else Decimal('1')
+                            cumulative *= (Decimal('1') + period_return)
+                            portfolio_returns.append(float((cumulative - Decimal('1')) * Decimal('100')))
+                    previous_value = value
+            else:
+                for _, value in portfolio_values:
+                    portfolio_returns.append(float(((value / base_value) - Decimal('1')) * Decimal('100')))
+
+        def build_index_returns(symbol: str) -> List[float]:
+            cache_key = (symbol.upper(), start_date, today)
+            if cache_key in self._benchmark_cache:
+                cached_series = self._benchmark_cache[cache_key]
+                if len(cached_series) == len(date_range):
+                    return cached_series
+
+            history = self.history_cache_service.get_cached_history(
+                symbol,
+                start_date - timedelta(days=14),
+                today,
+                'USD'
+            )
+            price_map: Dict[date, Decimal] = {}
+            for record in history:
+                record_date_str = record.get('date')
+                if not record_date_str:
+                    continue
+                try:
+                    record_date = datetime.fromisoformat(record_date_str).date()
+                except ValueError:
+                    continue
+                close_value = record.get('close')
+                if close_value in (None, ''):
+                    continue
+                try:
+                    price_map[record_date] = Decimal(str(close_value))
+                except (InvalidOperation, TypeError):
+                    continue
+
+            returns: List[float] = []
+            last_close: Optional[Decimal] = None
+            base_close: Optional[Decimal] = None
+            for current_date in date_range:
+                if current_date in price_map:
+                    last_close = price_map[current_date]
+                    if base_close is None and last_close > 0:
+                        base_close = last_close
+                if base_close is None or base_close <= 0 or last_close is None:
+                    returns.append(0.0)
+                else:
+                    returns.append(float(((last_close / base_close) - Decimal('1')) * Decimal('100')))
+            self._benchmark_cache[cache_key] = returns
+            if len(self._benchmark_cache) > 32:
+                try:
+                    oldest_key = next(iter(self._benchmark_cache))
+                    if oldest_key != cache_key:
+                        self._benchmark_cache.pop(oldest_key, None)
+                except StopIteration:
+                    pass
+            return returns
+
+        sp500_returns = build_index_returns('^GSPC')
+        nasdaq_returns = build_index_returns('^IXIC')
+
+        performance_series = []
+        for idx, current_date in enumerate(date_range):
+            performance_series.append({
+                'date': current_date.isoformat(),
+                'portfolio': portfolio_returns[idx] if idx < len(portfolio_returns) else 0.0,
+                'sp500': sp500_returns[idx] if idx < len(sp500_returns) else 0.0,
+                'nasdaq': nasdaq_returns[idx] if idx < len(nasdaq_returns) else 0.0
+            })
+
+        final_portfolio_return = portfolio_returns[-1] if portfolio_returns else 0.0
+        final_sp500_return = sp500_returns[-1] if sp500_returns else 0.0
+        final_nasdaq_return = nasdaq_returns[-1] if nasdaq_returns else 0.0
+        final_value = float(portfolio_values[-1][1]) if portfolio_values else 0.0
+        base_value_float = float(actual_base_value) if actual_base_value > 0 else 0.0
+        total_return_value = float(portfolio_values[-1][1] - actual_base_value) if (portfolio_values and actual_base_value > 0) else 0.0
+
+        return {
+            'performance_series': performance_series,
+            'summary': {
+                'start_date': start_date.isoformat(),
+                'end_date': today.isoformat(),
+                'range': period,
+                'return_type': 'twr' if use_twr else 'mwr',
+                'portfolio_return_percent': final_portfolio_return,
+                'portfolio_total_return': total_return_value,
+                'portfolio_final_value': final_value,
+                'portfolio_base_value': base_value_float,
+                'sp500_return_percent': final_sp500_return,
+                'nasdaq_return_percent': final_nasdaq_return
+            }
+        }
+
+    def get_recent_30_days_analysis(self, account_ids: List[int],
+                                    member_id: Optional[int] = None) -> Dict:
+        """保持向后兼容，默认返回最近1个月对比数据"""
+        return self.get_performance_comparison(account_ids, '1m', member_id=member_id)
     
     
     def _prepare_annual_chart_data(self, annual_data: List[Dict]) -> Dict:

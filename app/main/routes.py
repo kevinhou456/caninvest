@@ -248,6 +248,9 @@ def overview():
                     'cad_only': metrics_data['total_return']['cad_only'], 
                     'usd_only': metrics_data['total_return']['usd_only']
                 })
+                total_assets_cad = metrics_data['total_assets']['cad'] or 0
+                self.total_return_rate = (metrics_data['total_return']['cad'] / total_assets_cad * 100
+                                          if total_assets_cad else 0)
                 self.realized_gain = type('obj', (object,), {
                     'cad': metrics_data['realized_gain']['cad'], 
                     'cad_only': metrics_data['realized_gain']['cad_only'], 
@@ -286,7 +289,8 @@ def overview():
                     'cash_balance_total': self.cash_balance_total,
                     'total_return': {'cad': self.total_return.cad, 'cad_only': self.total_return.cad_only, 'usd_only': self.total_return.usd_only},
                     'realized_gain': {'cad': self.realized_gain.cad, 'cad_only': self.realized_gain.cad_only, 'usd_only': self.realized_gain.usd_only},
-                    'unrealized_gain': {'cad': self.unrealized_gain.cad, 'cad_only': self.unrealized_gain.cad_only, 'usd_only': self.unrealized_gain.usd_only}
+                    'unrealized_gain': {'cad': self.unrealized_gain.cad, 'cad_only': self.unrealized_gain.cad_only, 'usd_only': self.unrealized_gain.usd_only},
+                    'total_return_rate': self.total_return_rate
                 }
         
         metrics = ComprehensiveMetrics(comprehensive_metrics)
@@ -1678,9 +1682,9 @@ def daily_stats():
                          family=family)
 
 
-@bp.route('/recent-30-days-stats')
-def recent_30_days_stats():
-    """最近30天统计视图"""
+@bp.route('/comparison')
+def performance_comparison():
+    """收益对比视图"""
     from flask_babel import _
     family = Family.query.first()
     if not family:
@@ -1689,8 +1693,8 @@ def recent_30_days_stats():
         db.session.add(family)
         db.session.commit()
     
-    return render_template('investment/recent_30_days_stats.html',
-                         title=_('Recent 30 Days Statistics'),
+    return render_template('investment/performance_comparison.html',
+                         title=_('Performance Comparison'),
                          family=family)
 
 

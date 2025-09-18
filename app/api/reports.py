@@ -735,9 +735,9 @@ def get_family_daily_analysis(family_id):
             'error': f'Failed to generate daily analysis: {str(e)}'
         }), 500
 
-@bp.route('/families/<int:family_id>/reports/recent-30-days-analysis', methods=['GET'])
-def get_family_recent_30_days_analysis(family_id):
-    """获取家庭最近30天分析报告"""
+@bp.route('/families/<int:family_id>/reports/comparison', methods=['GET'])
+def get_family_performance_comparison(family_id):
+    """获取家庭收益对比分析"""
     family = Family.query.get_or_404(family_id)
     
     # 获取参数
@@ -762,16 +762,14 @@ def get_family_recent_30_days_analysis(family_id):
     else:
         # 家庭的所有账户
         account_ids = [acc.id for acc in family.accounts]
-    
+    range_param = request.args.get('range', '1m')
+
     try:
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
-        analysis_data = portfolio_service.get_recent_30_days_analysis(account_ids)
-        
-        # 如果是成员过滤，应用所有权比例计算
-        if member_id:
-            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
-        
+        analysis_data = portfolio_service.get_performance_comparison(account_ids, range_param, member_id=member_id,
+                                                                     return_type=request.args.get('return_type', 'mwr'))
+
         return jsonify({
             'family': family.to_dict(),
             'filter_info': {

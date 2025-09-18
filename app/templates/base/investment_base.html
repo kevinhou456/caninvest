@@ -419,13 +419,13 @@
                    href="{{ url_for('main.monthly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar me-2"></i>{{ _('Monthly Stats') }}
                 </a>
-                <a class="nav-link {{ 'active' if current_view == 'recent_30_days' }}" 
-                   href="{{ url_for('main.recent_30_days_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
-                    <i class="fas fa-clock me-2"></i>{{ _('Recent 30 Days Stats') }}
-                </a>
                 <a class="nav-link {{ 'active' if current_view == 'daily' }}" 
                    href="{{ url_for('main.daily_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-calendar-day me-2"></i>{{ _('Daily Stats') }}
+                </a>
+                <a class="nav-link {{ 'active' if current_view == 'comparison' }}" 
+                   href="{{ url_for('main.performance_comparison', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                    <i class="fas fa-clock me-2"></i>{{ _('Performance Comparison') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'holdings' }}" 
                    href="{{ url_for('main.holdings_analysis', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">

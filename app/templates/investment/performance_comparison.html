@@ -1,0 +1,339 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+            <div>
+                <h2 class="h3 mb-0 text-gray-800">
+                    <i class="fas fa-chart-line me-2"></i>{{ _('Performance Comparison') }}
+                </h2>
+                <p class="text-muted mb-0">{{ _('Contrast portfolio returns with S&P 500 and Nasdaq over different horizons') }}</p>
+            </div>
+            <div class="btn-toolbar" role="toolbar" aria-label="Performance selectors">
+                <div class="btn-group me-2" role="group" aria-label="Performance range selector" id="range-selector">
+                    <button type="button" class="btn btn-outline-primary btn-sm active" data-range="1m">{{ _('1M') }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-range="3m">{{ _('3M') }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-range="6m">{{ _('6M') }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-range="ytd">{{ _('YTD') }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-range="1y">{{ _('1Y') }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-range="2y">{{ _('2Y') }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-range="5y">{{ _('5Y') }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-range="all">{{ _('All') }}</button>
+                </div>
+                <div class="btn-group" role="group" aria-label="Return type selector" id="return-type-selector">
+                    <button type="button" class="btn btn-outline-secondary btn-sm active" data-return-type="mwr">{{ _('MWR') }}</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-return-type="twr">{{ _('TWR') }}</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-header py-3 bg-gradient-primary text-white">
+        <h6 class="m-0 font-weight-bold" id="chart-title">{{ _('Portfolio vs Index Performance (1M)') }}</h6>
+    </div>
+    <div class="card-body">
+        <div class="chart-area" style="height: 420px;">
+            <canvas id="performanceComparisonChart"></canvas>
+        </div>
+        <div class="row mt-4 g-3" id="return-summary">
+            <div class="col-md-4">
+                <div class="p-3 border rounded shadow-sm h-100">
+                    <h6 class="text-muted text-uppercase small mb-1">{{ _('Portfolio Return') }}</h6>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <span id="portfolio-return-percent" class="fs-4 fw-semibold text-primary">0.00%</span>
+                        <small class="text-muted">{{ _('Change') }}: <span id="portfolio-return-amount">$0.00</span></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="p-3 border rounded shadow-sm h-100">
+                    <h6 class="text-muted text-uppercase small mb-1">{{ _('S&P 500 (SPX)') }}</h6>
+                    <span id="sp500-return-percent" class="fs-4 fw-semibold text-success">0.00%</span>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="p-3 border rounded shadow-sm h-100">
+                    <h6 class="text-muted text-uppercase small mb-1">{{ _('Nasdaq Composite (IXIC)') }}</h6>
+                    <span id="nasdaq-return-percent" class="fs-4 fw-semibold text-danger">0.00%</span>
+                </div>
+            </div>
+        </div>
+        <p class="mt-3 text-muted small">
+            {{ _('All lines are normalized to 0%% on the first day to highlight relative performance. Index values are based on closing prices in USD; portfolio values use daily snapshots.') }}
+        </p>
+    </div>
+</div>
+
+<div id="loading-spinner" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status">
+        <span class="sr-only">{{ _('Loading...') }}</span>
+    </div>
+    <p class="mt-2 text-muted">{{ _('Loading performance comparison data...') }}</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let performanceSeries = [];
+let performanceChart = null;
+let currentRange = '1m';
+let currentReturnType = 'mwr';
+
+function showLoadingOverlay(message) {
+    const msg = message || '{{ _('Loading data...') }}';
+    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
+        GlobalLoading.manualShow(msg);
+    } else if (window.GlobalLoading && typeof GlobalLoading.show === 'function') {
+        GlobalLoading.show(msg);
+    }
+}
+
+function hideLoadingOverlay() {
+    if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
+        GlobalLoading.manualHide(300);
+    } else if (window.GlobalLoading && typeof GlobalLoading.hide === 'function') {
+        GlobalLoading.hide(300);
+    }
+}
+
+function formatPercent(value) {
+    const number = parseFloat(value) || 0;
+    const sign = number > 0 ? '+' : '';
+    return sign + number.toFixed(2) + '%';
+}
+
+function formatCurrency(value) {
+    const number = parseFloat(value) || 0;
+    const sign = number > 0 ? '+' : '';
+    return sign + '$' + Math.abs(number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function updateRangeSelector(range) {
+    const buttons = document.querySelectorAll('#range-selector button');
+    buttons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.range === range);
+    });
+}
+
+function updateChartTitle(range) {
+    const rangeLabels = {
+        '1m': '{{ _('Portfolio vs Index Performance (1M)') }}',
+        '3m': '{{ _('Portfolio vs Index Performance (3M)') }}',
+        '6m': '{{ _('Portfolio vs Index Performance (6M)') }}',
+        'ytd': '{{ _('Portfolio vs Index Performance (YTD)') }}',
+        '1y': '{{ _('Portfolio vs Index Performance (1Y)') }}',
+        '2y': '{{ _('Portfolio vs Index Performance (2Y)') }}',
+        '5y': '{{ _('Portfolio vs Index Performance (5Y)') }}',
+        'all': '{{ _('Portfolio vs Index Performance (All)') }}'
+    };
+                const returnTypeLabel = currentReturnType === 'twr' ? ' ({{ _('TWR') }})' : ' ({{ _('MWR') }})';
+    document.getElementById('chart-title').textContent = (rangeLabels[range] || rangeLabels['1m']) + returnTypeLabel;
+}
+
+function loadPerformanceComparison(range) {
+    currentRange = range || currentRange || '1m';
+    currentReturnType = currentReturnType || 'mwr';
+    updateRangeSelector(currentRange);
+    updateChartTitle(currentRange);
+
+    const familyId = {{ current_family.id if current_family else 1 }};
+    const memberId = {{ current_member_id if current_member_id else 'null' }};
+    const accountId = {{ current_account_id if current_account_id else 'null' }};
+
+    let apiUrl = `/api/v1/families/${familyId}/reports/comparison`;
+    const params = new URLSearchParams();
+    params.append('range', currentRange);
+    params.append('return_type', currentReturnType);
+    if (memberId) params.append('member_id', memberId);
+    if (accountId) params.append('account_id', accountId);
+    apiUrl += `?${params.toString()}`;
+
+    showLoadingOverlay('正在加载数据...');
+
+    fetch(apiUrl)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            const analysis = data.analysis || {};
+            performanceSeries = analysis.performance_series || [];
+            updateSummaryCards(analysis.summary || {});
+            updatePerformanceChart();
+            document.getElementById('loading-spinner').style.display = 'none';
+        })
+        .catch(error => {
+            console.error('Error loading performance comparison:', error);
+            showError('{{ _('Failed to load performance comparison data') }}: ' + error.message);
+        })
+        .finally(() => {
+            hideLoadingOverlay();
+        });
+}
+
+function updateSummaryCards(summary) {
+    const portfolioPercentEl = document.getElementById('portfolio-return-percent');
+    const portfolioAmountEl = document.getElementById('portfolio-return-amount');
+    const sp500PercentEl = document.getElementById('sp500-return-percent');
+    const nasdaqPercentEl = document.getElementById('nasdaq-return-percent');
+
+    const portfolioPct = summary.portfolio_return_percent || 0;
+    const portfolioAmt = summary.portfolio_total_return || 0;
+    const sp500Pct = summary.sp500_return_percent || 0;
+    const nasdaqPct = summary.nasdaq_return_percent || 0;
+
+    portfolioPercentEl.textContent = formatPercent(portfolioPct);
+    portfolioPercentEl.classList.toggle('text-success', portfolioPct >= 0);
+    portfolioPercentEl.classList.toggle('text-danger', portfolioPct < 0);
+    portfolioAmountEl.textContent = formatCurrency(portfolioAmt);
+
+    sp500PercentEl.textContent = formatPercent(sp500Pct);
+    sp500PercentEl.classList.toggle('text-success', sp500Pct >= 0);
+    sp500PercentEl.classList.toggle('text-danger', sp500Pct < 0);
+
+    nasdaqPercentEl.textContent = formatPercent(nasdaqPct);
+    nasdaqPercentEl.classList.toggle('text-success', nasdaqPct >= 0);
+    nasdaqPercentEl.classList.toggle('text-danger', nasdaqPct < 0);
+}
+
+function updatePerformanceChart() {
+    const ctx = document.getElementById('performanceComparisonChart').getContext('2d');
+
+    if (performanceChart) {
+        performanceChart.destroy();
+    }
+
+    if (!performanceSeries.length) {
+        showError('{{ _('No performance data available for the selected period.') }}');
+        return;
+    }
+
+    const labels = performanceSeries.map(item => item.date.slice(5));
+    const portfolioData = performanceSeries.map(item => item.portfolio || 0);
+    const sp500Data = performanceSeries.map(item => item.sp500 || 0);
+    const nasdaqData = performanceSeries.map(item => item.nasdaq || 0);
+
+    performanceChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '{{ _('Portfolio') }}',
+                    data: portfolioData,
+                    borderColor: 'rgba(78, 115, 223, 1)',
+                    backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 0
+                },
+                {
+                    label: '{{ _('S&P 500 (SPX)') }}',
+                    data: sp500Data,
+                    borderColor: 'rgba(28, 200, 138, 1)',
+                    backgroundColor: 'rgba(28, 200, 138, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 0
+                },
+                {
+                    label: '{{ _('Nasdaq (IXIC)') }}',
+                    data: nasdaqData,
+                    borderColor: 'rgba(231, 74, 59, 1)',
+                    backgroundColor: 'rgba(231, 74, 59, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 0
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: 'top'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed.y || 0;
+                            const sign = value > 0 ? '+' : '';
+                            return `${context.dataset.label}: ${sign}${value.toFixed(2)}%`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        maxTicksLimit: 12
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: '{{ _('Return Percent') }}'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            const sign = value > 0 ? '+' : '';
+                            return sign + value.toFixed(0) + '%';
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function showError(message) {
+    const spinner = document.getElementById('loading-spinner');
+    if (spinner) {
+        spinner.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>${message}
+            </div>
+        `;
+    }
+}
+
+document.getElementById('range-selector').addEventListener('click', function(event) {
+    const range = event.target.dataset.range;
+    if (!range || range === currentRange) {
+        return;
+    }
+    loadPerformanceComparison(range);
+});
+
+document.getElementById('return-type-selector').addEventListener('click', function(event) {
+    const returnType = event.target.dataset.returnType;
+    if (!returnType || returnType === currentReturnType) {
+        return;
+    }
+    const buttons = document.querySelectorAll('#return-type-selector button');
+    buttons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.returnType === returnType);
+    });
+    currentReturnType = returnType;
+    loadPerformanceComparison(currentRange);
+});
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadPerformanceComparison(currentRange);
+});
+</script>
+{% endblock %}

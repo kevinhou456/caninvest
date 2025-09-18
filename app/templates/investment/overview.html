@@ -205,10 +205,15 @@
                     </div>
                     <h6 class="card-title text-muted mb-0">{{ _('Total Return') }}</h6>
                 </div>
-                <h4 class="{{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }} mb-1">
-                    {% if metrics and metrics.total_return.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.total_return.cad if metrics else 0) }}
+                <h4 class="mb-1">
+                    <span class="{{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }}">
+                        {% if metrics and metrics.total_return.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.total_return.cad if metrics else 0) }}
+                    </span>
+                    <small class="ms-2 {{ 'text-success' if metrics and metrics.total_return_rate >= 0 else 'text-danger' }}">
+                        ({% if metrics %}{{ "+" if metrics.total_return_rate >= 0 else "" }}{{ "{:.2f}".format(metrics.total_return_rate) }}{% else %}0.00{% endif %}%)
+                    </small>
                 </h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_return.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_return.usd_only if metrics else 0) }}</small>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_return.cad_only if metrics else 0) }} | USD:${{ "{:,.2f}".format(metrics.total_return.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
