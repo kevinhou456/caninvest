@@ -127,7 +127,8 @@ class DailyStatsService:
         self.history_cache_service = StockHistoryCacheService()
         
     def get_monthly_calendar_data(self, account_ids: List[int], 
-                                  year: int, month: int) -> MonthlyCalendarData:
+                                  year: int, month: int,
+                                  ownership_map: Optional[Dict[int, Decimal]] = None) -> MonthlyCalendarData:
         """
         获取指定月份的完整月历数据
         
@@ -155,7 +156,7 @@ class DailyStatsService:
         )
         
         # 批量计算每日统计
-        daily_stats = self._calculate_daily_stats_batch(account_ids, start_date, effective_end)
+        daily_stats = self._calculate_daily_stats_batch(account_ids, start_date, effective_end, ownership_map)
         calendar_data.daily_stats = daily_stats
 
         # 计算月度汇总
@@ -164,12 +165,14 @@ class DailyStatsService:
         logger.info(f"月历数据生成完成，包含{len(daily_stats)}天的数据")
         return calendar_data
     
-    def get_current_month_calendar(self, account_ids: List[int]) -> MonthlyCalendarData:
+    def get_current_month_calendar(self, account_ids: List[int],
+                                   ownership_map: Optional[Dict[int, Decimal]] = None) -> MonthlyCalendarData:
         """获取当前月份的月历数据"""
         today = date.today()
-        return self.get_monthly_calendar_data(account_ids, today.year, today.month)
+        return self.get_monthly_calendar_data(account_ids, today.year, today.month, ownership_map)
     
-    def get_daily_floating_pnl(self, account_ids: List[int], target_date: date) -> Dict:
+    def get_daily_floating_pnl(self, account_ids: List[int], target_date: date,
+                               ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
         """
         获取指定日期的浮动盈亏详情
         
@@ -183,11 +186,11 @@ class DailyStatsService:
         logger.info(f"计算{target_date}的浮动盈亏，账户: {account_ids}")
         
         # 复用现有的日度报表功能
-        combined_report = self._get_combined_daily_report(account_ids, target_date)
+        combined_report = self._get_combined_daily_report(account_ids, target_date, ownership_map)
         
         # 计算前一交易日的对比
         prev_trading_date = self.report_service._get_previous_business_day(target_date)
-        prev_report = self._get_combined_daily_report(account_ids, prev_trading_date)
+        prev_report = self._get_combined_daily_report(account_ids, prev_trading_date, ownership_map)
         
         # 计算变化
         daily_change = self._calculate_daily_change(combined_report, prev_report)
@@ -207,7 +210,8 @@ class DailyStatsService:
         }
     
     def _calculate_daily_stats_batch(self, account_ids: List[int], 
-                                    start_date: date, end_date: date) -> Dict[str, DailyStatsPoint]:
+                                    start_date: date, end_date: date,
+                                    ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict[str, DailyStatsPoint]:
         """
         批量计算日期范围内的每日统计
         使用现有的AssetValuationService进行优化计算
@@ -223,7 +227,7 @@ class DailyStatsService:
 
         prev_trading_date = self._get_previous_trading_day(start_date)
         if prev_trading_date:
-            prev_snapshot = self._get_combined_asset_snapshot(account_ids, prev_trading_date)
+            prev_snapshot = self._get_combined_asset_snapshot(account_ids, prev_trading_date, ownership_map)
             prev_stats = DailyStatsPoint(
                 date=prev_trading_date,
                 account_id=0,
@@ -239,7 +243,7 @@ class DailyStatsService:
             date_str = current_date.isoformat()
             
             # 为每个账户计算资产快照
-            combined_snapshot = self._get_combined_asset_snapshot(account_ids, current_date)
+            combined_snapshot = self._get_combined_asset_snapshot(account_ids, current_date, ownership_map)
             
             # 创建日统计点
             stats_point = DailyStatsPoint(
@@ -265,7 +269,8 @@ class DailyStatsService:
         
         return daily_stats
     
-    def _get_combined_asset_snapshot(self, account_ids: List[int], target_date: date) -> Dict:
+    def _get_combined_asset_snapshot(self, account_ids: List[int], target_date: date,
+                                     ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
         """
         获取多个账户的合并资产快照
         集成智能缓存服务，优化性能
@@ -280,25 +285,28 @@ class DailyStatsService:
         }
         
         for account_id in account_ids:
+            proportion = self._get_account_proportion(account_id, ownership_map)
+            if proportion <= 0:
+                continue
             # 首先尝试从缓存获取
             cached_snapshot = daily_stats_cache_service.get_cached_asset_snapshot(account_id, target_date)
             
             if cached_snapshot:
                 # 使用缓存数据
-                combined_data['total_assets'] += cached_snapshot.total_assets
-                combined_data['stock_market_value'] += cached_snapshot.stock_market_value
-                combined_data['cash_balance_cad'] += cached_snapshot.cash_balance_cad
-                combined_data['cash_balance_usd'] += cached_snapshot.cash_balance_usd
-                combined_data['cash_balance_total_cad'] += cached_snapshot.cash_balance_total_cad
+                combined_data['total_assets'] += cached_snapshot.total_assets * proportion
+                combined_data['stock_market_value'] += cached_snapshot.stock_market_value * proportion
+                combined_data['cash_balance_cad'] += cached_snapshot.cash_balance_cad * proportion
+                combined_data['cash_balance_usd'] += cached_snapshot.cash_balance_usd * proportion
+                combined_data['cash_balance_total_cad'] += cached_snapshot.cash_balance_total_cad * proportion
             else:
                 # 缓存未命中，使用AssetValuationService计算
                 snapshot = self.asset_service.get_asset_snapshot(account_id, target_date)
                 
-                combined_data['total_assets'] += snapshot.total_assets
-                combined_data['stock_market_value'] += snapshot.stock_market_value
-                combined_data['cash_balance_cad'] += snapshot.cash_balance_cad
-                combined_data['cash_balance_usd'] += snapshot.cash_balance_usd
-                combined_data['cash_balance_total_cad'] += snapshot.cash_balance_total_cad
+                combined_data['total_assets'] += snapshot.total_assets * proportion
+                combined_data['stock_market_value'] += snapshot.stock_market_value * proportion
+                combined_data['cash_balance_cad'] += snapshot.cash_balance_cad * proportion
+                combined_data['cash_balance_usd'] += snapshot.cash_balance_usd * proportion
+                combined_data['cash_balance_total_cad'] += snapshot.cash_balance_total_cad * proportion
                 
                 # 将计算结果存入缓存
                 snapshot_data = {
@@ -312,7 +320,14 @@ class DailyStatsService:
         
         return combined_data
     
-    def _get_combined_daily_report(self, account_ids: List[int], target_date: date) -> Dict:
+    def _get_account_proportion(self, account_id: int,
+                                 ownership_map: Optional[Dict[int, Decimal]]) -> Decimal:
+        if not ownership_map:
+            return Decimal('1')
+        return ownership_map.get(account_id, Decimal('0'))
+
+    def _get_combined_daily_report(self, account_ids: List[int], target_date: date,
+                                   ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
         """
         获取多个账户的合并日度报表
         复用ReportService的功能
@@ -325,14 +340,17 @@ class DailyStatsService:
         }
         
         for account_id in account_ids:
+            proportion = self._get_account_proportion(account_id, ownership_map)
+            if proportion <= 0:
+                continue
             try:
                 daily_report = self.report_service.get_daily_report(account_id, target_date)
                 current_data = daily_report['current']
                 
-                combined_report['total_assets'] += Decimal(str(current_data['total_assets']))
-                combined_report['stock_market_value'] += Decimal(str(current_data['stock_market_value']))
-                combined_report['cash_balance'] += Decimal(str(current_data['cash_balance']['total_cad']))
-                
+                combined_report['total_assets'] += Decimal(str(current_data['total_assets'])) * proportion
+                combined_report['stock_market_value'] += Decimal(str(current_data['stock_market_value'])) * proportion
+                combined_report['cash_balance'] += Decimal(str(current_data['cash_balance']['total_cad'])) * proportion
+
             except Exception as e:
                 logger.warning(f"获取账户{account_id}日度报表失败: {e}")
                 continue
@@ -430,12 +448,13 @@ class DailyStatsService:
         return {tx.trade_date for tx in transactions}
     
     def get_calendar_summary_stats(self, account_ids: List[int], 
-                                  year: int, month: int) -> Dict:
+                                  year: int, month: int,
+                                  ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
         """
         获取月历的汇总统计信息
         用于前端显示月度概览
         """
-        calendar_data = self.get_monthly_calendar_data(account_ids, year, month)
+        calendar_data = self.get_monthly_calendar_data(account_ids, year, month, ownership_map)
         
         # 计算额外的统计指标
         daily_changes = [point.daily_change for point in calendar_data.daily_stats.values() 

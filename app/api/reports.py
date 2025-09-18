@@ -555,11 +555,7 @@ def get_family_annual_analysis(family_id):
     try:
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
-        analysis_data = portfolio_service.get_annual_analysis(account_ids, years)
-        
-        # 如果是成员过滤，应用所有权比例计算
-        if member_id:
-            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
+        analysis_data = portfolio_service.get_annual_analysis(account_ids, years, member_id=member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -617,11 +613,7 @@ def get_family_quarterly_analysis(family_id):
     try:
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
-        analysis_data = portfolio_service.get_quarterly_analysis(account_ids, years)
-        
-        # 如果是成员过滤，应用所有权比例计算
-        if member_id:
-            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
+        analysis_data = portfolio_service.get_quarterly_analysis(account_ids, years, member_id=member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -671,11 +663,7 @@ def get_family_monthly_analysis(family_id):
     try:
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
-        analysis_data = portfolio_service.get_monthly_analysis(account_ids, months)
-        
-        # 如果是成员过滤，应用所有权比例计算
-        if member_id:
-            analysis_data = apply_member_ownership_proportions(analysis_data, member_id)
+        analysis_data = portfolio_service.get_monthly_analysis(account_ids, months, member_id=member_id)
         
         return jsonify({
             'family': family.to_dict(),

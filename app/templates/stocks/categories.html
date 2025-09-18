@@ -36,7 +36,6 @@
                         <th>{{ _('Category') }}</th>
                         <th>{{ _('English Name') }}</th>
                         <th>{{ _('Description') }}</th>
-                        <th>{{ _('Color') }}</th>
                         <th>{{ _('Stock Count') }}</th>
                         <th>{{ _('Actions') }}</th>
                     </tr>
@@ -45,10 +44,7 @@
                     {% for category in categories %}
                     <tr>
                         <td>
-                            <div class="d-flex align-items-center">
-                                <div class="color-indicator me-2" style="width: 12px; height: 12px; background-color: {{ category.color or '#007bff' }}; border-radius: 50%;"></div>
-                                <strong>{{ category.name }}</strong>
-                            </div>
+                            <strong>{{ category.name }}</strong>
                         </td>
                         <td>{{ category.name_en or '-' }}</td>
                         <td>
@@ -57,17 +53,12 @@
                             </span>
                         </td>
                         <td>
-                            <span class="badge" style="background-color: {{ category.color or '#007bff' }}; color: white;">
-                                {{ category.color or '#007bff' }}
-                            </span>
-                        </td>
-                        <td>
                             <span class="badge bg-secondary">{{ category.stock_count }}</span>
                         </td>
                         <td>
                             <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-secondary btn-sm" 
-                                        onclick="editCategory({{ category.id }}, '{{ category.name }}', '{{ category.name_en or '' }}', '{{ category.description or '' }}', '{{ category.color or '#007bff' }}')">
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        onclick="editCategory({{ category.id }}, '{{ category.name }}', '{{ category.name_en or '' }}', '{{ category.description or '' }}')">
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <button class="btn btn-outline-danger btn-sm" 
@@ -197,10 +188,6 @@
                         <textarea class="form-control" id="categoryDescription" name="description" rows="3"></textarea>
                     </div>
                     
-                    <div class="mb-3">
-                        <label for="categoryColor" class="form-label">{{ _('Color') }}</label>
-                        <input type="color" class="form-control form-control-color" id="categoryColor" name="color" value="#007bff">
-                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Cancel') }}</button>
@@ -225,7 +212,7 @@ function openAddCategoryModal() {
     modal.show();
 }
 
-function editCategory(categoryId, name, nameEn, description, color) {
+function editCategory(categoryId, name, nameEn, description) {
     isEditMode = true;
     document.getElementById('categoryModalLabel').textContent = '{{ _("Edit Category") }}';
     document.getElementById('saveCategoryBtn').textContent = '{{ _("Update") }}';
@@ -233,7 +220,6 @@ function editCategory(categoryId, name, nameEn, description, color) {
     document.getElementById('categoryName').value = name;
     document.getElementById('categoryNameEn').value = nameEn;
     document.getElementById('categoryDescription').value = description;
-    document.getElementById('categoryColor').value = color;
     const modal = new bootstrap.Modal(document.getElementById('categoryModal'));
     modal.show();
 }
@@ -388,8 +374,7 @@ document.getElementById('categoryForm').addEventListener('submit', function(e) {
     const data = {
         name: formData.get('name'),
         name_en: formData.get('name_en'),
-        description: formData.get('description'),
-        color: formData.get('color')
+        description: formData.get('description')
     };
     
     const categoryId = formData.get('categoryId');

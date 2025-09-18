@@ -10,18 +10,22 @@
 """
 
 from datetime import datetime, date, timedelta
+from calendar import monthrange
 from typing import Dict, List, Optional, Tuple, Union
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
 import logging
 
 from app import db
-from app.models.account import Account
+from app.models.account import Account, AccountMember
 from app.models.transaction import Transaction
 from app.models.stocks_cache import StocksCache
 from app.models.price_cache import StockPriceCache
+from app.services.stock_history_cache_service import StockHistoryCacheService
+from app.services.currency_service import currency_service
+from app.services.asset_valuation_service import AssetValuationService
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +161,7 @@ class PortfolioService:
     """统一投资组合服务"""
     
     def __init__(self):
-        pass
+        self.history_cache_service = StockHistoryCacheService()
     
     def get_time_period_dates(self, period: TimePeriod, 
                             start_date: Optional[date] = None,
@@ -417,7 +421,8 @@ class PortfolioService:
         return 'Unknown'
     
     def get_annual_analysis(self, account_ids: List[int], 
-                           years: Optional[List[int]] = None) -> Dict:
+                           years: Optional[List[int]] = None,
+                           member_id: Optional[int] = None) -> Dict:
         """获取年度分析数据
         
         Args:
@@ -439,7 +444,25 @@ class PortfolioService:
                 min_year = min(transaction_years)
                 current_year = datetime.now().year
                 years = list(range(min_year, current_year + 1))
-        
+        exchange_rate_value = currency_service.get_current_rate('USD', 'CAD')
+        if not exchange_rate_value:
+            exchange_rate_value = 1
+        exchange_rate_decimal = Decimal(str(exchange_rate_value))
+
+        asset_service = AssetValuationService()
+
+        ownership_map: Dict[int, Decimal] = {}
+        if member_id:
+            memberships = AccountMember.query.filter_by(member_id=member_id).all()
+            for membership in memberships:
+                try:
+                    ownership_map[membership.account_id] = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+                except (InvalidOperation, TypeError):
+                    ownership_map[membership.account_id] = Decimal('0')
+
+        def get_proportion(account_id: int) -> Decimal:
+            return ownership_map.get(account_id, Decimal('1')) if ownership_map else Decimal('1')
+
         annual_data = []
         if not years:
             years = []  # Set empty list if no years found
@@ -461,43 +484,63 @@ class PortfolioService:
             
             # 统计交易数据
             transaction_count = len(year_transactions)
-            buy_amount = sum((tx.quantity * tx.price + tx.fee) 
-                           for tx in year_transactions if tx.type == 'BUY' and tx.quantity and tx.price)
-            sell_amount = sum((tx.quantity * tx.price - tx.fee) 
-                            for tx in year_transactions if tx.type == 'SELL' and tx.quantity and tx.price)
-            
-            # 按货币统计交易数据
-            buy_cad = sum((tx.quantity * tx.price + tx.fee) 
-                         for tx in year_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'CAD')
-            buy_usd = sum((tx.quantity * tx.price + tx.fee) 
-                         for tx in year_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'USD')
-            sell_cad = sum((tx.quantity * tx.price - tx.fee) 
-                          for tx in year_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'CAD')
-            sell_usd = sum((tx.quantity * tx.price - tx.fee) 
-                          for tx in year_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'USD')
-            
-            # 统计分红和利息（从amount字段）
-            dividends = sum(tx.amount for tx in year_transactions 
-                          if tx.type == 'DIVIDEND' and tx.amount)
-            interest = sum(tx.amount for tx in year_transactions 
-                         if tx.type == 'INTEREST' and tx.amount)
-            
-            # 按货币统计分红和利息
-            dividends_cad = sum(tx.amount for tx in year_transactions 
-                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'CAD')
-            dividends_usd = sum(tx.amount for tx in year_transactions 
-                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'USD')
-            interest_cad = sum(tx.amount for tx in year_transactions 
-                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'CAD')
-            interest_usd = sum(tx.amount for tx in year_transactions 
-                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'USD')
+            buy_amount = sell_amount = Decimal('0')
+            buy_cad = buy_usd = Decimal('0')
+            sell_cad = sell_usd = Decimal('0')
+            dividends = interest = Decimal('0')
+            dividends_cad = dividends_usd = Decimal('0')
+            interest_cad = interest_usd = Decimal('0')
+
+            for tx in year_transactions:
+                tx_type = (tx.type or '').upper()
+                tx_currency = (tx.currency or '').upper()
+                proportion = get_proportion(tx.account_id)
+                if proportion <= 0:
+                    continue
+
+                quantity = Decimal(str(tx.quantity or 0))
+                price = Decimal(str(tx.price or 0))
+                fee = Decimal(str(tx.fee or 0))
+                amount = Decimal(str(tx.amount or 0))
+
+                if tx_type == 'BUY' and quantity and price:
+                    gross = (quantity * price + fee) * proportion
+                    buy_amount += gross
+                    if tx_currency == 'CAD':
+                        buy_cad += gross
+                    elif tx_currency == 'USD':
+                        buy_usd += gross
+                elif tx_type == 'SELL' and quantity and price:
+                    net = (quantity * price - fee) * proportion
+                    sell_amount += net
+                    if tx_currency == 'CAD':
+                        sell_cad += net
+                    elif tx_currency == 'USD':
+                        sell_usd += net
+                elif tx_type == 'DIVIDEND' and amount:
+                    value = amount * proportion
+                    dividends += value
+                    if tx_currency == 'CAD':
+                        dividends_cad += value
+                    elif tx_currency == 'USD':
+                        dividends_usd += value
+                elif tx_type == 'INTEREST' and amount:
+                    value = amount * proportion
+                    interest += value
+                    if tx_currency == 'CAD':
+                        interest_cad += value
+                    elif tx_currency == 'USD':
+                        interest_usd += value
             
             # 计算年度已实现收益（从清算的持仓中统计）
-            annual_realized_gain = 0
-            annual_realized_gain_cad = 0
-            annual_realized_gain_usd = 0
+            annual_realized_gain = Decimal('0')
+            annual_realized_gain_cad = Decimal('0')
+            annual_realized_gain_usd = Decimal('0')
             for holding in year_portfolio.get('cleared_holdings', []):
-                realized_gain = holding.get('realized_gain', 0)
+                proportion = get_proportion(holding.get('account_id'))
+                if proportion <= 0:
+                    continue
+                realized_gain = Decimal(str(holding.get('realized_gain', 0))) * proportion
                 annual_realized_gain += realized_gain
                 # 按货币分组已实现收益
                 if holding.get('currency') == 'CAD':
@@ -506,50 +549,104 @@ class PortfolioService:
                     annual_realized_gain_usd += realized_gain
             
             # 计算按货币分组的总资产和浮动收益
-            total_assets_cad = 0
-            total_assets_usd = 0
-            unrealized_gain_cad = 0
-            unrealized_gain_usd = 0
+            total_assets_cad = Decimal('0')
+            total_assets_usd = Decimal('0')
             
-            for holding in year_portfolio.get('current_holdings', []):
-                if holding.get('currency') == 'CAD':
-                    total_assets_cad += holding.get('current_value', 0)
-                    unrealized_gain_cad += holding.get('unrealized_gain', 0)
-                elif holding.get('currency') == 'USD':
-                    total_assets_usd += holding.get('current_value', 0)
-                    unrealized_gain_usd += holding.get('unrealized_gain', 0)
-            
+            current_holdings = year_portfolio.get('current_holdings', [])
+            total_assets_value = Decimal('0')
+            for holding in current_holdings:
+                proportion = get_proportion(holding.get('account_id'))
+                if proportion <= 0:
+                    continue
+                value_dec = Decimal(str(holding.get('current_value', 0))) * proportion
+                total_assets_value += value_dec
+                currency = (holding.get('currency') or '').upper()
+                if currency == 'CAD':
+                    total_assets_cad += value_dec
+                elif currency == 'USD':
+                    total_assets_usd += value_dec
+
+            annual_unrealized_gain_dec, currency_gain_map = self._calculate_quarterly_unrealized_gain(
+                current_holdings,
+                year_start,
+                year_end,
+                ownership_map
+            ) if current_holdings else (Decimal('0'), {'CAD': Decimal('0'), 'USD': Decimal('0')})
+
+            annual_unrealized_gain = float(annual_unrealized_gain_dec)
+            unrealized_gain_cad = float(currency_gain_map.get('CAD', Decimal('0')))
+            unrealized_gain_usd = float(currency_gain_map.get('USD', Decimal('0')))
+
+            year_cash_cad = Decimal('0')
+            year_cash_usd = Decimal('0')
+            for account_id in account_ids:
+                proportion = get_proportion(account_id)
+                if proportion <= 0:
+                    continue
+                snapshot = asset_service.get_asset_snapshot(account_id, year_end)
+                year_cash_cad += snapshot.cash_balance_cad * proportion
+                year_cash_usd += snapshot.cash_balance_usd * proportion
+
+            total_assets_dec = total_assets_value + year_cash_cad + year_cash_usd * exchange_rate_decimal
+
             annual_data.append({
                 'year': year,
-                'total_assets': year_portfolio['summary']['total_current_value'],
-                'annual_realized_gain': annual_realized_gain,
-                'annual_unrealized_gain': year_portfolio['summary']['total_unrealized_gain'],
-                'annual_dividends': dividends,
-                'annual_interest': interest,
+                'total_assets': float(total_assets_dec),
+                'annual_realized_gain': float(annual_realized_gain),
+                'annual_unrealized_gain': annual_unrealized_gain,
+                'annual_dividends': float(dividends),
+                'annual_interest': float(interest),
+                'annual_income': float(dividends + interest),
                 'transaction_count': transaction_count,
-                'buy_amount': buy_amount,
-                'sell_amount': sell_amount,
+                'buy_amount': float(buy_amount),
+                'sell_amount': float(sell_amount),
                 'currency_breakdown': {
-                    'total_assets_cad': total_assets_cad,
-                    'total_assets_usd': total_assets_usd,
-                    'realized_gain_cad': annual_realized_gain_cad,
-                    'realized_gain_usd': annual_realized_gain_usd,
+                    'total_assets_cad': float(total_assets_cad + year_cash_cad),
+                    'total_assets_usd': float(total_assets_usd + year_cash_usd),
+                    'realized_gain_cad': float(annual_realized_gain_cad),
+                    'realized_gain_usd': float(annual_realized_gain_usd),
                     'unrealized_gain_cad': unrealized_gain_cad,
                     'unrealized_gain_usd': unrealized_gain_usd,
-                    'buy_cad': buy_cad,
-                    'buy_usd': buy_usd,
-                    'sell_cad': sell_cad,
-                    'sell_usd': sell_usd,
-                    'dividends_cad': dividends_cad,
-                    'dividends_usd': dividends_usd,
-                    'interest_cad': interest_cad,
-                    'interest_usd': interest_usd
+                    'buy_cad': float(buy_cad),
+                    'buy_usd': float(buy_usd),
+                    'sell_cad': float(sell_cad),
+                    'sell_usd': float(sell_usd),
+                    'dividends_cad': float(dividends_cad),
+                    'dividends_usd': float(dividends_usd),
+                    'interest_cad': float(interest_cad),
+                    'interest_usd': float(interest_usd),
+                    'cash_cad': float(year_cash_cad),
+                    'cash_usd': float(year_cash_usd)
+                },
+                'cash_balance': {
+                    'cad': float(year_cash_cad),
+                    'usd': float(year_cash_usd)
                 }
             })
-        
+
         # 计算图表数据
         chart_data = self._prepare_annual_chart_data(annual_data)
-        
+
+        total_realized_sum = sum(item.get('annual_realized_gain', 0) or 0 for item in annual_data)
+        total_unrealized_sum = sum(item.get('annual_unrealized_gain', 0) or 0 for item in annual_data)
+        total_income_sum = sum((item.get('annual_dividends', 0) or 0) + (item.get('annual_interest', 0) or 0)
+                               for item in annual_data)
+
+        if annual_data:
+            latest_entry = max(annual_data, key=lambda x: x.get('year', 0))
+            latest_cash = latest_entry.get('cash_balance', {})
+            latest_cash_cad = latest_cash.get('cad', 0.0) or 0.0
+            latest_cash_usd = latest_cash.get('usd', 0.0) or 0.0
+            cash_balance_summary = {
+                'cad': latest_cash_cad,
+                'usd': latest_cash_usd,
+                'total_cad': latest_cash_cad + latest_cash_usd * float(exchange_rate_decimal)
+            }
+            current_assets_value = latest_entry.get('total_assets', 0.0) or 0.0
+        else:
+            cash_balance_summary = {'cad': 0.0, 'usd': 0.0, 'total_cad': 0.0}
+            current_assets_value = 0.0
+
         return {
             'annual_data': annual_data,
             'chart_data': chart_data,
@@ -559,12 +656,19 @@ class PortfolioService:
                                       for item in annual_data),
                 'total_dividends': sum(item['annual_dividends'] for item in annual_data),
                 'total_interest': sum(item['annual_interest'] for item in annual_data),
-                'average_annual_return': self._calculate_average_annual_return(annual_data)
-            }
+                'average_annual_return': self._calculate_average_annual_return(annual_data),
+                'total_realized_gain': total_realized_sum,
+                'total_unrealized_gain': total_unrealized_sum,
+                'total_income': total_income_sum,
+                'current_assets': current_assets_value,
+                'cash_balance': cash_balance_summary
+            },
+            'cash_balance': cash_balance_summary
         }
     
     def get_quarterly_analysis(self, account_ids: List[int], 
-                              years: Optional[List[int]] = None) -> Dict:
+                              years: Optional[List[int]] = None,
+                              member_id: Optional[int] = None) -> Dict:
         """获取季度分析数据
         
         Args:
@@ -586,8 +690,23 @@ class PortfolioService:
                 min_year = min(transaction_years)
                 current_year = datetime.now().year
                 years = list(range(min_year, current_year + 1))
-        
+
+        if not years:
+            years = [datetime.now().year]
+        else:
+            years = sorted(set(years))
+
+        ownership_map: Dict[int, Decimal] = {}
+        if member_id:
+            memberships = AccountMember.query.filter_by(member_id=member_id).all()
+            for membership in memberships:
+                try:
+                    ownership_map[membership.account_id] = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+                except (InvalidOperation, TypeError):
+                    ownership_map[membership.account_id] = Decimal('0')
+
         quarterly_data = []
+        today = date.today()
         for year in sorted(years, reverse=True):
             for quarter in [4, 3, 2, 1]:  # 倒序排列
                 quarter_start = date(year, (quarter - 1) * 3 + 1, 1)
@@ -596,58 +715,81 @@ class PortfolioService:
                 else:
                     next_quarter_start = date(year, quarter * 3 + 1, 1)
                     quarter_end = next_quarter_start - timedelta(days=1)
-                
+
+                if quarter_start > today:
+                    continue
+
+                effective_end = min(quarter_end, today)
+
                 # 使用统一的portfolio_summary获取季度数据
                 quarter_portfolio = self.get_portfolio_summary(
-                    account_ids, TimePeriod.CUSTOM, quarter_start, quarter_end
+                    account_ids, TimePeriod.CUSTOM, quarter_start, effective_end
                 )
-                
+
+                def get_proportion(account_id: int) -> Decimal:
+                    return ownership_map.get(account_id, Decimal('1')) if ownership_map else Decimal('1')
+
                 # 计算季度交易统计
                 quarter_transactions = Transaction.query.filter(
                     Transaction.account_id.in_(account_ids),
                     Transaction.trade_date >= quarter_start,
-                    Transaction.trade_date <= quarter_end
+                    Transaction.trade_date <= effective_end
                 ).all()
-                
-                # 统计交易数据
+
+                # 统计交易与收益数据（兼容大小写）
                 transaction_count = len(quarter_transactions)
-                buy_amount = sum((tx.quantity * tx.price + tx.fee) 
-                               for tx in quarter_transactions if tx.type == 'BUY' and tx.quantity and tx.price)
-                sell_amount = sum((tx.quantity * tx.price - tx.fee) 
-                                for tx in quarter_transactions if tx.type == 'SELL' and tx.quantity and tx.price)
-                
-                # 按货币统计交易数据
-                buy_cad = sum((tx.quantity * tx.price + tx.fee) 
-                             for tx in quarter_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'CAD')
-                buy_usd = sum((tx.quantity * tx.price + tx.fee) 
-                             for tx in quarter_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'USD')
-                sell_cad = sum((tx.quantity * tx.price - tx.fee) 
-                              for tx in quarter_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'CAD')
-                sell_usd = sum((tx.quantity * tx.price - tx.fee) 
-                              for tx in quarter_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'USD')
-                
-                # 统计分红和利息
-                dividends = sum(tx.amount for tx in quarter_transactions 
-                              if tx.type == 'DIVIDEND' and tx.amount)
-                interest = sum(tx.amount for tx in quarter_transactions 
-                             if tx.type == 'INTEREST' and tx.amount)
-                
-                # 按货币统计分红和利息
-                dividends_cad = sum(tx.amount for tx in quarter_transactions 
-                                  if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'CAD')
-                dividends_usd = sum(tx.amount for tx in quarter_transactions 
-                                  if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'USD')
-                interest_cad = sum(tx.amount for tx in quarter_transactions 
-                                 if tx.type == 'INTEREST' and tx.amount and tx.currency == 'CAD')
-                interest_usd = sum(tx.amount for tx in quarter_transactions 
-                                 if tx.type == 'INTEREST' and tx.amount and tx.currency == 'USD')
-                
+                buy_amount = sell_amount = 0.0
+                buy_cad = buy_usd = 0.0
+                sell_cad = sell_usd = 0.0
+                dividends = interest = 0.0
+                dividends_cad = dividends_usd = 0.0
+                interest_cad = interest_usd = 0.0
+
+                for tx in quarter_transactions:
+                    tx_type = (tx.type or '').upper()
+                    tx_currency = (tx.currency or '').upper()
+                    proportion = float(get_proportion(tx.account_id))
+
+                    quantity = float(tx.quantity or 0)
+                    price = float(tx.price or 0)
+                    fee = float(tx.fee or 0)
+                    amount = float(tx.amount or 0)
+
+                    if tx_type == 'BUY' and quantity and price:
+                        gross = (quantity * price + fee) * proportion
+                        buy_amount += gross
+                        if tx_currency == 'CAD':
+                            buy_cad += gross
+                        elif tx_currency == 'USD':
+                            buy_usd += gross
+                    elif tx_type == 'SELL' and quantity and price:
+                        net = (quantity * price - fee) * proportion
+                        sell_amount += net
+                        if tx_currency == 'CAD':
+                            sell_cad += net
+                        elif tx_currency == 'USD':
+                            sell_usd += net
+                    elif tx_type == 'DIVIDEND' and amount:
+                        dividend_value = amount * proportion
+                        dividends += dividend_value
+                        if tx_currency == 'CAD':
+                            dividends_cad += dividend_value
+                        elif tx_currency == 'USD':
+                            dividends_usd += dividend_value
+                    elif tx_type == 'INTEREST' and amount:
+                        interest_value = amount * proportion
+                        interest += interest_value
+                        if tx_currency == 'CAD':
+                            interest_cad += interest_value
+                        elif tx_currency == 'USD':
+                            interest_usd += interest_value
+
                 # 计算季度已实现收益
                 quarterly_realized_gain = 0
                 quarterly_realized_gain_cad = 0
                 quarterly_realized_gain_usd = 0
                 for holding in quarter_portfolio.get('cleared_holdings', []):
-                    realized_gain = holding.get('realized_gain', 0)
+                    realized_gain = holding.get('realized_gain', 0) * float(get_proportion(holding.get('account_id')))
                     quarterly_realized_gain += realized_gain
                     if holding.get('currency') == 'CAD':
                         quarterly_realized_gain_cad += realized_gain
@@ -660,20 +802,34 @@ class PortfolioService:
                 unrealized_gain_cad = 0
                 unrealized_gain_usd = 0
                 
-                for holding in quarter_portfolio.get('current_holdings', []):
+                current_holdings = quarter_portfolio.get('current_holdings', [])
+                total_assets = Decimal('0')
+                for holding in current_holdings:
+                    proportion_dec = get_proportion(holding.get('account_id'))
+                    value_dec = Decimal(str(holding.get('current_value', 0))) * proportion_dec
+                    total_assets += value_dec
                     if holding.get('currency') == 'CAD':
-                        total_assets_cad += holding.get('current_value', 0)
-                        unrealized_gain_cad += holding.get('unrealized_gain', 0)
+                        total_assets_cad += float(value_dec)
                     elif holding.get('currency') == 'USD':
-                        total_assets_usd += holding.get('current_value', 0)
-                        unrealized_gain_usd += holding.get('unrealized_gain', 0)
-                
+                        total_assets_usd += float(value_dec)
+
+                quarterly_unrealized_gain_dec, currency_gain_map = self._calculate_quarterly_unrealized_gain(
+                    current_holdings,
+                    quarter_start,
+                    effective_end,
+                    ownership_map
+                )
+
+                quarterly_unrealized_gain = float(quarterly_unrealized_gain_dec)
+                unrealized_gain_cad = float(currency_gain_map.get('CAD', Decimal('0')))
+                unrealized_gain_usd = float(currency_gain_map.get('USD', Decimal('0')))
+
                 quarterly_data.append({
                     'year': year,
                     'quarter': quarter,
-                    'total_assets': quarter_portfolio['summary']['total_current_value'],
+                    'total_assets': float(total_assets),
                     'quarterly_realized_gain': quarterly_realized_gain,
-                    'quarterly_unrealized_gain': quarter_portfolio['summary']['total_unrealized_gain'],
+                    'quarterly_unrealized_gain': quarterly_unrealized_gain,
                     'quarterly_dividends': dividends,
                     'quarterly_interest': interest,
                     'transaction_count': transaction_count,
@@ -708,9 +864,177 @@ class PortfolioService:
                 'average_quarterly_return': self._calculate_average_return(quarterly_data, 'quarterly_realized_gain', 'quarterly_unrealized_gain')
             }
         }
+
+    def _calculate_quarterly_unrealized_gain(self,
+                                            holdings: List[Dict],
+                                            quarter_start: date,
+                                            quarter_end: date,
+                                            ownership_map: Dict[int, Decimal]) -> Tuple[Decimal, Dict[str, Decimal]]:
+        total_gain = Decimal('0')
+        per_currency_gain: Dict[str, Decimal] = defaultdict(lambda: Decimal('0'))
+
+        prev_cutoff = quarter_start - timedelta(days=1)
+
+        for holding in holdings:
+            account_id = holding.get('account_id')
+            symbol = holding.get('symbol')
+            currency = (holding.get('currency') or 'USD').upper()
+            current_shares = Decimal(str(holding.get('current_shares', 0)))
+
+            if not symbol or not account_id or current_shares <= 0:
+                continue
+
+            gain = self._calculate_holding_quarterly_unrealized_gain(
+                account_id,
+                symbol,
+                currency,
+                quarter_start,
+                quarter_end,
+                prev_cutoff,
+                holding,
+                ownership_map.get(account_id, Decimal('1')) if ownership_map else Decimal('1')
+            )
+
+            total_gain += gain
+            per_currency_gain[currency] += gain
+
+        return total_gain, per_currency_gain
+
+    def _calculate_holding_quarterly_unrealized_gain(self,
+                                                    account_id: int,
+                                                    symbol: str,
+                                                    currency: str,
+                                                    quarter_start: date,
+                                                    quarter_end: date,
+                                                    prev_cutoff: date,
+                                                    holding: Dict,
+                                                    proportion: Decimal) -> Decimal:
+        from app.models.transaction import Transaction
+
+        transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.stock == symbol,
+            Transaction.trade_date <= quarter_end
+        ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
+
+        if not transactions:
+            return Decimal('0')
+
+        price_end = self._get_last_trading_price(symbol, currency, quarter_end)
+        if price_end is None:
+            current_price = holding.get('current_price')
+            price_end = Decimal(str(current_price)) if current_price else Decimal('0')
+        if price_end is None or price_end == 0:
+            return Decimal('0')
+
+        prev_price = self._get_last_trading_price(symbol, currency, prev_cutoff)
+
+        lots: List[Dict[str, Decimal]] = []
+
+        def add_lot(quantity: Decimal, base_price: Optional[Decimal], cost_per_share: Decimal):
+            if quantity <= 0:
+                return
+            lots.append({
+                'quantity': quantity,
+                'base_price': base_price,
+                'cost_per_share': cost_per_share
+            })
+
+        def remove_quantity(quantity: Decimal):
+            remaining = quantity
+            while remaining > 0 and lots:
+                lot = lots[0]
+                lot_quantity = lot['quantity']
+                if lot_quantity > remaining:
+                    lot['quantity'] = lot_quantity - remaining
+                    remaining = Decimal('0')
+                else:
+                    remaining -= lot_quantity
+                    lots.pop(0)
+
+        def compute_cost_per_share(tx) -> Decimal:
+            qty = Decimal(str(tx.quantity or 0))
+            if qty == 0:
+                return Decimal('0')
+            price = Decimal(str(tx.price or 0))
+            fee = Decimal(str(tx.fee or 0))
+            return price + (fee / qty)
+
+        pre_transactions = [tx for tx in transactions if tx.trade_date < quarter_start]
+        in_quarter_transactions = [tx for tx in transactions if quarter_start <= tx.trade_date <= quarter_end]
+
+        for tx in pre_transactions:
+            qty = Decimal(str(tx.quantity or 0))
+            if qty <= 0:
+                continue
+            tx_type = (tx.type or '').upper()
+            if tx_type == 'BUY':
+                cost_per_share = compute_cost_per_share(tx)
+                add_lot(qty, None, cost_per_share)
+            elif tx_type == 'SELL':
+                remove_quantity(qty)
+
+        for lot in lots:
+            base_price = prev_price if prev_price is not None else lot['cost_per_share']
+            lot['base_price'] = base_price
+
+        for tx in in_quarter_transactions:
+            qty = Decimal(str(tx.quantity or 0))
+            if qty <= 0:
+                continue
+            tx_type = (tx.type or '').upper()
+            if tx_type == 'BUY':
+                cost_per_share = compute_cost_per_share(tx)
+                add_lot(qty, cost_per_share, cost_per_share)
+            elif tx_type == 'SELL':
+                remove_quantity(qty)
+
+        gain = Decimal('0')
+        for lot in lots:
+            base_price = lot.get('base_price')
+            if base_price is None:
+                base_price = lot.get('cost_per_share', Decimal('0'))
+            gain += lot['quantity'] * (price_end - base_price)
+
+        return gain * proportion
+
+    def _get_last_trading_price(self, symbol: str, currency: str, target_date: date) -> Optional[Decimal]:
+        if not symbol or not target_date:
+            return None
+        effective_end = min(target_date, date.today())
+        window_start = effective_end - timedelta(days=14)
+        history = self.history_cache_service.get_cached_history(symbol, window_start, effective_end, currency)
+        if not history:
+            return None
+        history_sorted = sorted(
+            (record for record in history if record.get('date') and record.get('close') is not None),
+            key=lambda r: r['date'],
+            reverse=True
+        )
+        for record in history_sorted:
+            try:
+                record_date = datetime.fromisoformat(record['date']).date()
+            except ValueError:
+                continue
+            if record_date <= effective_end:
+                return Decimal(str(record['close']))
+        return None
+
+    def _shift_month(self, base_month_start: date, offset: int) -> Optional[date]:
+        if base_month_start is None:
+            return None
+        year = base_month_start.year
+        month = base_month_start.month - offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        if year < 1:
+            return None
+        return date(year, month, 1)
     
     def get_monthly_analysis(self, account_ids: List[int], 
-                            months: Optional[int] = 12) -> Dict:
+                            months: Optional[int] = 12,
+                            member_id: Optional[int] = None) -> Dict:
         """获取月度分析数据
         
         Args:
@@ -720,69 +1044,104 @@ class PortfolioService:
         Returns:
             包含月度统计数据的字典
         """
-        current_date = datetime.now().date()
+        if not months:
+            months = 12
+
+        today = date.today()
+        base_month_start = today.replace(day=1)
         monthly_data = []
-        
-        for i in range(months):
-            # 计算月份
-            month_date = current_date.replace(day=1) - timedelta(days=i * 30)
-            month_start = month_date.replace(day=1)
-            if month_start.month == 12:
-                month_end = month_start.replace(year=month_start.year + 1, month=1, day=1) - timedelta(days=1)
-            else:
-                month_end = month_start.replace(month=month_start.month + 1, day=1) - timedelta(days=1)
-            
+
+        ownership_map: Dict[int, Decimal] = {}
+        if member_id:
+            memberships = AccountMember.query.filter_by(member_id=member_id).all()
+            for membership in memberships:
+                try:
+                    ownership_map[membership.account_id] = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+                except (InvalidOperation, TypeError):
+                    ownership_map[membership.account_id] = Decimal('0')
+
+        for offset in range(months):
+            target_start = self._shift_month(base_month_start, offset)
+            if not target_start:
+                continue
+
+            _, days_in_month = monthrange(target_start.year, target_start.month)
+            month_end = date(target_start.year, target_start.month, days_in_month)
+
+            if target_start > today:
+                continue
+
+            effective_end = min(month_end, today)
+
             # 使用统一的portfolio_summary获取月度数据
             month_portfolio = self.get_portfolio_summary(
-                account_ids, TimePeriod.CUSTOM, month_start, month_end
+                account_ids, TimePeriod.CUSTOM, target_start, effective_end
             )
             
             # 计算月度交易统计
             month_transactions = Transaction.query.filter(
                 Transaction.account_id.in_(account_ids),
-                Transaction.trade_date >= month_start,
-                Transaction.trade_date <= month_end
+                Transaction.trade_date >= target_start,
+                Transaction.trade_date <= effective_end
             ).all()
             
             # 统计交易数据
             transaction_count = len(month_transactions)
-            buy_amount = sum((tx.quantity * tx.price + tx.fee) 
-                           for tx in month_transactions if tx.type == 'BUY' and tx.quantity and tx.price)
-            sell_amount = sum((tx.quantity * tx.price - tx.fee) 
-                            for tx in month_transactions if tx.type == 'SELL' and tx.quantity and tx.price)
-            
-            # 按货币统计交易数据
-            buy_cad = sum((tx.quantity * tx.price + tx.fee) 
-                         for tx in month_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'CAD')
-            buy_usd = sum((tx.quantity * tx.price + tx.fee) 
-                         for tx in month_transactions if tx.type == 'BUY' and tx.quantity and tx.price and tx.currency == 'USD')
-            sell_cad = sum((tx.quantity * tx.price - tx.fee) 
-                          for tx in month_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'CAD')
-            sell_usd = sum((tx.quantity * tx.price - tx.fee) 
-                          for tx in month_transactions if tx.type == 'SELL' and tx.quantity and tx.price and tx.currency == 'USD')
-            
-            # 统计分红和利息
-            dividends = sum(tx.amount for tx in month_transactions 
-                          if tx.type == 'DIVIDEND' and tx.amount)
-            interest = sum(tx.amount for tx in month_transactions 
-                         if tx.type == 'INTEREST' and tx.amount)
-            
-            # 按货币统计分红和利息
-            dividends_cad = sum(tx.amount for tx in month_transactions 
-                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'CAD')
-            dividends_usd = sum(tx.amount for tx in month_transactions 
-                              if tx.type == 'DIVIDEND' and tx.amount and tx.currency == 'USD')
-            interest_cad = sum(tx.amount for tx in month_transactions 
-                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'CAD')
-            interest_usd = sum(tx.amount for tx in month_transactions 
-                             if tx.type == 'INTEREST' and tx.amount and tx.currency == 'USD')
+            buy_amount = sell_amount = 0.0
+            buy_cad = buy_usd = 0.0
+            sell_cad = sell_usd = 0.0
+            dividends = interest = 0.0
+            dividends_cad = dividends_usd = 0.0
+            interest_cad = interest_usd = 0.0
+
+            def get_proportion(account_id: int) -> Decimal:
+                return ownership_map.get(account_id, Decimal('1')) if ownership_map else Decimal('1')
+
+            for tx in month_transactions:
+                tx_type = (tx.type or '').upper()
+                tx_currency = (tx.currency or '').upper()
+                proportion = float(get_proportion(tx.account_id))
+
+                quantity = float(tx.quantity or 0)
+                price = float(tx.price or 0)
+                fee = float(tx.fee or 0)
+                amount = float(tx.amount or 0)
+
+                if tx_type == 'BUY' and quantity and price:
+                    gross = (quantity * price + fee) * proportion
+                    buy_amount += gross
+                    if tx_currency == 'CAD':
+                        buy_cad += gross
+                    elif tx_currency == 'USD':
+                        buy_usd += gross
+                elif tx_type == 'SELL' and quantity and price:
+                    net = (quantity * price - fee) * proportion
+                    sell_amount += net
+                    if tx_currency == 'CAD':
+                        sell_cad += net
+                    elif tx_currency == 'USD':
+                        sell_usd += net
+                elif tx_type == 'DIVIDEND' and amount:
+                    dividend_value = amount * proportion
+                    dividends += dividend_value
+                    if tx_currency == 'CAD':
+                        dividends_cad += dividend_value
+                    elif tx_currency == 'USD':
+                        dividends_usd += dividend_value
+                elif tx_type == 'INTEREST' and amount:
+                    interest_value = amount * proportion
+                    interest += interest_value
+                    if tx_currency == 'CAD':
+                        interest_cad += interest_value
+                    elif tx_currency == 'USD':
+                        interest_usd += interest_value
             
             # 计算月度已实现收益
             monthly_realized_gain = 0
             monthly_realized_gain_cad = 0
             monthly_realized_gain_usd = 0
             for holding in month_portfolio.get('cleared_holdings', []):
-                realized_gain = holding.get('realized_gain', 0)
+                realized_gain = holding.get('realized_gain', 0) * float(get_proportion(holding.get('account_id')))
                 monthly_realized_gain += realized_gain
                 if holding.get('currency') == 'CAD':
                     monthly_realized_gain_cad += realized_gain
@@ -795,21 +1154,36 @@ class PortfolioService:
             unrealized_gain_cad = 0
             unrealized_gain_usd = 0
             
-            for holding in month_portfolio.get('current_holdings', []):
-                if holding.get('currency') == 'CAD':
-                    total_assets_cad += holding.get('current_value', 0)
-                    unrealized_gain_cad += holding.get('unrealized_gain', 0)
-                elif holding.get('currency') == 'USD':
-                    total_assets_usd += holding.get('current_value', 0)
-                    unrealized_gain_usd += holding.get('unrealized_gain', 0)
+            current_holdings = month_portfolio.get('current_holdings', [])
+            total_assets = Decimal('0')
+            for holding in current_holdings:
+                proportion_dec = get_proportion(holding.get('account_id'))
+                value_dec = Decimal(str(holding.get('current_value', 0))) * proportion_dec
+                total_assets += value_dec
+                if (holding.get('currency') or '').upper() == 'CAD':
+                    total_assets_cad += float(value_dec)
+                    unrealized_gain_cad += float(Decimal(str(holding.get('unrealized_gain', 0))) * proportion_dec)
+                elif (holding.get('currency') or '').upper() == 'USD':
+                    total_assets_usd += float(value_dec)
+                    unrealized_gain_usd += float(Decimal(str(holding.get('unrealized_gain', 0))) * proportion_dec)
+
+            monthly_unrealized_gain_dec, currency_gain_map = self._calculate_quarterly_unrealized_gain(
+                current_holdings,
+                target_start,
+                effective_end,
+                ownership_map
+            )
+            monthly_unrealized_gain = float(monthly_unrealized_gain_dec)
+            unrealized_gain_cad = float(currency_gain_map.get('CAD', Decimal('0')))
+            unrealized_gain_usd = float(currency_gain_map.get('USD', Decimal('0')))
             
             monthly_data.append({
-                'year': month_start.year,
-                'month': month_start.month,
-                'month_name': month_start.strftime('%Y-%m'),
-                'total_assets': month_portfolio['summary']['total_current_value'],
+                'year': target_start.year,
+                'month': target_start.month,
+                'month_name': target_start.strftime('%Y-%m'),
+                'total_assets': float(total_assets),
                 'monthly_realized_gain': monthly_realized_gain,
-                'monthly_unrealized_gain': month_portfolio['summary']['total_unrealized_gain'],
+                'monthly_unrealized_gain': monthly_unrealized_gain,
                 'monthly_dividends': dividends,
                 'monthly_interest': interest,
                 'transaction_count': transaction_count,

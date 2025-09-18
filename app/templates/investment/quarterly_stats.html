@@ -195,6 +195,23 @@ let quarterlyData = [];
 let quarterlyAssetsChart = null;
 let quarterlyReturnsChart = null;
 
+function showLoadingOverlay(message) {
+    const msg = message || '正在加载数据...';
+    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
+        GlobalLoading.manualShow(msg);
+    } else if (window.GlobalLoading && typeof GlobalLoading.show === 'function') {
+        GlobalLoading.show(msg);
+    }
+}
+
+function hideLoadingOverlay() {
+    if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
+        GlobalLoading.manualHide(300);
+    } else if (window.GlobalLoading && typeof GlobalLoading.hide === 'function') {
+        GlobalLoading.hide(300);
+    }
+}
+
 // Load quarterly analysis data
 function loadQuarterlyAnalysis() {
     const familyId = {{ current_family.id if current_family else 1 }};
@@ -217,6 +234,8 @@ function loadQuarterlyAnalysis() {
     
     console.log('Loading quarterly analysis from:', apiUrl);
     
+    showLoadingOverlay('正在加载数据...');
+
     fetch(apiUrl)
         .then(response => {
             if (!response.ok) {
@@ -240,6 +259,9 @@ function loadQuarterlyAnalysis() {
         .catch(error => {
             console.error('Error loading quarterly analysis:', error);
             showError('Failed to load quarterly analysis data: ' + error.message);
+        })
+        .finally(() => {
+            hideLoadingOverlay();
         });
 }
 

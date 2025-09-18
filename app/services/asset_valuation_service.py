@@ -284,7 +284,10 @@ class AssetValuationService:
         
         return bought_total, sold_total, total_bought_shares, total_sold_shares, realized_gain
     
-    def get_comprehensive_portfolio_metrics(self, account_ids: List[int], target_date: Optional[date] = None) -> Dict:
+    def get_comprehensive_portfolio_metrics(self,
+                                           account_ids: List[int],
+                                           target_date: Optional[date] = None,
+                                           ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
         """
         获取完整的投资组合指标，包括正确的总回报计算
         
@@ -324,38 +327,41 @@ class AssetValuationService:
         
         # 计算每个账户的数据并汇总
         for account_id in account_ids:
+            proportion = self._get_account_proportion(account_id, ownership_map)
+            if proportion <= 0:
+                continue
             # 获取现金余额
             cad_balance, usd_balance = self._calculate_cash_balance(account_id, target_date)
-            cash_cad += cad_balance
-            cash_usd += usd_balance
+            cash_cad += cad_balance * proportion
+            cash_usd += usd_balance * proportion
             
             # 获取按币种分类的交易统计
             account_stats = self._get_account_stats_by_currency(account_id, target_date)
             
             # 汇总股票市值（按币种）
-            stock_value_cad += account_stats['stock_value_cad']
-            stock_value_usd += account_stats['stock_value_usd']
+            stock_value_cad += account_stats['stock_value_cad'] * proportion
+            stock_value_usd += account_stats['stock_value_usd'] * proportion
             
             # 汇总已实现收益（按币种）
-            realized_gain_cad += account_stats['realized_gain_cad']
-            realized_gain_usd += account_stats['realized_gain_usd']
+            realized_gain_cad += account_stats['realized_gain_cad'] * proportion
+            realized_gain_usd += account_stats['realized_gain_usd'] * proportion
             
             # 汇总未实现收益（按币种）
-            unrealized_gain_cad += account_stats['unrealized_gain_cad']
-            unrealized_gain_usd += account_stats['unrealized_gain_usd']
+            unrealized_gain_cad += account_stats['unrealized_gain_cad'] * proportion
+            unrealized_gain_usd += account_stats['unrealized_gain_usd'] * proportion
             
             # 汇总股息和利息（按币种）
-            dividends_cad += account_stats['dividends_cad']
-            dividends_usd += account_stats['dividends_usd']
-            interest_cad += account_stats['interest_cad']
-            interest_usd += account_stats['interest_usd']
+            dividends_cad += account_stats['dividends_cad'] * proportion
+            dividends_usd += account_stats['dividends_usd'] * proportion
+            interest_cad += account_stats['interest_cad'] * proportion
+            interest_usd += account_stats['interest_usd'] * proportion
             
             # 计算存款和取款
             deposits_withdrawals = self._calculate_deposits_withdrawals_by_currency(account_id, target_date)
-            deposits_cad += deposits_withdrawals['deposits_cad']
-            deposits_usd += deposits_withdrawals['deposits_usd']
-            withdrawals_cad += deposits_withdrawals['withdrawals_cad']
-            withdrawals_usd += deposits_withdrawals['withdrawals_usd']
+            deposits_cad += deposits_withdrawals['deposits_cad'] * proportion
+            deposits_usd += deposits_withdrawals['deposits_usd'] * proportion
+            withdrawals_cad += deposits_withdrawals['withdrawals_cad'] * proportion
+            withdrawals_usd += deposits_withdrawals['withdrawals_usd'] * proportion
         
         # 计算总和（CAD等价）
         total_stock_value = stock_value_cad + stock_value_usd * exchange_rate_decimal
@@ -369,7 +375,7 @@ class AssetValuationService:
         total_deposits = deposits_cad + deposits_usd * exchange_rate_decimal
         total_withdrawals = withdrawals_cad + withdrawals_usd * exchange_rate_decimal
         total_return = total_realized_gain + total_unrealized_gain + total_dividends + total_interest
-        
+
         return {
             'total_assets': {
                 'cad': float(total_assets),
@@ -427,6 +433,12 @@ class AssetValuationService:
             },
             'exchange_rate': float(exchange_rate_decimal)
         }
+
+    def _get_account_proportion(self, account_id: int,
+                                ownership_map: Optional[Dict[int, Decimal]]) -> Decimal:
+        if not ownership_map:
+            return Decimal('1')
+        return ownership_map.get(account_id, Decimal('0'))
     
     def _get_account_stats_by_currency(self, account_id: int, target_date: date) -> Dict:
         """

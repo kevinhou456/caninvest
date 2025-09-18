@@ -8,7 +8,7 @@ from flask import Blueprint
 bp = Blueprint('api', __name__)
 
 # 导入所有路由模块
-from . import families, members, accounts, stocks, categories, imports, reports, scheduler, validation
+from . import families, members, accounts, stocks, categories, imports, reports, scheduler, validation, database
 
 # 导出蓝图
 __all__ = ['bp']

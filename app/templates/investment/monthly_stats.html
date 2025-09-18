@@ -4,28 +4,28 @@
 <div class="row mb-4">
     <div class="col-12">
         <h2 class="h3 mb-0 text-gray-800">
-            <i class="fas fa-chart-bar me-2"></i>{{ _('Monthly Statistics') }}
+            <i class="fas fa-calendar-alt me-2"></i>{{ _('Monthly Analysis') }}
         </h2>
-        <p class="text-muted">{{ _('Monthly portfolio analysis and performance breakdown') }}</p>
+        <p class="text-muted">{{ _('Comprehensive monthly investment performance analysis') }}</p>
     </div>
 </div>
 
 <!-- Summary Cards -->
-<div class="row mb-4" id="summary-cards">
+<div class="row mb-4">
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-primary shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                            {{ _('Total Value') }} (CAD)
+                            {{ _('Months Covered') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-value-cad">
-                            $0.00
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            <span id="months-covered">-</span>
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                        <i class="fas fa-calendar fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -38,10 +38,10 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                            {{ _('Total Return') }}
+                            {{ _('Total Returns') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-return">
-                            $0.00 (0.00%)
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            $<span id="total-returns">-</span>
                         </div>
                     </div>
                     <div class="col-auto">
@@ -58,14 +58,14 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                            {{ _('Total Investment') }}
+                            {{ _('Average Monthly Return') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="total-investment">
-                            $0.00
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            <span id="avg-monthly-return">-</span>%
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-credit-card fa-2x text-gray-300"></i>
+                        <i class="fas fa-percentage fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -78,14 +78,14 @@
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
                         <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                            {{ _('Monthly Avg Return') }}
+                            {{ _('Current Assets') }}
                         </div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="avg-monthly-return">
-                            0.00%
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">
+                            $<span id="current-assets">-</span>
                         </div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-percentage fa-2x text-gray-300"></i>
+                        <i class="fas fa-wallet fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
@@ -95,151 +95,241 @@
 
 <!-- Charts Row -->
 <div class="row mb-4">
-    <!-- Monthly Total Assets Chart -->
-    <div class="col-xl-4 col-lg-5">
+    <!-- Total Assets Chart -->
+    <div class="col-lg-4">
         <div class="card shadow mb-4">
-            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Total Assets') }}</h6>
+            <div class="card-header py-3 bg-primary">
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Monthly Total Assets') }}</h6>
             </div>
             <div class="card-body">
-                <div class="chart-area">
-                    <canvas id="monthlyAssetsChart" style="height: 320px;"></canvas>
+                <div class="chart-area" style="height: 350px;">
+                    <canvas id="monthlyAssetsChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- Monthly Returns Breakdown Chart -->
-    <div class="col-xl-8 col-lg-7">
+    <!-- Returns Breakdown Chart -->
+    <div class="col-lg-8">
         <div class="card shadow mb-4">
-            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Returns Breakdown') }}</h6>
+            <div class="card-header py-3 bg-success">
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Monthly Returns Breakdown') }}</h6>
             </div>
             <div class="card-body">
-                <div class="chart-area">
-                    <canvas id="monthlyReturnsChart" style="height: 320px;"></canvas>
+                <div class="chart-area" style="height: 350px;">
+                    <canvas id="monthlyReturnsChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Data Analysis Table -->
+<!-- Monthly Data Analysis Table -->
 <div class="card shadow mb-4">
-    <div class="card-header py-3">
-        <h6 class="m-0 font-weight-bold text-primary">{{ _('Monthly Data Analysis') }}</h6>
+    <div class="card-header py-3 d-flex justify-content-between align-items-center bg-info">
+        <h6 class="m-0 font-weight-bold text-white">{{ _('Monthly Data Analysis') }}</h6>
+        <div class="dropdown">
+            <button class="btn btn-primary dropdown-toggle btn-sm" type="button" id="exportDropdown" data-toggle="dropdown">
+                <i class="fas fa-download me-1"></i>{{ _('Export') }}
+            </button>
+            <div class="dropdown-menu">
+                <a class="dropdown-item" href="#" onclick="exportTableToCSV()">
+                    <i class="fas fa-file-csv me-2"></i>{{ _('CSV') }}
+                </a>
+                <a class="dropdown-item" href="#" onclick="exportTableToPDF()">
+                    <i class="fas fa-file-pdf me-2"></i>{{ _('PDF') }}
+                </a>
+            </div>
+        </div>
     </div>
     <div class="card-body">
         <div class="table-responsive">
-            <table class="table table-bordered" id="monthlyTable" width="100%" cellspacing="0">
+            <table class="table table-bordered" id="monthlyAnalysisTable" width="100%" cellspacing="0">
                 <thead>
-                    <tr>
+                    <tr class="bg-primary text-white">
                         <th>{{ _('Month') }}</th>
-                        <th>{{ _('Total Value (CAD)') }}</th>
-                        <th>{{ _('Total Value (USD)') }}</th>
-                        <th>{{ _('Total Investment (CAD)') }}</th>
-                        <th>{{ _('Total Investment (USD)') }}</th>
-                        <th>{{ _('Return (CAD)') }}</th>
-                        <th>{{ _('Return (USD)') }}</th>
-                        <th>{{ _('Return Percent') }}</th>
+                        <th>{{ _('Total Assets') }}</th>
+                        <th>{{ _('Realized Gain/Loss') }}</th>
+                        <th>{{ _('Unrealized Gain/Loss') }}</th>
+                        <th>{{ _('Total Dividends') }}</th>
+                        <th>{{ _('Total Interest') }}</th>
+                        <th>{{ _('Transactions') }}</th>
+                        <th>{{ _('Buy Amount') }}</th>
+                        <th>{{ _('Sell Amount') }}</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="monthly-data-tbody">
+                    <!-- Data populated by JavaScript -->
                 </tbody>
+                <tfoot>
+                    <tr class="bg-light font-weight-bold">
+                        <td>{{ _('Total') }}</td>
+                        <td id="total-assets-footer">-</td>
+                        <td id="total-realized-footer">-</td>
+                        <td id="total-unrealized-footer">-</td>
+                        <td id="total-dividends-footer">-</td>
+                        <td id="total-interest-footer">-</td>
+                        <td id="total-transactions-footer">-</td>
+                        <td id="total-buy-footer">-</td>
+                        <td id="total-sell-footer">-</td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     </div>
 </div>
+
+<div id="loading-spinner" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status">
+        <span class="sr-only">{{ _('Loading...') }}</span>
+    </div>
+    <p class="mt-2 text-muted">{{ _('Loading monthly analysis data...') }}</p>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 let monthlyData = [];
 let monthlyAssetsChart = null;
 let monthlyReturnsChart = null;
 
-// Get current family ID and other parameters
-const familyId = {{ family.id if family else 'null' }};
-const memberId = new URLSearchParams(window.location.search).get('member_id');
-const accountId = new URLSearchParams(window.location.search).get('account_id');
+function showLoadingOverlay(message) {
+    const msg = message || '正在加载数据...';
+    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
+        GlobalLoading.manualShow(msg);
+    } else if (window.GlobalLoading && typeof GlobalLoading.show === 'function') {
+        GlobalLoading.show(msg);
+    }
+}
+
+function hideLoadingOverlay() {
+    if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
+        GlobalLoading.manualHide(300);
+    } else if (window.GlobalLoading && typeof GlobalLoading.hide === 'function') {
+        GlobalLoading.hide(300);
+    }
+}
 
 function loadMonthlyAnalysis() {
+    const familyId = {{ current_family.id if current_family else 1 }};
+    const memberId = {{ current_member_id if current_member_id else 'null' }};
+    const accountId = {{ current_account_id if current_account_id else 'null' }};
+
     let apiUrl = `/api/v1/families/${familyId}/reports/monthly-analysis`;
-    let params = new URLSearchParams();
-    
-    if (memberId) params.append('member_id', memberId);
-    if (accountId) params.append('account_id', accountId);
-    
+    const params = new URLSearchParams();
+
+    if (memberId) {
+        params.append('member_id', memberId);
+    }
+    if (accountId) {
+        params.append('account_id', accountId);
+    }
+
     if (params.toString()) {
         apiUrl += '?' + params.toString();
     }
-    
+
+    showLoadingOverlay('正在加载数据...');
+
     fetch(apiUrl)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
-            monthlyData = data.analysis.monthly_data || [];
-            updateSummaryCards(data.analysis.summary || {});
-            updateMonthlyAssetsChart();
-            updateMonthlyReturnsChart();
-            updateMonthlyTable();
+            if (data.analysis) {
+                monthlyData = data.analysis.monthly_data || [];
+                updateSummaryCards(data.analysis.summary || {});
+                updateMonthlyAssetsChart();
+                updateMonthlyReturnsChart();
+                updateMonthlyTable();
+                document.getElementById('loading-spinner').style.display = 'none';
+            } else {
+                showError('No analysis data returned from API');
+            }
         })
         .catch(error => {
             console.error('Error loading monthly analysis:', error);
+            showError('Failed to load monthly analysis data: ' + error.message);
+        })
+        .finally(() => {
+            hideLoadingOverlay();
         });
 }
 
 function updateSummaryCards(summary) {
-    document.getElementById('total-value-cad').textContent = 
-        '$' + (summary.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    const totalReturn = summary.total_return_cad || 0;
-    const totalReturnPercent = summary.total_return_percent || 0;
-    document.getElementById('total-return').textContent = 
-        '$' + totalReturn.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + 
-        ' (' + totalReturnPercent.toFixed(2) + '%)';
-    
-    document.getElementById('total-investment').textContent = 
-        '$' + (summary.total_investment_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    document.getElementById('avg-monthly-return').textContent = 
-        (summary.avg_monthly_return_percent || 0).toFixed(2) + '%';
+    document.getElementById('months-covered').textContent = summary.months_covered || 0;
+    document.getElementById('total-returns').textContent = formatNumber(summary.total_months_gain || 0);
+    document.getElementById('avg-monthly-return').textContent = formatNumber(summary.average_monthly_return || 0, 2);
+
+    let currentAssets = 0;
+    if (monthlyData.length > 0) {
+        const latestMonth = monthlyData.reduce((latest, current) => {
+            const currentDate = new Date(current.year, current.month - 1);
+            const latestDate = new Date(latest.year, latest.month - 1);
+            return currentDate > latestDate ? current : latest;
+        });
+        currentAssets = latestMonth.total_assets || 0;
+    }
+    document.getElementById('current-assets').textContent = formatNumber(currentAssets);
 }
 
 function updateMonthlyAssetsChart() {
     const ctx = document.getElementById('monthlyAssetsChart').getContext('2d');
-    
+
     if (monthlyAssetsChart) {
         monthlyAssetsChart.destroy();
     }
-    
-    const labels = monthlyData.map(item => item.period);
-    const cadData = monthlyData.map(item => item.total_value_cad || 0);
-    const usdData = monthlyData.map(item => item.total_value_usd || 0);
-    
+
+    const chartData = [...monthlyData].sort((a, b) => {
+        if (a.year !== b.year) return a.year - b.year;
+        return a.month - b.month;
+    });
+
+    const labels = chartData.map(item => `${item.year}-${String(item.month).padStart(2, '0')}`);
+    const assets = chartData.map(item => item.total_assets);
+
     monthlyAssetsChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
-            datasets: [{
-                label: 'CAD',
-                data: cadData,
-                backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                borderColor: 'rgba(54, 162, 235, 1)',
-                borderWidth: 1
-            }, {
-                label: 'USD',
-                data: usdData,
-                backgroundColor: 'rgba(255, 99, 132, 0.6)',
-                borderColor: 'rgba(255, 99, 132, 1)',
-                borderWidth: 1
-            }]
+            datasets: [
+                {
+                    label: '{{ _("Total Assets") }}',
+                    data: assets,
+                    backgroundColor: 'rgba(78, 115, 223, 0.8)',
+                    borderColor: 'rgba(78, 115, 223, 1)',
+                    borderWidth: 1
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            elements: {
+                bar: {
+                    categoryPercentage: 0.8,
+                    barPercentage: 0.9
+                }
+            },
             scales: {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '{{ _("Month") }}'
+                    }
+                },
                 y: {
-                    beginAtZero: true,
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '{{ _("Total Assets ($)") }}'
+                    },
                     ticks: {
                         callback: function(value) {
                             return '$' + value.toLocaleString();
@@ -254,6 +344,9 @@ function updateMonthlyAssetsChart() {
                             return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
                         }
                     }
+                },
+                legend: {
+                    display: false
                 }
             }
         }
@@ -262,88 +355,107 @@ function updateMonthlyAssetsChart() {
 
 function updateMonthlyReturnsChart() {
     const ctx = document.getElementById('monthlyReturnsChart').getContext('2d');
-    
+
     if (monthlyReturnsChart) {
         monthlyReturnsChart.destroy();
     }
-    
-    const labels = monthlyData.map(item => item.period);
-    const cadReturnData = monthlyData.map(item => item.total_return_cad || 0);
-    const usdReturnData = monthlyData.map(item => item.total_return_usd || 0);
-    const returnPercentData = monthlyData.map(item => item.total_return_percent || 0);
-    
+
+    const chartData = [...monthlyData].sort((a, b) => {
+        if (a.year !== b.year) return a.year - b.year;
+        return a.month - b.month;
+    });
+
+    const labels = chartData.map(item => `${item.year}-${String(item.month).padStart(2, '0')}`);
+    const realizedGains = chartData.map(item => item.monthly_realized_gain || 0);
+    const unrealizedGains = chartData.map(item => item.monthly_unrealized_gain || 0);
+    const dividendsAndInterest = chartData.map(item => (item.monthly_dividends || 0) + (item.monthly_interest || 0));
+
     monthlyReturnsChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
-            datasets: [{
-                label: 'Return CAD ($)',
-                data: cadReturnData,
-                backgroundColor: 'rgba(75, 192, 192, 0.6)',
-                borderColor: 'rgba(75, 192, 192, 1)',
-                borderWidth: 1,
-                yAxisID: 'y'
-            }, {
-                label: 'Return USD ($)',
-                data: usdReturnData,
-                backgroundColor: 'rgba(153, 102, 255, 0.6)',
-                borderColor: 'rgba(153, 102, 255, 1)',
-                borderWidth: 1,
-                yAxisID: 'y'
-            }, {
-                label: 'Return %',
-                data: returnPercentData,
-                type: 'line',
-                borderColor: 'rgba(255, 206, 86, 1)',
-                backgroundColor: 'rgba(255, 206, 86, 0.2)',
-                borderWidth: 3,
-                fill: false,
-                yAxisID: 'y1'
-            }]
+            datasets: [
+                {
+                    label: '{{ _("Realized Gains") }}',
+                    data: realizedGains,
+                    backgroundColor: 'rgba(28, 200, 138, 0.8)',
+                    borderColor: 'rgba(28, 200, 138, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: '{{ _("Unrealized Gains") }}',
+                    data: unrealizedGains,
+                    backgroundColor: 'rgba(54, 162, 235, 0.8)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: '{{ _("Dividends & Interest") }}',
+                    data: dividendsAndInterest,
+                    backgroundColor: 'rgba(255, 206, 86, 0.8)',
+                    borderColor: 'rgba(255, 206, 86, 1)',
+                    borderWidth: 1
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false,
+            elements: {
+                bar: {
+                    categoryPercentage: 0.8,
+                    barPercentage: 0.9
+                }
             },
             scales: {
-                y: {
-                    type: 'linear',
+                x: {
                     display: true,
-                    position: 'left',
+                    title: {
+                        display: true,
+                        text: '{{ _("Month") }}'
+                    }
+                },
+                y: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: '{{ _("Returns ($)") }}'
+                    },
                     ticks: {
                         callback: function(value) {
                             return '$' + value.toLocaleString();
                         }
                     }
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    ticks: {
-                        callback: function(value) {
-                            return value.toFixed(1) + '%';
-                        }
-                    },
-                    grid: {
-                        drawOnChartArea: false,
-                    },
                 }
             },
             plugins: {
                 tooltip: {
+                    mode: 'index',
+                    intersect: false,
                     callbacks: {
                         label: function(context) {
-                            if (context.dataset.label === 'Return %') {
-                                return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + '%';
-                            } else {
-                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                            if (context.dataset.label === '{{ _("Dividends & Interest") }}') {
+                                const monthIndex = context.dataIndex;
+                                const dividends = chartData[monthIndex].monthly_dividends || 0;
+                                const interest = chartData[monthIndex].monthly_interest || 0;
+                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString() +
+                                       ' ({{ _("Dividends") }}: $' + dividends.toLocaleString() +
+                                       ', {{ _("Interest") }}: $' + interest.toLocaleString() + ')';
                             }
+                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                        },
+                        footer: function(tooltipItems) {
+                            let total = 0;
+                            tooltipItems.forEach(function(tooltipItem) {
+                                total += tooltipItem.parsed.y;
+                            });
+                            return '{{ _("Total") }}: $' + total.toLocaleString();
                         }
                     }
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
                 }
             }
         }
@@ -351,54 +463,131 @@ function updateMonthlyReturnsChart() {
 }
 
 function updateMonthlyTable() {
-    const tbody = document.querySelector('#monthlyTable tbody');
+    const tbody = document.getElementById('monthly-data-tbody');
     tbody.innerHTML = '';
-    
-    monthlyData.forEach(item => {
-        const row = tbody.insertRow();
-        
-        // Month
-        const cellMonth = row.insertCell();
-        cellMonth.textContent = item.period;
-        cellMonth.className = 'font-weight-bold';
-        
-        // Total Value CAD
-        const cellValueCAD = row.insertCell();
-        cellValueCAD.textContent = '$' + (item.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        // Total Value USD
-        const cellValueUSD = row.insertCell();
-        cellValueUSD.textContent = '$' + (item.total_value_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        // Total Investment CAD
-        const cellInvestmentCAD = row.insertCell();
-        cellInvestmentCAD.textContent = '$' + (item.total_investment_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        // Total Investment USD
-        const cellInvestmentUSD = row.insertCell();
-        cellInvestmentUSD.textContent = '$' + (item.total_investment_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        // Return CAD
-        const cellReturnCAD = row.insertCell();
-        const returnCAD = item.total_return_cad || 0;
-        cellReturnCAD.textContent = '$' + returnCAD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        cellReturnCAD.className = returnCAD >= 0 ? 'text-success' : 'text-danger';
-        
-        // Return USD
-        const cellReturnUSD = row.insertCell();
-        const returnUSD = item.total_return_usd || 0;
-        cellReturnUSD.textContent = '$' + returnUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        cellReturnUSD.className = returnUSD >= 0 ? 'text-success' : 'text-danger';
-        
-        // Return %
-        const cellReturnPercent = row.insertCell();
-        const returnPercent = item.total_return_percent || 0;
-        cellReturnPercent.textContent = returnPercent.toFixed(2) + '%';
-        cellReturnPercent.className = returnPercent >= 0 ? 'text-success font-weight-bold' : 'text-danger font-weight-bold';
+
+    let totalAssets = 0, totalRealized = 0, totalUnrealized = 0;
+    let totalDividends = 0, totalInterest = 0, totalTransactions = 0;
+    let totalBuy = 0, totalSell = 0;
+
+    const tableData = [...monthlyData].sort((a, b) => {
+        if (a.year !== b.year) return b.year - a.year;
+        return b.month - a.month;
     });
+
+    tableData.forEach(item => {
+        const row = document.createElement('tr');
+
+        const realizedClass = item.monthly_realized_gain >= 0 ? 'text-success' : 'text-danger';
+        const unrealizedClass = item.monthly_unrealized_gain >= 0 ? 'text-success' : 'text-danger';
+        const currencyBreakdown = item.currency_breakdown || {};
+
+        row.innerHTML = `
+            <td class="font-weight-bold">${item.year}-${String(item.month).padStart(2, '0')}</td>
+            <td>
+                $${formatNumber(item.total_assets)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
+            </td>
+            <td class="${realizedClass}">
+                $${formatNumber(item.monthly_realized_gain, 2, true)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
+            </td>
+            <td class="${unrealizedClass}">
+                $${formatNumber(item.monthly_unrealized_gain, 2, true)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.unrealized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.unrealized_gain_usd || 0, 2, true)}</small>
+            </td>
+            <td class="text-info">
+                $${formatNumber(item.monthly_dividends)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
+            </td>
+            <td class="text-info">
+                $${formatNumber(item.monthly_interest)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.interest_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.interest_usd || 0, 2)}</small>
+            </td>
+            <td class="text-center">${item.transaction_count}</td>
+            <td class="text-success">
+                $${formatNumber(item.buy_amount, 2)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.buy_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.buy_usd || 0, 2)}</small>
+            </td>
+            <td class="text-danger">
+                $${formatNumber(item.sell_amount, 2)}
+                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.sell_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.sell_usd || 0, 2)}</small>
+            </td>
+        `;
+
+        tbody.appendChild(row);
+
+        if (item === tableData[0]) {
+            totalAssets = item.total_assets;
+        }
+        totalRealized += item.monthly_realized_gain;
+        totalUnrealized += item.monthly_unrealized_gain;
+        totalDividends += item.monthly_dividends;
+        totalInterest += item.monthly_interest;
+        totalTransactions += item.transaction_count;
+        totalBuy += item.buy_amount;
+        totalSell += item.sell_amount;
+    });
+
+    document.getElementById('total-assets-footer').textContent = '$' + formatNumber(totalAssets);
+    document.getElementById('total-realized-footer').textContent = '$' + formatNumber(totalRealized, 2, true);
+    document.getElementById('total-unrealized-footer').textContent = '$' + formatNumber(totalUnrealized, 2, true);
+    document.getElementById('total-dividends-footer').textContent = '$' + formatNumber(totalDividends);
+    document.getElementById('total-interest-footer').textContent = '$' + formatNumber(totalInterest);
+    document.getElementById('total-transactions-footer').textContent = totalTransactions;
+    document.getElementById('total-buy-footer').textContent = '$' + formatNumber(totalBuy, 2);
+    document.getElementById('total-sell-footer').textContent = '$' + formatNumber(totalSell, 2);
 }
 
-// Load data when page loads
+function formatNumber(num, decimals = 0, showSign = false) {
+    const number = parseFloat(num) || 0;
+    const formatted = number.toLocaleString('en-US', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+    });
+
+    if (showSign && number > 0) {
+        return '+' + formatted;
+    }
+
+    return formatted;
+}
+
+function showError(message) {
+    document.getElementById('loading-spinner').innerHTML = `
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-triangle me-2"></i>${message}
+        </div>
+    `;
+}
+
+function exportTableToCSV() {
+    const table = document.getElementById('monthlyAnalysisTable');
+    const rows = table.querySelectorAll('tr');
+    const csv = [];
+
+    for (let i = 0; i < rows.length; i++) {
+        const row = [], cols = rows[i].querySelectorAll('td, th');
+        for (let j = 0; j < cols.length; j++) {
+            row.push('"' + cols[j].innerText.replace(/"/g, '""') + '"');
+        }
+        csv.push(row.join(','));
+    }
+
+    const csvFile = new Blob([csv.join('\n')], { type: 'text/csv' });
+    const downloadLink = document.createElement('a');
+    downloadLink.download = 'monthly_analysis.csv';
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+    downloadLink.style.display = 'none';
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+}
+
+function exportTableToPDF() {
+    window.print();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     loadMonthlyAnalysis();
 });

@@ -159,6 +159,9 @@
 <!-- Chart.js datalabels plugin for displaying percentages on charts -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <script>
+if (window.Chart && Chart.register && typeof ChartDataLabels !== 'undefined') {
+    Chart.register(ChartDataLabels);
+}
 let distributionData = {};
 let stocksChart = null;
 let categoryChart = null;
@@ -223,7 +226,7 @@ function updateStocksChart() {
         .sort((a, b) => b.value - a.value)
         .slice(0, 10);
     
-    const labels = sortedStocks.map(stock => stock.symbol);
+    const labels = sortedStocks.map(stock => `${stock.symbol} ($${stock.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     const data = sortedStocks.map(stock => stock.value);
     
     stocksChart = new Chart(ctx, {
@@ -257,15 +260,10 @@ function updateStocksChart() {
                 },
                 legend: {
                     display: true,
-                    position: 'bottom'
+                    position: 'right'
                 },
                 datalabels: {
-                    display: function(context) {
-                        const value = context.parsed;
-                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                        const percentage = (value / total) * 100;
-                        return percentage >= 3; // 降低到3%显示更多标签
-                    },
+                    display: true,
                     color: 'white',
                     font: {
                         weight: 'bold',
@@ -273,6 +271,7 @@ function updateStocksChart() {
                     },
                     formatter: function(value, context) {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        if (!total) return '';
                         const percentage = ((value / total) * 100).toFixed(1);
                         return percentage + '%';
                     }
@@ -294,7 +293,7 @@ function updateCategoryChart() {
         return;
     }
     
-    const labels = distributionData.by_category.map(cat => cat.category);
+    const labels = distributionData.by_category.map(cat => `${cat.category} ($${cat.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     const data = distributionData.by_category.map(cat => cat.value);
     
     categoryChart = new Chart(ctx, {
@@ -329,15 +328,10 @@ function updateCategoryChart() {
                 },
                 legend: {
                     display: true,
-                    position: 'bottom'
+                    position: 'right'
                 },
                 datalabels: {
-                    display: function(context) {
-                        const value = context.parsed;
-                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                        const percentage = (value / total) * 100;
-                        return percentage >= 3; // 降低到3%显示更多标签
-                    },
+                    display: true,
                     color: 'white',
                     font: {
                         weight: 'bold',
@@ -345,6 +339,7 @@ function updateCategoryChart() {
                     },
                     formatter: function(value, context) {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        if (!total) return '';
                         const percentage = ((value / total) * 100).toFixed(1);
                         return percentage + '%';
                     }
@@ -366,7 +361,7 @@ function updateCurrencyChart() {
         return;
     }
     
-    const labels = distributionData.by_currency.map(curr => curr.currency);
+    const labels = distributionData.by_currency.map(curr => `${curr.currency} ($${curr.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     const data = distributionData.by_currency.map(curr => curr.value);
     
     currencyChart = new Chart(ctx, {
@@ -399,11 +394,19 @@ function updateCurrencyChart() {
                 },
                 legend: {
                     display: true,
-                    position: 'bottom'
+                    position: 'right'
                 },
                 datalabels: {
                     display: true, // 货币分布只有两个，都显示
-                    color: 'white',
+                    color: function(context) {
+                        const currency = distributionData.by_currency[context.dataIndex].currency;
+                        if (!currency) return 'white';
+                        const upper = currency.toUpperCase();
+                        if (upper === 'CAD' || upper === 'USD') {
+                            return '#1f2a4a';
+                        }
+                        return 'white';
+                    },
                     font: {
                         weight: 'bold',
                         size: 14
@@ -443,7 +446,7 @@ function updateAccountChart() {
 
     if (singleJointAccount) {
         const account = accountData[0];
-        labels = account.members.map(member => member.name);
+        labels = account.members.map(member => `${member.name} ($${(member.value || account.value * (member.ownership_percentage || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
         data = account.members.map(member => {
             if (typeof member.value === 'number' && !Number.isNaN(member.value)) {
                 return member.value;
@@ -455,7 +458,7 @@ function updateAccountChart() {
             titleEl.textContent = `${defaultTitle} - ${account.account_name}`;
         }
     } else {
-        labels = accountData.map(acc => acc.account_name);
+        labels = accountData.map(acc => `${acc.account_name} ($${acc.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
         data = accountData.map(acc => acc.value);
         if (titleEl && defaultTitle) {
             titleEl.textContent = defaultTitle;
@@ -497,15 +500,10 @@ function updateAccountChart() {
                 },
                 legend: {
                     display: true,
-                    position: 'bottom'
+                    position: 'right'
                 },
                 datalabels: {
-                    display: function(context) {
-                        const value = context.parsed;
-                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                        const percentage = (value / total) * 100;
-                        return percentage >= 3; // 降低到3%显示更多标签
-                    },
+                    display: true,
                     color: 'white',
                     font: {
                         weight: 'bold',
@@ -513,6 +511,7 @@ function updateAccountChart() {
                     },
                     formatter: function(value, context) {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        if (!total) return '';
                         const percentage = ((value / total) * 100).toFixed(1);
                         return percentage + '%';
                     }

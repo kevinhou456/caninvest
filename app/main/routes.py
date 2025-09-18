@@ -53,6 +53,8 @@ def overview():
         report_service = ReportService()
         
         # 根据过滤条件获取账户
+        ownership_map = None
+
         if account_id:
             accounts = Account.query.filter_by(id=account_id, family_id=family.id).all()
             filter_description = f"账户: {accounts[0].name}" if accounts else "未找到账户"
@@ -65,10 +67,17 @@ def overview():
             from app.models.member import Member
             member = Member.query.get(member_id)
             filter_description = f"成员: {member.name}" if member else "未找到成员"
+
+            ownership_map = {}
+            for membership in member_accounts:
+                try:
+                    ownership_map[membership.account_id] = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+                except Exception:
+                    ownership_map[membership.account_id] = Decimal('0')
         else:
             accounts = Account.query.filter_by(family_id=family.id).all()
             filter_description = "全部成员"
-        
+
         # 获取汇率信息
         exchange_rates = currency_service.get_cad_usd_rates()
         
@@ -76,7 +85,10 @@ def overview():
         account_ids = [acc.id for acc in accounts]
         
         # 获取综合投资组合指标 - 包含完整的财务计算
-        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(account_ids)
+        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
+            account_ids,
+            ownership_map=ownership_map
+        )
         
         # 获取详细的投资组合数据
         portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
@@ -1591,8 +1603,7 @@ def monthly_stats():
         db.session.commit()
     
     return render_template('investment/monthly_stats.html',
-                         title=_('Monthly Statistics'),
-                         family=family)
+                         title=_('Monthly Statistics'))
 
 
 @bp.route('/quarterly-stats')

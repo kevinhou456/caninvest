@@ -695,8 +695,17 @@ function renderDailyPnlChart(dailyStats) {
 
 // Handle day click to show details
 function onDayClick(dateStr) {
-    const apiUrl = `/api/v1/daily-stats/day/${dateStr}`;
-    
+    const params = new URLSearchParams();
+    if (accountId) {
+        params.append('account_ids', accountId);
+    } else if (memberId) {
+        params.append('member_id', memberId);
+    }
+
+    const apiUrl = params.toString()
+        ? `/api/v1/daily-stats/day/${dateStr}?${params.toString()}`
+        : `/api/v1/daily-stats/day/${dateStr}`;
+
     fetch(apiUrl)
         .then(response => response.json())
         .then(data => {

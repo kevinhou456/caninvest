@@ -1,0 +1,8 @@
+Collecting APScheduler
+  Downloading APScheduler-3.11.0-py3-none-any.whl.metadata (6.4 kB)
+Collecting tzlocal>=3.0 (from APScheduler)
+  Downloading tzlocal-5.3.1-py3-none-any.whl.metadata (7.6 kB)
+Downloading APScheduler-3.11.0-py3-none-any.whl (64 kB)
+Downloading tzlocal-5.3.1-py3-none-any.whl (18 kB)
+Installing collected packages: tzlocal, APScheduler
+Successfully installed APScheduler-3.11.0 tzlocal-5.3.1

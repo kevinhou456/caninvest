@@ -14,9 +14,11 @@ from datetime import datetime, date
 from typing import Dict, List, Optional
 import logging
 
+from decimal import Decimal, InvalidOperation
+
 from app.services.daily_stats_service import daily_stats_service
 from app.services.daily_stats_cache_service import daily_stats_cache_service
-from app.models.account import Account
+from app.models.account import Account, AccountMember
 from app.models.family import Family
 from app.models.member import Member
 
@@ -36,6 +38,21 @@ def get_member_account_ids(member_id: int) -> List[int]:
     # 使用成员的get_accounts方法获取账户信息
     accounts = member.get_accounts()
     return [account['id'] for account in accounts if 'id' in account]
+
+
+def get_member_ownership_map(member_id: int) -> Dict[int, Decimal]:
+    """获取成员各账户的持股比例映射"""
+    ownership_map: Dict[int, Decimal] = {}
+    memberships = AccountMember.query.filter_by(member_id=member_id).all()
+
+    for membership in memberships:
+        try:
+            percentage = Decimal(str(membership.ownership_percentage or 0))
+            ownership_map[membership.account_id] = percentage / Decimal('100')
+        except (InvalidOperation, TypeError):
+            ownership_map[membership.account_id] = Decimal('0')
+
+    return ownership_map
 
 # 创建蓝图
 daily_stats_bp = Blueprint('daily_stats', __name__, url_prefix='/api/v1/daily-stats')
@@ -88,6 +105,8 @@ def get_monthly_calendar():
         account_ids_param = request.args.get('account_ids')
         member_id_param = request.args.get('member_id', type=int)
         
+        ownership_map = None
+
         if account_ids_param:
             try:
                 account_ids = [int(id.strip()) for id in account_ids_param.split(',') if id.strip()]
@@ -100,6 +119,7 @@ def get_monthly_calendar():
         elif member_id_param:
             # 使用指定成员的账户
             account_ids = get_member_account_ids(member_id_param)
+            ownership_map = get_member_ownership_map(member_id_param)
             if not account_ids:
                 return jsonify({
                     'success': False,
@@ -142,7 +162,9 @@ def get_monthly_calendar():
         logger.info(f"获取月历数据: {year}-{month}, 账户: {account_ids}")
         
         # 获取月历数据
-        calendar_data = daily_stats_service.get_monthly_calendar_data(account_ids, year, month)
+        calendar_data = daily_stats_service.get_monthly_calendar_data(
+            account_ids, year, month, ownership_map
+        )
         
         return jsonify({
             'success': True,
@@ -189,6 +211,7 @@ def get_current_month_calendar():
         elif member_id_param:
             # 使用指定成员的账户
             account_ids = get_member_account_ids(member_id_param)
+            ownership_map = get_member_ownership_map(member_id_param)
             if not account_ids:
                 return jsonify({
                     'success': False,
@@ -214,7 +237,7 @@ def get_current_month_calendar():
         logger.info(f"获取当前月历数据，账户: {account_ids}")
         
         # 获取当前月份数据
-        calendar_data = daily_stats_service.get_current_month_calendar(account_ids)
+        calendar_data = daily_stats_service.get_current_month_calendar(account_ids, ownership_map)
         
         return jsonify({
             'success': True,
@@ -289,6 +312,10 @@ def get_daily_floating_pnl(date_str: str):
         
         # 获取账户ID列表
         account_ids_param = request.args.get('account_ids')
+        member_id_param = request.args.get('member_id', type=int)
+
+        ownership_map = None
+
         if account_ids_param:
             try:
                 account_ids = [int(id.strip()) for id in account_ids_param.split(',') if id.strip()]
@@ -297,15 +324,21 @@ def get_daily_floating_pnl(date_str: str):
                     'success': False,
                     'error': '账户ID格式无效'
                 }), 400
+            if member_id_param:
+                ownership_map = get_member_ownership_map(member_id_param)
         else:
-            family = Family.query.first()
-            if not family:
-                return jsonify({
-                    'success': False,
-                    'error': '没有找到家庭数据',
-                    'message': '请先创建家庭数据'
-                }), 400
-            account_ids = get_family_account_ids(family.id)
+            if member_id_param:
+                account_ids = get_member_account_ids(member_id_param)
+                ownership_map = get_member_ownership_map(member_id_param)
+            else:
+                family = Family.query.first()
+                if not family:
+                    return jsonify({
+                        'success': False,
+                        'error': '没有找到家庭数据',
+                        'message': '请先创建家庭数据'
+                    }), 400
+                account_ids = get_family_account_ids(family.id)
         
         if not account_ids:
             return jsonify({
@@ -316,7 +349,7 @@ def get_daily_floating_pnl(date_str: str):
         logger.info(f"获取{target_date}的浮动盈亏，账户: {account_ids}")
         
         # 获取浮动盈亏详情
-        pnl_data = daily_stats_service.get_daily_floating_pnl(account_ids, target_date)
+        pnl_data = daily_stats_service.get_daily_floating_pnl(account_ids, target_date, ownership_map)
         
         return jsonify({
             'success': True,
@@ -370,6 +403,10 @@ def get_calendar_summary():
         
         # 获取账户ID列表
         account_ids_param = request.args.get('account_ids')
+        member_id_param = request.args.get('member_id', type=int)
+
+        ownership_map = None
+
         if account_ids_param:
             try:
                 account_ids = [int(id.strip()) for id in account_ids_param.split(',') if id.strip()]
@@ -378,15 +415,21 @@ def get_calendar_summary():
                     'success': False,
                     'error': '账户ID格式无效'
                 }), 400
+            if member_id_param:
+                ownership_map = get_member_ownership_map(member_id_param)
         else:
-            family = Family.query.first()
-            if not family:
-                return jsonify({
-                    'success': False,
-                    'error': '没有找到家庭数据',
-                    'message': '请先创建家庭数据'
-                }), 400
-            account_ids = get_family_account_ids(family.id)
+            if member_id_param:
+                account_ids = get_member_account_ids(member_id_param)
+                ownership_map = get_member_ownership_map(member_id_param)
+            else:
+                family = Family.query.first()
+                if not family:
+                    return jsonify({
+                        'success': False,
+                        'error': '没有找到家庭数据',
+                        'message': '请先创建家庭数据'
+                    }), 400
+                account_ids = get_family_account_ids(family.id)
         
         if not account_ids:
             return jsonify({
@@ -404,7 +447,7 @@ def get_calendar_summary():
         logger.info(f"获取月历汇总统计: {year}-{month}, 账户: {account_ids}")
         
         # 获取汇总统计
-        summary_data = daily_stats_service.get_calendar_summary_stats(account_ids, year, month)
+        summary_data = daily_stats_service.get_calendar_summary_stats(account_ids, year, month, ownership_map)
         
         return jsonify({
             'success': True,
