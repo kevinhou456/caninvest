@@ -119,3 +119,9 @@ migrations/versions/*.py
 # Local development
 test_db.db
 family_investment.db
+/static/uploads
+debug_csv_flow.py
+test_csv_import_enhancements.py
+test_csv_import_simple.py
+test_currency_validation.py
+test_transaction_update.py
