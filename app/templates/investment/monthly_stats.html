@@ -153,9 +153,10 @@ function loadMonthlyAnalysis() {
         .then(data => {
             if (data.analysis) {
                 monthlyData = data.analysis.monthly_data || [];
+                const currentTotals = data.analysis.current_totals || null;
                 updateMonthlyAssetsChart();
                 updateMonthlyReturnsChart();
-                updateMonthlyTable();
+                updateMonthlyTable(currentTotals);
                 document.getElementById('loading-spinner').style.display = 'none';
             } else {
                 showError('No analysis data returned from API');
@@ -354,7 +355,7 @@ function updateMonthlyReturnsChart() {
     });
 }
 
-function updateMonthlyTable() {
+function updateMonthlyTable(currentTotals) {
     const tbody = document.getElementById('monthly-data-tbody');
     tbody.innerHTML = '';
 
@@ -454,13 +455,26 @@ function updateMonthlyTable() {
         }
     });
 
-    document.getElementById('total-assets-footer').innerHTML = '$' + formatNumber(totalAssets, 2) +
-        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalAssetsCad, 2)} | USD: $${formatNumber(totalAssetsUsd, 2)}</small>`;
-    document.getElementById('total-realized-footer').innerHTML = '$' + formatNumber(totalRealized, 2, true) +
-        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalRealizedCad, 2, true)} | USD: $${formatNumber(totalRealizedUsd, 2, true)}</small>`;
-    document.getElementById('total-unrealized-footer').innerHTML = '$' + formatNumber(totalUnrealized, 2, true) +
-        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalUnrealizedCad, 2, true)} | USD: $${formatNumber(totalUnrealizedUsd, 2, true)}</small>`;
-    if (hasReturnBase) {
+    const totalAssetsValue = currentTotals ? currentTotals.total_assets : totalAssets;
+    const totalAssetsCadValue = currentTotals ? currentTotals.total_assets_cad : totalAssetsCad;
+    const totalAssetsUsdValue = currentTotals ? currentTotals.total_assets_usd : totalAssetsUsd;
+    const totalRealizedValue = currentTotals ? currentTotals.realized_gain : totalRealized;
+    const totalRealizedCadValue = currentTotals ? currentTotals.realized_gain_cad : totalRealizedCad;
+    const totalRealizedUsdValue = currentTotals ? currentTotals.realized_gain_usd : totalRealizedUsd;
+    const totalUnrealizedValue = currentTotals ? currentTotals.unrealized_gain : totalUnrealized;
+    const totalUnrealizedCadValue = currentTotals ? currentTotals.unrealized_gain_cad : totalUnrealizedCad;
+    const totalUnrealizedUsdValue = currentTotals ? currentTotals.unrealized_gain_usd : totalUnrealizedUsd;
+    const footerReturnPercent = currentTotals ? currentTotals.return_percent : (hasReturnBase ? (compoundReturnFactor - 1) * 100 : null);
+
+    document.getElementById('total-assets-footer').innerHTML = '$' + formatNumber(totalAssetsValue, 2) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalAssetsCadValue, 2)} | USD: $${formatNumber(totalAssetsUsdValue, 2)}</small>`;
+    document.getElementById('total-realized-footer').innerHTML = '$' + formatNumber(totalRealizedValue, 2, true) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalRealizedCadValue, 2, true)} | USD: $${formatNumber(totalRealizedUsdValue, 2, true)}</small>`;
+    document.getElementById('total-unrealized-footer').innerHTML = '$' + formatNumber(totalUnrealizedValue, 2, true) +
+        `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalUnrealizedCadValue, 2, true)} | USD: $${formatNumber(totalUnrealizedUsdValue, 2, true)}</small>`;
+    if (footerReturnPercent !== null && footerReturnPercent !== undefined) {
+        document.getElementById('total-return-percent-footer').textContent = formatNumber(footerReturnPercent, 2, true) + '%';
+    } else if (hasReturnBase) {
         const cumulativeReturn = (compoundReturnFactor - 1) * 100;
         document.getElementById('total-return-percent-footer').textContent = formatNumber(cumulativeReturn, 2, true) + '%';
     } else {

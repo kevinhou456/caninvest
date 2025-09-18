@@ -3,10 +3,11 @@
 """
 
 import logging
+import re
 import requests
 import json
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from datetime import datetime, timedelta, timezone, date
+from typing import Dict, List, Optional, Tuple
 from decimal import Decimal
 from flask import current_app
 from app import db
@@ -232,7 +233,7 @@ class StockPriceService:
             logger.error(f"获取{symbol}缓存价格失败: {str(e)}")
             return Decimal('0')
     
-    def get_stock_history(self, symbol: str, start_date, end_date) -> Dict:
+    def get_stock_history(self, symbol: str, start_date, end_date) -> Tuple[Dict, Dict]:
         """
         获取股票历史价格数据
         参数:
@@ -240,14 +241,19 @@ class StockPriceService:
             start_date: 开始日期
             end_date: 结束日期
         返回:
-            Dict: 日期和价格的字典，格式为 {'YYYY-MM-DD': {'close': price}}
+            Tuple[Dict, Dict]: (历史价格字典, 附加信息字典)
         """
+        info: Dict = {
+            'requested_start': start_date,
+            'requested_end': end_date
+        }
+
         try:
             # 转换日期为Unix时间戳
             import time
             start_timestamp = int(time.mktime(start_date.timetuple()))
             end_timestamp = int(time.mktime(end_date.timetuple()))
-            
+
             # Yahoo Finance API URL for historical data
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
             params = {
@@ -256,19 +262,34 @@ class StockPriceService:
                 'interval': '1d',
                 'includePrePost': 'false'
             }
-            
+
             response = requests.get(url, headers=self.headers, params=params, timeout=self.timeout)
             print(f"[Yahoo API] 请求 {symbol} {start_date}->{end_date} params={params}")
-            response.raise_for_status()
+            info['status_code'] = response.status_code
 
-            data = response.json()
-            
-            if 'chart' not in data or not data['chart']['result']:
+            try:
+                data = response.json()
+            except ValueError:
+                data = None
+
+            if response.status_code >= 400:
+                return self._handle_error_response(symbol, start_date, end_date, data, info)
+
+            if not data or 'chart' not in data:
+                logger.warning(f"无法解析{symbol}的历史价格数据 ({start_date} -> {end_date})")
+                return {}, info
+
+            chart = data['chart']
+            result = (chart.get('result') or [])
+            error_info = chart.get('error')
+
+            if not result:
+                self._populate_no_data_from_error(start_date, end_date, info, error_info)
                 logger.warning(f"无法获取{symbol}的历史价格数据 ({start_date} -> {end_date})")
-                return {}
-            
-            result = data['chart']['result'][0]
-            meta = result.get('meta', {})
+                return {}, info
+
+            result_entry = result[0]
+            meta = result_entry.get('meta', {})
             timezone_name = meta.get('timezone') or meta.get('exchangeTimezoneName')
             target_tz = timezone.utc
             if timezone_name:
@@ -277,22 +298,33 @@ class StockPriceService:
                 except Exception:
                     logger.debug(f"未识别的时区 {timezone_name}，使用UTC")
 
+            first_trade_ts = meta.get('firstTradeDate') or meta.get('firstTradeDateMs')
+            if first_trade_ts:
+                if first_trade_ts > 1e12:  # 毫秒时间戳
+                    first_trade_ts = first_trade_ts / 1000
+                try:
+                    first_trade_date = datetime.fromtimestamp(first_trade_ts, tz=timezone.utc).date()
+                    info['first_trade_date'] = first_trade_date
+                    if start_date < first_trade_date:
+                        info.setdefault('no_data_ranges', []).append((start_date, min(end_date, first_trade_date - timedelta(days=1))))
+                except Exception:
+                    logger.debug(f"无法解析{symbol}的firstTradeDate: {first_trade_ts}")
 
-            # 检查是否有价格数据
-            if 'indicators' not in result or 'quote' not in result['indicators'] or not result['indicators']['quote']:
+            indicators = result_entry.get('indicators', {})
+            quotes = indicators.get('quote') if indicators else None
+            if not quotes:
                 logger.warning(f"{symbol}历史数据中无价格信息 ({start_date} -> {end_date})")
-                return {}
-            
-            # 检查timestamp数据是否存在
-            if 'timestamp' not in result:
+                return {}, info
+
+            if 'timestamp' not in result_entry:
                 logger.warning(f"{symbol}历史数据中无时间戳信息 ({start_date} -> {end_date})")
-                return {}
-                
-            timestamps = result['timestamp']
-            prices = result['indicators']['quote'][0]['close']
-            
-            # 构建历史价格字典
-            history = {}
+                return {}, info
+
+            timestamps = result_entry['timestamp']
+            prices = quotes[0].get('close') if quotes else []
+
+            history: Dict[str, Dict] = {}
+            history_dates: List[date] = []
             for i, timestamp in enumerate(timestamps):
                 if i < len(prices) and prices[i] is not None:
                     try:
@@ -304,12 +336,52 @@ class StockPriceService:
                     history[date_str] = {
                         'close': float(prices[i])
                     }
+                    try:
+                        history_dates.append(datetime.strptime(date_str, '%Y-%m-%d').date())
+                    except Exception:
+                        pass
 
-            return history
-            
+            if history_dates:
+                info['data_start_date'] = min(history_dates)
+                info['data_end_date'] = max(history_dates)
+
+            return history, info
+
         except requests.RequestException as e:
             logger.error(f"获取{symbol}历史价格失败 ({start_date} -> {end_date}): {str(e)}")
-            return {}
+            info['error'] = str(e)
+            return {}, info
         except Exception as e:
             logger.error(f"解析{symbol}历史价格数据失败: {str(e)}")
-            return {}
+            info['error'] = str(e)
+            return {}, info
+
+    def _handle_error_response(self, symbol: str, start_date, end_date, data: Optional[Dict], info: Dict) -> Tuple[Dict, Dict]:
+        if data and isinstance(data, dict):
+            chart = data.get('chart') if isinstance(data.get('chart'), dict) else None
+            error_info = chart.get('error') if chart else None
+            if error_info:
+                info['error_code'] = error_info.get('code')
+                info['error_description'] = error_info.get('description')
+                self._populate_no_data_from_error(start_date, end_date, info, error_info)
+                return {}, info
+        logger.error(f"Yahoo历史价格请求失败 {symbol} ({start_date} -> {end_date}) 状态码: {info.get('status_code')}")
+        info['error'] = f"HTTP {info.get('status_code')}"
+        return {}, info
+
+    def _populate_no_data_from_error(self, start_date, end_date, info: Dict, error_info: Optional[Dict]):
+        if not error_info:
+            return
+        description = error_info.get('description') or ''
+        match = re.search(r'startDate\s*=\s*(\d+).+endDate\s*=\s*(\d+)', description)
+        if match:
+            try:
+                start_ts = int(match.group(1))
+                end_ts = int(match.group(2))
+                start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc).date()
+                end_dt = datetime.fromtimestamp(end_ts, tz=timezone.utc).date()
+                info.setdefault('no_data_ranges', []).append((start_dt, end_dt))
+            except Exception:
+                pass
+        elif 'Data doesn' in description:
+            info.setdefault('no_data_ranges', []).append((start_date, end_date))

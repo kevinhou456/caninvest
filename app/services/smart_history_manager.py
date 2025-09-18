@@ -206,16 +206,26 @@ class SmartHistoryManager:
             return True
         
         # 如果请求的开始日期比缓存最早日期还早，需要强制刷新
-        if start_date < earliest_cached.trade_date:
-            print(f"智能历史管理器: {stock_symbol} 需要更早数据 (请求:{start_date} vs 缓存最早:{earliest_cached.trade_date})，强制刷新")
-            return True
-            
+        effective_start = start_date
+        earliest_cached_date = earliest_cached.trade_date
+
+        if start_date < earliest_cached_date:
+            gap_end = min(earliest_cached_date - timedelta(days=1), end_date)
+            if gap_end >= start_date and self.cache_service.is_known_no_data(stock_symbol, start_date, gap_end, currency):
+                effective_start = earliest_cached_date
+            else:
+                print(f"智能历史管理器: {stock_symbol} 需要更早数据 (请求:{start_date} vs 缓存最早:{earliest_cached_date})，强制刷新")
+                return True
+
+        if effective_start > end_date:
+            return False
+
         # 检查数据缺口
-        total_days_requested = (end_date - start_date).days + 1
+        total_days_requested = (end_date - effective_start).days + 1
         cached_count = StockPriceHistory.query.filter(
             StockPriceHistory.symbol == stock_symbol,
             StockPriceHistory.currency == currency,
-            StockPriceHistory.trade_date >= start_date,
+            StockPriceHistory.trade_date >= effective_start,
             StockPriceHistory.trade_date <= end_date
         ).count()
         

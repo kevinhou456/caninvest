@@ -31,6 +31,7 @@ class StockHistoryCacheService:
     
     _GLOBAL_FETCH_REGISTRY: Dict[tuple, Dict] = {}
     _GLOBAL_FAILURE_REGISTRY: Dict[tuple, Dict] = {}
+    _GLOBAL_NO_DATA_REGISTRY: Dict[tuple, List[Tuple[date, date]]] = {}
 
     def __init__(self):
         self.stock_service = StockPriceService()
@@ -39,6 +40,7 @@ class StockHistoryCacheService:
         self.fetch_failure_cooldown_hours = 12  # 失败后等待时间
         self._recent_fetch_registry = self._GLOBAL_FETCH_REGISTRY
         self._recent_failure_registry = self._GLOBAL_FAILURE_REGISTRY
+        self._no_data_registry = self._GLOBAL_NO_DATA_REGISTRY
         self.prefetch_buffer_days = 30  # 向两侧预取的缓冲天数
         self.min_prefetch_span_days = 365  # 每次至少抓取一年的数据
         
@@ -121,9 +123,10 @@ class StockHistoryCacheService:
 
         # 精确识别缺失的日期区间
         missing_ranges = self._detect_missing_ranges(symbol, currency, start_date, end_date, cached_dates)
+        missing_ranges = self._subtract_no_data_ranges(symbol, currency, missing_ranges)
 
         # 如果没有任何缓存数据，整段都视为缺失
-        if not latest_cached_date and not missing_ranges:
+        if not latest_cached_date and not missing_ranges and not self._is_range_fully_no_data(symbol, currency, start_date, end_date):
             missing_ranges = [(start_date, end_date)]
 
         # 对缺失区间进行去噪：忽略距离最新缓存日期在3天以内的未来区间
@@ -239,6 +242,7 @@ class StockHistoryCacheService:
         holidays.add(nth_weekday(1, 0, 3))         # Martin Luther King Jr. Day (3rd Monday Jan)
         holidays.add(nth_weekday(2, 0, 3))         # Presidents' Day (3rd Monday Feb)
         holidays.add(last_weekday(5, 0))           # Memorial Day (last Monday May)
+        holidays.add(observed(date(year, 6, 19)))  # Juneteenth National Independence Day
         holidays.add(observed(date(year, 7, 4)))   # Independence Day
         holidays.add(nth_weekday(9, 0, 1))         # Labor Day
         holidays.add(nth_weekday(11, 3, 4))        # Thanksgiving (4th Thursday Nov)
@@ -284,7 +288,14 @@ class StockHistoryCacheService:
         holidays.add(nth_weekday(9, 0, 1))                 # Labour Day
         holidays.add(nth_weekday(10, 0, 2))                # Thanksgiving (2nd Monday Oct)
         holidays.add(observed(date(year, 12, 25)))         # Christmas
-        holidays.add(observed(date(year, 12, 26)))         # Boxing Day
+
+        boxing_day = date(year, 12, 26)
+        observed_boxing_day = observed(boxing_day)
+        holidays.add(observed_boxing_day)                  # Boxing Day (observed)
+
+        # 如果Boxing Day补假落在周一，交易所通常也会在周二休市
+        if observed_boxing_day.weekday() == 0:  # Monday
+            holidays.add(observed_boxing_day + timedelta(days=1))
 
         return holidays
 
@@ -326,6 +337,83 @@ class StockHistoryCacheService:
                 merged.append((current_start, current_end))
 
         return merged
+
+    def _mark_no_data_range(self, symbol: str, currency: str, start_date: date, end_date: date):
+        if not symbol or not currency or start_date is None or end_date is None:
+            return
+        if start_date > end_date:
+            return
+        key = (symbol.upper(), currency.upper())
+        ranges = self._no_data_registry.get(key, [])
+        ranges.append((start_date, end_date))
+        self._no_data_registry[key] = self._merge_ranges(ranges)
+
+    def _get_no_data_ranges(self, symbol: str, currency: str) -> List[Tuple[date, date]]:
+        key = (symbol.upper(), currency.upper())
+        return list(self._no_data_registry.get(key, []))
+
+    def _subtract_no_data_ranges(self, symbol: str, currency: str,
+                                 ranges: List[Tuple[date, date]]) -> List[Tuple[date, date]]:
+        if not ranges:
+            return []
+        no_data_ranges = self._get_no_data_ranges(symbol, currency)
+        if not no_data_ranges:
+            return ranges
+
+        adjusted: List[Tuple[date, date]] = []
+        for range_start, range_end in ranges:
+            segments = [(range_start, range_end)]
+            for nd_start, nd_end in no_data_ranges:
+                new_segments: List[Tuple[date, date]] = []
+                for seg_start, seg_end in segments:
+                    if nd_end < seg_start or nd_start > seg_end:
+                        new_segments.append((seg_start, seg_end))
+                        continue
+
+                    if nd_start > seg_start:
+                        left_end = nd_start - timedelta(days=1)
+                        if seg_start <= left_end:
+                            new_segments.append((seg_start, left_end))
+
+                    if nd_end < seg_end:
+                        right_start = nd_end + timedelta(days=1)
+                        if right_start <= seg_end:
+                            new_segments.append((right_start, seg_end))
+
+                segments = [segment for segment in new_segments if segment[0] <= segment[1]]
+                if not segments:
+                    break
+
+            adjusted.extend(segments)
+
+        return adjusted
+
+    def _is_range_fully_no_data(self, symbol: str, currency: str,
+                               start_date: date, end_date: date) -> bool:
+        coverage = self._subtract_no_data_ranges(symbol, currency, [(start_date, end_date)])
+        return not coverage
+
+    def _register_response_metadata(self, symbol: str, currency: str,
+                                     response_info: Optional[Dict],
+                                     fetch_start: date, fetch_end: date):
+        if not response_info:
+            return
+
+        for nd_range in response_info.get('no_data_ranges', []) or []:
+            nd_start, nd_end = nd_range
+            if nd_start is None or nd_end is None:
+                continue
+            start = max(fetch_start, nd_start)
+            end = min(fetch_end, nd_end)
+            if start <= end:
+                self._mark_no_data_range(symbol, currency, start, end)
+
+        first_trade_date = response_info.get('first_trade_date')
+        if isinstance(first_trade_date, date):
+            if fetch_start < first_trade_date:
+                self._mark_no_data_range(symbol, currency,
+                                         fetch_start,
+                                         first_trade_date - timedelta(days=1))
 
     def _should_skip_fetch(self, symbol: str, currency: str, start_date: date,
                            end_date: date, force_refresh: bool) -> bool:
@@ -420,7 +508,10 @@ class StockHistoryCacheService:
 
                 print(f"[Yahoo Fetch] {symbol}({currency}) {fetch_start} -> {fetch_end} (原始缺口 {start_date}->{end_date})")
                 # 从Yahoo Finance获取数据
-                raw_data = self.stock_service.get_stock_history(symbol, fetch_start, fetch_end)
+                raw_data, response_info = self.stock_service.get_stock_history(symbol, fetch_start, fetch_end)
+                self._register_response_metadata(symbol, currency, response_info, fetch_start, fetch_end)
+
+                success = False
 
                 if raw_data:
                     # 转换并保存数据
@@ -432,7 +523,11 @@ class StockHistoryCacheService:
                     else:
                         self._record_fetch(symbol, currency, fetch_start, fetch_end, success=False)
                 else:
-                    self._record_fetch(symbol, currency, fetch_start, fetch_end, success=False)
+                    if response_info and response_info.get('no_data_ranges'):
+                        success = True
+                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=True)
+                    else:
+                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=False)
 
             except Exception:
                 continue
@@ -579,7 +674,15 @@ class StockHistoryCacheService:
         except Exception as e:
             logger.error(f"获取缓存统计失败: {str(e)}")
             return {}
-    
+
+    def is_known_no_data(self, symbol: str, start_date: date, end_date: date, currency: str = 'USD') -> bool:
+        """判断指定区间是否已被标记为无数据范围"""
+        if not symbol or start_date is None or end_date is None:
+            return False
+        if start_date > end_date:
+            return False
+        return self._is_range_fully_no_data(symbol.upper(), currency.upper(), start_date, end_date)
+
     def cleanup_old_cache(self, days_to_keep: int = 365) -> Dict:
         """
         清理旧的缓存数据
