@@ -426,11 +426,21 @@ function updateQuarterlyTable(currentTotals) {
     const totalUnrealizedUsdValue = currentTotals ? currentTotals.unrealized_gain_usd : totalUnrealizedUsd;
     const footerReturnPercent = currentTotals ? currentTotals.return_percent : (hasReturnBase ? (compoundReturnFactor - 1) * 100 : null);
 
-    document.getElementById('total-assets-footer').innerHTML = '$' + formatNumber(totalAssetsValue, 2) +
+    // Recalculate totals using current exchange rate
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+    const totalAssetsCorrect = totalAssetsCadValue + totalAssetsUsdValue * currentRate;
+    const totalRealizedCorrect = totalRealizedCadValue + totalRealizedUsdValue * currentRate;
+    const totalUnrealizedCorrect = totalUnrealizedCadValue + totalUnrealizedUsdValue * currentRate;
+    const totalDividendsCorrect = totalDividendsCad + totalDividendsUsd * currentRate;
+    const totalInterestCorrect = totalInterestCad + totalInterestUsd * currentRate;
+    const totalBuyCorrect = totalBuyCad + totalBuyUsd * currentRate;
+    const totalSellCorrect = totalSellCad + totalSellUsd * currentRate;
+
+    document.getElementById('total-assets-footer').innerHTML = '$' + formatNumber(totalAssetsCorrect, 2) +
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalAssetsCadValue, 2)} | USD: $${formatNumber(totalAssetsUsdValue, 2)}</small>`;
-    document.getElementById('total-realized-footer').innerHTML = '$' + formatNumber(totalRealizedValue, 2, true) +
+    document.getElementById('total-realized-footer').innerHTML = '$' + formatNumber(totalRealizedCorrect, 2, true) +
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalRealizedCadValue, 2, true)} | USD: $${formatNumber(totalRealizedUsdValue, 2, true)}</small>`;
-    document.getElementById('total-unrealized-footer').innerHTML = '$' + formatNumber(totalUnrealizedValue, 2, true) +
+    document.getElementById('total-unrealized-footer').innerHTML = '$' + formatNumber(totalUnrealizedCorrect, 2, true) +
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalUnrealizedCadValue, 2, true)} | USD: $${formatNumber(totalUnrealizedUsdValue, 2, true)}</small>`;
     if (footerReturnPercent !== null && footerReturnPercent !== undefined) {
         document.getElementById('total-return-percent-footer').textContent = formatNumber(footerReturnPercent, 2, true) + '%';
@@ -440,14 +450,14 @@ function updateQuarterlyTable(currentTotals) {
     } else {
         document.getElementById('total-return-percent-footer').textContent = '--';
     }
-    document.getElementById('total-dividends-footer').innerHTML = '$' + formatNumber(totalDividends, 2) +
+    document.getElementById('total-dividends-footer').innerHTML = '$' + formatNumber(totalDividendsCorrect, 2) +
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalDividendsCad, 2)} | USD: $${formatNumber(totalDividendsUsd, 2)}</small>`;
-    document.getElementById('total-interest-footer').innerHTML = '$' + formatNumber(totalInterest, 2) +
+    document.getElementById('total-interest-footer').innerHTML = '$' + formatNumber(totalInterestCorrect, 2) +
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalInterestCad, 2)} | USD: $${formatNumber(totalInterestUsd, 2)}</small>`;
     document.getElementById('total-transactions-footer').textContent = totalTransactions;
-    document.getElementById('total-buy-footer').innerHTML = '$' + formatNumber(totalBuy, 2) +
+    document.getElementById('total-buy-footer').innerHTML = '$' + formatNumber(totalBuyCorrect, 2) +
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalBuyCad, 2)} | USD: $${formatNumber(totalBuyUsd, 2)}</small>`;
-    document.getElementById('total-sell-footer').innerHTML = '$' + formatNumber(totalSell, 2) +
+    document.getElementById('total-sell-footer').innerHTML = '$' + formatNumber(totalSellCorrect, 2) +
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalSellCad, 2)} | USD: $${formatNumber(totalSellUsd, 2)}</small>`;
 
     updateCurrencyBreakdownVisibility();

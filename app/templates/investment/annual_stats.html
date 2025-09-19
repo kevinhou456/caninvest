@@ -32,7 +32,7 @@
                         <th>{{ _('Withdrawals') }}</th>
                         <th>{{ _('Unrealized Gain/Loss') }}</th>
                         <th>{{ _('Return Rate') }}</th>
-                        <th>{{ _('Annual exchange rates') }}</th>
+                        <th>{{ _('Annual Exchange Rates(*)') }}</th>
                     </tr>
                 </thead>
                 <tbody id="annual-data-tbody">
@@ -492,6 +492,13 @@ function updateAnnualTable() {
         const combinedIncomeCad = (currencyBreakdown.dividends_cad || 0) + (currencyBreakdown.interest_cad || 0);
         const combinedIncomeUsd = (currencyBreakdown.dividends_usd || 0) + (currencyBreakdown.interest_usd || 0);
 
+        // Calculate totals using annual exchange rate for display (*marked fields)
+        const annualRate = item.annual_usd_cad_rate || 1.0;
+        const realizedGainTotal = (currencyBreakdown.realized_gain_cad || 0) + (currencyBreakdown.realized_gain_usd || 0) * annualRate;
+        const combinedIncomeTotal = combinedIncomeCad + combinedIncomeUsd * annualRate;
+        const depositsTotal = (currencyBreakdown.deposit_cad || 0) + (currencyBreakdown.deposit_usd || 0) * annualRate;
+        const withdrawalsTotal = (currencyBreakdown.withdrawal_cad || 0) + (currencyBreakdown.withdrawal_usd || 0) * annualRate;
+
         // 显示年份、账户类型或成员名称
         let displayYear;
         if (item.is_detail_row) {
@@ -509,19 +516,19 @@ function updateAnnualTable() {
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
             </td>
             <td class="${realizedClass}">
-                $${formatNumber(item.annual_realized_gain, 2, true)}
+                $${formatNumber(realizedGainTotal, 2, true)}*
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
             </td>
             <td class="text-info">
-                $${formatNumber(combinedIncome, 2)}
+                $${formatNumber(combinedIncomeTotal, 2)}*
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(combinedIncomeCad, 2)} | USD: $${formatNumber(combinedIncomeUsd, 2)}</small>
             </td>
             <td class="text-primary">
-                $${formatNumber(item.deposit_amount || 0, 2)}
+                $${formatNumber(depositsTotal, 2)}*
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.deposit_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.deposit_usd || 0, 2)}</small>
             </td>
             <td class="text-warning">
-                $${formatNumber(item.withdrawal_amount || 0, 2)}
+                $${formatNumber(withdrawalsTotal, 2)}*
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.withdrawal_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.withdrawal_usd || 0, 2)}</small>
             </td>
             <td class="${unrealizedClass}">
@@ -540,14 +547,15 @@ function updateAnnualTable() {
         
         // Update totals (only for main rows, not detail rows or member rows)
         if (!item.is_detail_row && !item.is_member_row) {
-            // Use the first main row for latest assets and exchange rate
+            // Use the first main row for latest assets and set current exchange rate
             if (totalAssets === 0) {
                 totalAssets = item.total_assets;
-                latestUsdCadRate = item.annual_usd_cad_rate;
+                latestUsdCadRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
             }
+            // Accumulate original values for current rate calculation in totals
             totalRealized += item.annual_realized_gain;
             totalUnrealized += item.annual_unrealized_gain;
-            totalIncome += (item.annual_dividends + item.annual_interest);
+            totalIncome += item.annual_dividends + item.annual_interest;
             totalDeposits += (item.deposit_amount || 0);
             totalWithdrawals += (item.withdrawal_amount || 0);
 
@@ -578,25 +586,32 @@ function updateAnnualTable() {
     // Calculate overall return rate
     const overallReturnRate = totalInvestmentSum > 0 ? (totalReturnsSum / totalInvestmentSum) * 100 : 0;
 
+    // Recalculate totals using current exchange rate (for footer without *)
+    const currentRate = latestUsdCadRate;
+    const totalRealizedCurrent = totalRealizedCad + totalRealizedUsd * currentRate;
+    const totalIncomeCurrent = totalIncomeCad + totalIncomeUsd * currentRate;
+    const totalDepositsCurrent = totalDepositsCad + totalDepositsUsd * currentRate;
+    const totalWithdrawalsCurrent = totalWithdrawalsCad + totalWithdrawalsUsd * currentRate;
+
     // Update footer totals
     document.getElementById('total-assets-footer').innerHTML = `
         $${formatNumber(totalAssets, 2)}
         <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalAssetsCad, 2)} | USD: $${formatNumber(totalAssetsUsd, 2)}</small>
     `;
     document.getElementById('total-realized-footer').innerHTML = `
-        $${formatNumber(totalRealized, 2, true)}
+        $${formatNumber(totalRealizedCurrent, 2, true)}
         <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalRealizedCad, 2, true)} | USD: $${formatNumber(totalRealizedUsd, 2, true)}</small>
     `;
     document.getElementById('total-income-footer').innerHTML = `
-        $${formatNumber(totalIncome, 2)}
+        $${formatNumber(totalIncomeCurrent, 2)}
         <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalIncomeCad, 2)} | USD: $${formatNumber(totalIncomeUsd, 2)}</small>
     `;
     document.getElementById('total-deposits-footer').innerHTML = `
-        $${formatNumber(totalDeposits, 2)}
+        $${formatNumber(totalDepositsCurrent, 2)}
         <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalDepositsCad, 2)} | USD: $${formatNumber(totalDepositsUsd, 2)}</small>
     `;
     document.getElementById('total-withdrawals-footer').innerHTML = `
-        $${formatNumber(totalWithdrawals, 2)}
+        $${formatNumber(totalWithdrawalsCurrent, 2)}
         <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalWithdrawalsCad, 2)} | USD: $${formatNumber(totalWithdrawalsUsd, 2)}</small>
     `;
     document.getElementById('total-unrealized-footer').innerHTML = `
@@ -604,7 +619,7 @@ function updateAnnualTable() {
         <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalUnrealizedCad, 2, true)} | USD: $${formatNumber(totalUnrealizedUsd, 2, true)}</small>
     `;
     document.getElementById('total-return-rate-footer').textContent = formatNumber(overallReturnRate, 2, true) + '%';
-    document.getElementById('total-usd-cad-rate-footer').textContent = latestUsdCadRate ? formatNumber(latestUsdCadRate, 4) : 'N/A';
+    document.getElementById('total-usd-cad-rate-footer').textContent = latestUsdCadRate ? 'Current Rates: ' + formatNumber(latestUsdCadRate, 4) : 'N/A';
 
     updateCurrencyBreakdownVisibility();
 }
