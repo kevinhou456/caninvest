@@ -12,29 +12,14 @@
 
 <!-- Charts Row -->
 <div class="row mb-4">
-    <!-- Total Assets Chart -->
-    <div class="col-lg-4">
+    <div class="col-12">
         <div class="card shadow mb-4">
             <div class="card-header py-3 bg-primary">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Quarterly Total Assets') }}</h6>
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Quarterly Assets & Returns') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="height: 350px;">
-                    <canvas id="quarterlyAssetsChart"></canvas>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Quarterly Returns Breakdown Chart -->
-    <div class="col-lg-8">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3 bg-success">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Quarterly Returns Breakdown') }}</h6>
-            </div>
-            <div class="card-body">
-                <div class="chart-area" style="height: 350px;">
-                    <canvas id="quarterlyReturnsChart"></canvas>
+                    <canvas id="quarterlyPerformanceChart"></canvas>
                 </div>
             </div>
         </div>
@@ -101,8 +86,7 @@
 {% block scripts %}
 <script>
 let quarterlyData = [];
-let quarterlyAssetsChart = null;
-let quarterlyReturnsChart = null;
+let quarterlyPerformanceChart = null;
 let showCurrencyBreakdown = false;
 
 function showLoadingOverlay(message) {
@@ -158,8 +142,7 @@ function loadQuarterlyAnalysis() {
             if (data.analysis) {
                 quarterlyData = data.analysis.quarterly_data || [];
                 const currentTotals = data.analysis.current_totals || null;
-                updateQuarterlyAssetsChart();
-                updateQuarterlyReturnsChart();
+                updateQuarterlyPerformanceChart();
                 updateQuarterlyTable(currentTotals);
                 document.getElementById('loading-spinner').style.display = 'none';
             } else {
@@ -175,103 +158,31 @@ function loadQuarterlyAnalysis() {
         });
 }
 
-// Update quarterly assets chart
-function updateQuarterlyAssetsChart() {
-    const ctx = document.getElementById('quarterlyAssetsChart').getContext('2d');
-    
-    if (quarterlyAssetsChart) {
-        quarterlyAssetsChart.destroy();
+// Update quarterly assets & returns chart
+function updateQuarterlyPerformanceChart() {
+    const canvas = document.getElementById('quarterlyPerformanceChart');
+    if (!canvas) {
+        return;
     }
-    
-    // Sort data by year and quarter ascending for charts
-    const chartData = [...quarterlyData].sort((a, b) => {
-        if (a.year !== b.year) return a.year - b.year;
-        return a.quarter - b.quarter;
-    });
-    
-    const labels = chartData.map(item => `${item.year} Q${item.quarter}`);
-    const assets = chartData.map(item => item.total_assets);
-    
-    quarterlyAssetsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: '{{ _("Total Assets") }}',
-                    data: assets,
-                    backgroundColor: 'rgba(78, 115, 223, 0.8)',
-                    borderColor: 'rgba(78, 115, 223, 1)',
-                    borderWidth: 1
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            elements: {
-                bar: {
-                    categoryPercentage: 0.8,
-                    barPercentage: 0.9
-                }
-            },
-            scales: {
-                x: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '{{ _("Quarter") }}'
-                    }
-                },
-                y: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '{{ _("Total Assets ($)") }}'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return '$' + value.toLocaleString();
-                        }
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
-                        }
-                    }
-                },
-                legend: {
-                    display: false
-                }
-            }
-        }
-    });
-}
 
-// Update quarterly returns breakdown chart
-function updateQuarterlyReturnsChart() {
-    const ctx = document.getElementById('quarterlyReturnsChart').getContext('2d');
-    
-    if (quarterlyReturnsChart) {
-        quarterlyReturnsChart.destroy();
+    const ctx = canvas.getContext('2d');
+
+    if (quarterlyPerformanceChart) {
+        quarterlyPerformanceChart.destroy();
     }
-    
-    // Sort data by year and quarter ascending for charts
+
     const chartData = [...quarterlyData].sort((a, b) => {
         if (a.year !== b.year) return a.year - b.year;
         return a.quarter - b.quarter;
     });
-    
+
     const labels = chartData.map(item => `${item.year} Q${item.quarter}`);
+    const assets = chartData.map(item => item.total_assets || 0);
     const realizedGains = chartData.map(item => item.quarterly_realized_gain || 0);
     const unrealizedGains = chartData.map(item => item.quarterly_unrealized_gain || 0);
     const dividendsAndInterest = chartData.map(item => (item.quarterly_dividends || 0) + (item.quarterly_interest || 0));
-    
-    quarterlyReturnsChart = new Chart(ctx, {
+
+    quarterlyPerformanceChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
@@ -281,32 +192,50 @@ function updateQuarterlyReturnsChart() {
                     data: realizedGains,
                     backgroundColor: 'rgba(28, 200, 138, 0.8)',
                     borderColor: 'rgba(28, 200, 138, 1)',
-                    borderWidth: 1
+                    borderWidth: 1,
+                    yAxisID: 'yReturns',
+                    order: 2
                 },
                 {
                     label: '{{ _("Unrealized Gains") }}',
                     data: unrealizedGains,
                     backgroundColor: 'rgba(54, 162, 235, 0.8)',
                     borderColor: 'rgba(54, 162, 235, 1)',
-                    borderWidth: 1
+                    borderWidth: 1,
+                    yAxisID: 'yReturns',
+                    order: 2
                 },
                 {
                     label: '{{ _("Dividends & Interest") }}',
                     data: dividendsAndInterest,
                     backgroundColor: 'rgba(255, 206, 86, 0.8)',
                     borderColor: 'rgba(255, 206, 86, 1)',
-                    borderWidth: 1
+                    borderWidth: 1,
+                    yAxisID: 'yReturns',
+                    order: 2
+                },
+                {
+                    type: 'line',
+                    label: '{{ _("Total Assets") }}',
+                    data: assets,
+                    yAxisID: 'yAssets',
+                    borderColor: 'rgba(78, 115, 223, 1)',
+                    backgroundColor: 'rgba(78, 115, 223, 0.2)',
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    tension: 0.3,
+                    fill: false,
+                    order: 1
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            elements: {
-                bar: {
-                    categoryPercentage: 0.8,
-                    barPercentage: 0.9
-                }
+            interaction: {
+                mode: 'index',
+                intersect: false
             },
             scales: {
                 x: {
@@ -316,8 +245,9 @@ function updateQuarterlyReturnsChart() {
                         text: '{{ _("Quarter") }}'
                     }
                 },
-                y: {
+                yReturns: {
                     display: true,
+                    position: 'right',
                     title: {
                         display: true,
                         text: '{{ _("Returns ($)") }}'
@@ -327,29 +257,50 @@ function updateQuarterlyReturnsChart() {
                             return '$' + value.toLocaleString();
                         }
                     }
+                },
+                yAssets: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: {
+                        display: true,
+                        text: '{{ _("Total Assets ($)") }}'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
                 }
             },
             plugins: {
                 tooltip: {
-                    mode: 'index',
-                    intersect: false,
                     callbacks: {
                         label: function(context) {
-                            if (context.dataset.label === '{{ _("Dividends & Interest") }}') {
+                            const label = context.dataset.label || '';
+                            if (label === '{{ _("Dividends & Interest") }}') {
                                 const quarterIndex = context.dataIndex;
                                 const dividends = chartData[quarterIndex].quarterly_dividends || 0;
                                 const interest = chartData[quarterIndex].quarterly_interest || 0;
-                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString() + 
-                                       ' ({{ _("Dividends") }}: $' + dividends.toLocaleString() + 
+                                return label + ': $' + context.parsed.y.toLocaleString() +
+                                       ' ({{ _("Dividends") }}: $' + dividends.toLocaleString() +
                                        ', {{ _("Interest") }}: $' + interest.toLocaleString() + ')';
                             }
-                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                            return label + ': $' + context.parsed.y.toLocaleString();
                         },
                         footer: function(tooltipItems) {
                             let total = 0;
                             tooltipItems.forEach(function(tooltipItem) {
-                                total += tooltipItem.parsed.y;
+                                if (tooltipItem.dataset.yAxisID === 'yReturns') {
+                                    total += tooltipItem.parsed.y;
+                                }
                             });
+                            if (total === 0) {
+                                return undefined;
+                            }
                             return '{{ _("Total") }}: $' + total.toLocaleString();
                         }
                     }

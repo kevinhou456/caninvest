@@ -45,18 +45,9 @@
 <div class="card shadow mb-4">
     <div class="card-header py-3 d-flex justify-content-between align-items-center bg-info">
         <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Data Analysis') }}</h6>
-        <div class="dropdown">
-            <button class="btn btn-primary dropdown-toggle btn-sm" type="button" id="exportDropdown" data-toggle="dropdown">
-                <i class="fas fa-download me-1"></i>{{ _('Export') }}
-            </button>
-            <div class="dropdown-menu">
-                <a class="dropdown-item" href="#" onclick="exportTableToCSV()">
-                    <i class="fas fa-file-csv me-2"></i>{{ _('CSV') }}
-                </a>
-                <a class="dropdown-item" href="#" onclick="exportTableToPDF()">
-                    <i class="fas fa-file-pdf me-2"></i>{{ _('PDF') }}
-                </a>
-            </div>
+        <div class="form-check form-switch text-white mb-0">
+            <input class="form-check-input" type="checkbox" id="toggleCurrencyBreakdown">
+            <label class="form-check-label" for="toggleCurrencyBreakdown">{{ _('显示货币明细') }}</label>
         </div>
     </div>
     <div class="card-body">
@@ -110,6 +101,7 @@
 let annualData = [];
 let annualAssetsChart = null;
 let annualReturnsChart = null;
+let showCurrencyBreakdown = false;
 
 function showLoadingOverlay(message) {
     const msg = message || '正在加载数据...';
@@ -383,33 +375,33 @@ function updateAnnualTable() {
         row.innerHTML = `
             <td class="font-weight-bold">${item.year}</td>
             <td>
-                $${formatNumber(item.total_assets)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
+                $${formatNumber(item.total_assets, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
             </td>
             <td class="${realizedClass}">
                 $${formatNumber(item.annual_realized_gain, 2, true)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
             </td>
             <td class="${unrealizedClass}">
                 $${formatNumber(item.annual_unrealized_gain, 2, true)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.unrealized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.unrealized_gain_usd || 0, 2, true)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.unrealized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.unrealized_gain_usd || 0, 2, true)}</small>
             </td>
             <td class="text-info">
-                $${formatNumber(item.annual_dividends)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
+                $${formatNumber(item.annual_dividends, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
             </td>
             <td class="text-info">
-                $${formatNumber(item.annual_interest)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.interest_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.interest_usd || 0, 2)}</small>
+                $${formatNumber(item.annual_interest, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.interest_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.interest_usd || 0, 2)}</small>
             </td>
             <td class="text-center">${item.transaction_count}</td>
             <td class="text-success">
                 $${formatNumber(item.buy_amount, 2)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.buy_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.buy_usd || 0, 2)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.buy_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.buy_usd || 0, 2)}</small>
             </td>
             <td class="text-danger">
                 $${formatNumber(item.sell_amount, 2)}
-                <br><small class="text-muted">CAD: $${formatNumber(currencyBreakdown.sell_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.sell_usd || 0, 2)}</small>
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.sell_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.sell_usd || 0, 2)}</small>
             </td>
         `;
         
@@ -429,14 +421,27 @@ function updateAnnualTable() {
     });
     
     // Update footer totals
-    document.getElementById('total-assets-footer').textContent = '$' + formatNumber(totalAssets);
+    document.getElementById('total-assets-footer').textContent = '$' + formatNumber(totalAssets, 2);
     document.getElementById('total-realized-footer').textContent = '$' + formatNumber(totalRealized, 2, true);
     document.getElementById('total-unrealized-footer').textContent = '$' + formatNumber(totalUnrealized, 2, true);
-    document.getElementById('total-dividends-footer').textContent = '$' + formatNumber(totalDividends);
-    document.getElementById('total-interest-footer').textContent = '$' + formatNumber(totalInterest);
+    document.getElementById('total-dividends-footer').textContent = '$' + formatNumber(totalDividends, 2);
+    document.getElementById('total-interest-footer').textContent = '$' + formatNumber(totalInterest, 2);
     document.getElementById('total-transactions-footer').textContent = totalTransactions;
     document.getElementById('total-buy-footer').textContent = '$' + formatNumber(totalBuy, 2);
     document.getElementById('total-sell-footer').textContent = '$' + formatNumber(totalSell, 2);
+
+    updateCurrencyBreakdownVisibility();
+}
+
+function updateCurrencyBreakdownVisibility() {
+    const breakdownElements = document.querySelectorAll('.currency-breakdown');
+    breakdownElements.forEach(el => {
+        if (showCurrencyBreakdown) {
+            el.classList.remove('d-none');
+        } else {
+            el.classList.add('d-none');
+        }
+    });
 }
 
 // Utility functions
@@ -496,6 +501,16 @@ function exportTableToPDF() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadAnnualAnalysis();
+
+    const toggle = document.getElementById('toggleCurrencyBreakdown');
+    if (toggle) {
+        showCurrencyBreakdown = toggle.checked;
+        toggle.addEventListener('change', function(event) {
+            showCurrencyBreakdown = event.target.checked;
+            updateCurrencyBreakdownVisibility();
+        });
+        updateCurrencyBreakdownVisibility();
+    }
 });
 </script>
 {% endblock %}
