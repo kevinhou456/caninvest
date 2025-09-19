@@ -525,22 +525,42 @@ function loadCalendarData(year, month) {
 
 // Update month summary cards
 function updateMonthSummaryCards(summary) {
-    document.getElementById('month-start-assets').textContent = 
-        '$' + (summary.start_assets || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    document.getElementById('month-end-assets').textContent = 
-        '$' + (summary.end_assets || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
-    const totalChange = summary.total_change || 0;
+    // Get current exchange rate for USD to CAD conversion
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+
+    // Extract currency breakdown if available (similar to monthly/quarterly stats)
+    let startAssets = summary.start_assets || 0;
+    let endAssets = summary.end_assets || 0;
+    let totalChange = summary.total_change || 0;
+
+    // If summary contains currency breakdown, recalculate with current exchange rate
+    if (summary.currency_breakdown) {
+        const startCadValue = summary.currency_breakdown.start_assets?.CAD || 0;
+        const startUsdValue = summary.currency_breakdown.start_assets?.USD || 0;
+        const endCadValue = summary.currency_breakdown.end_assets?.CAD || 0;
+        const endUsdValue = summary.currency_breakdown.end_assets?.USD || 0;
+
+        // Recalculate with current exchange rate
+        startAssets = startCadValue + startUsdValue * currentRate;
+        endAssets = endCadValue + endUsdValue * currentRate;
+        totalChange = endAssets - startAssets;
+    }
+
+    document.getElementById('month-start-assets').textContent =
+        '$' + startAssets.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    document.getElementById('month-end-assets').textContent =
+        '$' + endAssets.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
     const changeElement = document.getElementById('month-total-change');
     changeElement.textContent = '$' + totalChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     changeElement.className = 'h5 mb-0 font-weight-bold ' + (totalChange >= 0 ? 'text-success' : 'text-danger');
-    
-    const returnPct = summary.return_pct || 0;
+
+    const returnPct = startAssets > 0 ? (totalChange / startAssets) * 100 : 0;
     const returnElement = document.getElementById('month-return-pct');
     returnElement.textContent = returnPct.toFixed(2) + '%';
     returnElement.className = 'h5 mb-0 font-weight-bold ' + (returnPct >= 0 ? 'text-success' : 'text-danger');
-    
+
     // Summary cards are always visible now
 }
 
@@ -557,8 +577,27 @@ function updateDayCell(dayEl, dateStr, dayData) {
         return;
     }
 
-    const dailyChange = dayData.daily_change || 0;
-    const dailyReturnPct = dayData.daily_return_pct || 0;
+    // Get current exchange rate for USD to CAD conversion
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+
+    let dailyChange = dayData.daily_change || 0;
+    let dailyReturnPct = dayData.daily_return_pct || 0;
+
+    // If dayData contains currency breakdown, recalculate with current exchange rate
+    if (dayData.currency_breakdown) {
+        const changeCadValue = dayData.currency_breakdown.daily_change?.CAD || 0;
+        const changeUsdValue = dayData.currency_breakdown.daily_change?.USD || 0;
+        dailyChange = changeCadValue + changeUsdValue * currentRate;
+
+        // Recalculate return percentage if total assets info is available
+        if (dayData.currency_breakdown.total_assets) {
+            const totalAssetsCad = dayData.currency_breakdown.total_assets?.CAD || 0;
+            const totalAssetsUsd = dayData.currency_breakdown.total_assets?.USD || 0;
+            const totalAssets = totalAssetsCad + totalAssetsUsd * currentRate;
+            const previousAssets = totalAssets - dailyChange;
+            dailyReturnPct = previousAssets > 0 ? (dailyChange / previousAssets) * 100 : 0;
+        }
+    }
     
     console.log(`Manual update ${dateStr}: change=${dailyChange.toFixed(2)}, return=${dailyReturnPct.toFixed(2)}%`);
 
@@ -625,12 +664,26 @@ function renderDailyPnlChart(dailyStats) {
     if (!dailyStats) return;
     const todayISO = new Date().toISOString().split('T')[0];
 
+    // Get current exchange rate for USD to CAD conversion
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+
     const statsArray = Object.values(dailyStats)
         .filter(day => day.is_trading_day && day.date <= todayISO)
         .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     const labels = statsArray.map(day => day.date.slice(-5));
-    const values = statsArray.map(day => day.daily_change || 0);
+    const values = statsArray.map(day => {
+        let dailyChange = day.daily_change || 0;
+
+        // If day contains currency breakdown, recalculate with current exchange rate
+        if (day.currency_breakdown && day.currency_breakdown.daily_change) {
+            const changeCadValue = day.currency_breakdown.daily_change.CAD || 0;
+            const changeUsdValue = day.currency_breakdown.daily_change.USD || 0;
+            dailyChange = changeCadValue + changeUsdValue * currentRate;
+        }
+
+        return dailyChange;
+    });
 
     const ctx = document.getElementById('dailyPnlChart');
     if (!ctx) return;
@@ -722,10 +775,30 @@ function onDayClick(dateStr) {
 
 // Show day details in modal or alert
 function showDayDetails(dayData) {
-    const assets = dayData.floating_pnl.total_assets || 0;
-    const change = dayData.floating_pnl.daily_change || 0;
-    const returnPct = dayData.floating_pnl.daily_return_pct || 0;
-    
+    // Get current exchange rate for USD to CAD conversion
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+
+    let assets = dayData.floating_pnl.total_assets || 0;
+    let change = dayData.floating_pnl.daily_change || 0;
+    let returnPct = dayData.floating_pnl.daily_return_pct || 0;
+
+    // If dayData contains currency breakdown, recalculate with current exchange rate
+    if (dayData.floating_pnl.currency_breakdown) {
+        const cadValue = dayData.floating_pnl.currency_breakdown.total_assets?.CAD || 0;
+        const usdValue = dayData.floating_pnl.currency_breakdown.total_assets?.USD || 0;
+        assets = cadValue + usdValue * currentRate;
+
+        const changeCadValue = dayData.floating_pnl.currency_breakdown.daily_change?.CAD || 0;
+        const changeUsdValue = dayData.floating_pnl.currency_breakdown.daily_change?.USD || 0;
+        change = changeCadValue + changeUsdValue * currentRate;
+
+        // Recalculate return percentage based on corrected values
+        if (assets > 0 && change !== 0) {
+            const previousAssets = assets - change;
+            returnPct = previousAssets > 0 ? (change / previousAssets) * 100 : 0;
+        }
+    }
+
     alert(`Date: ${dayData.date}\nTotal Assets: $${assets.toLocaleString()}\nDaily Change: ${change >= 0 ? '+' : ''}$${change.toLocaleString()}\nReturn: ${returnPct.toFixed(2)}%`);
 }
 

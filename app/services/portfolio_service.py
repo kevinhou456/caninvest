@@ -569,22 +569,26 @@ class PortfolioService:
 
             total_assets_float = float(total_assets_dec)
             total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec * usd_to_cad_decimal)
+            total_assets_usd += float(cash_total_usd_dec)
+
+            # Apply current exchange rate to realized and unrealized gains
+            total_realized_with_rate = float(realized_totals['cad']) + float(realized_totals['usd']) * float(usd_to_cad_decimal)
+            total_unrealized_with_rate = unrealized_gain_cad + unrealized_gain_usd * float(usd_to_cad_decimal)
 
             total_unrealized_float = float(total_unrealized_dec)
             total_realized_float = float(realized_totals['total'])
             overall_return_percent = 0.0
             if total_assets_float > 0:
-                overall_return_percent = ((total_realized_float + total_unrealized_float) / total_assets_float) * 100
+                overall_return_percent = ((total_realized_with_rate + total_unrealized_with_rate) / total_assets_float) * 100
 
             return {
                 'total_assets': total_assets_float,
                 'total_assets_cad': total_assets_cad,
                 'total_assets_usd': total_assets_usd,
-                'realized_gain': total_realized_float,
+                'realized_gain': total_realized_with_rate,
                 'realized_gain_cad': float(realized_totals['cad']),
                 'realized_gain_usd': float(realized_totals['usd']),
-                'unrealized_gain': total_unrealized_float,
+                'unrealized_gain': total_unrealized_with_rate,
                 'unrealized_gain_cad': unrealized_gain_cad,
                 'unrealized_gain_usd': unrealized_gain_usd,
                 'cash_cad': float(cash_total_cad_dec),
@@ -1380,22 +1384,26 @@ class PortfolioService:
 
             total_assets_float = float(total_assets_dec)
             total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec * usd_to_cad_decimal)
+            total_assets_usd += float(cash_total_usd_dec)
+
+            # Apply current exchange rate to realized and unrealized gains
+            total_realized_with_rate = float(realized_totals['cad']) + float(realized_totals['usd']) * float(usd_to_cad_decimal)
+            total_unrealized_with_rate = unrealized_gain_cad + unrealized_gain_usd * float(usd_to_cad_decimal)
 
             total_unrealized_float = float(total_unrealized_dec)
             total_realized_float = float(realized_totals['total'])
             overall_return_percent = 0.0
             if total_assets_float > 0:
-                overall_return_percent = ((total_realized_float + total_unrealized_float) / total_assets_float) * 100
+                overall_return_percent = ((total_realized_with_rate + total_unrealized_with_rate) / total_assets_float) * 100
 
             return {
                 'total_assets': total_assets_float,
                 'total_assets_cad': total_assets_cad,
                 'total_assets_usd': total_assets_usd,
-                'realized_gain': total_realized_float,
+                'realized_gain': total_realized_with_rate,
                 'realized_gain_cad': float(realized_totals['cad']),
                 'realized_gain_usd': float(realized_totals['usd']),
-                'unrealized_gain': total_unrealized_float,
+                'unrealized_gain': total_unrealized_with_rate,
                 'unrealized_gain_cad': unrealized_gain_cad,
                 'unrealized_gain_usd': unrealized_gain_usd,
                 'cash_cad': float(cash_total_cad_dec),
@@ -1892,22 +1900,26 @@ class PortfolioService:
 
             total_assets_float = float(total_assets_dec)
             total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec * usd_to_cad_decimal)
+            total_assets_usd += float(cash_total_usd_dec)
+
+            # Apply current exchange rate to realized and unrealized gains
+            total_realized_with_rate = float(realized_totals['cad']) + float(realized_totals['usd']) * float(usd_to_cad_decimal)
+            total_unrealized_with_rate = unrealized_gain_cad + unrealized_gain_usd * float(usd_to_cad_decimal)
 
             total_unrealized_float = float(total_unrealized_dec)
             total_realized_float = float(realized_totals['total'])
             overall_return_percent = 0.0
             if total_assets_float > 0:
-                overall_return_percent = ((total_realized_float + total_unrealized_float) / total_assets_float) * 100
+                overall_return_percent = ((total_realized_with_rate + total_unrealized_with_rate) / total_assets_float) * 100
 
             return {
                 'total_assets': total_assets_float,
                 'total_assets_cad': total_assets_cad,
                 'total_assets_usd': total_assets_usd,
-                'realized_gain': total_realized_float,
+                'realized_gain': total_realized_with_rate,
                 'realized_gain_cad': float(realized_totals['cad']),
                 'realized_gain_usd': float(realized_totals['usd']),
-                'unrealized_gain': total_unrealized_float,
+                'unrealized_gain': total_unrealized_with_rate,
                 'unrealized_gain_cad': unrealized_gain_cad,
                 'unrealized_gain_usd': unrealized_gain_usd,
                 'cash_cad': float(cash_total_cad_dec),
@@ -2093,25 +2105,33 @@ class PortfolioService:
 
             total_assets_float = float(total_assets_dec)
             total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec * usd_to_cad_decimal)
+            total_assets_usd += float(cash_total_usd_dec)
+
+            # Apply current exchange rate to all monetary values
+            monthly_realized_gain_with_rate = monthly_realized_gain_cad + monthly_realized_gain_usd * float(usd_to_cad_decimal)
+            monthly_unrealized_gain_with_rate = unrealized_gain_cad + unrealized_gain_usd * float(usd_to_cad_decimal)
+            dividends_with_rate = dividends_cad + dividends_usd * float(usd_to_cad_decimal)
+            interest_with_rate = interest_cad + interest_usd * float(usd_to_cad_decimal)
+            buy_amount_with_rate = buy_cad + buy_usd * float(usd_to_cad_decimal)
+            sell_amount_with_rate = sell_cad + sell_usd * float(usd_to_cad_decimal)
 
             monthly_return_percent = 0.0
             if total_assets_float > 0:
-                monthly_return_percent = ((monthly_realized_gain + monthly_unrealized_gain) / total_assets_float) * 100
-            
+                monthly_return_percent = ((monthly_realized_gain_with_rate + monthly_unrealized_gain_with_rate) / total_assets_float) * 100
+
             monthly_data.append({
                 'year': target_start.year,
                 'month': target_start.month,
                 'month_name': target_start.strftime('%Y-%m'),
                 'total_assets': total_assets_float,
-                'monthly_realized_gain': monthly_realized_gain,
-                'monthly_unrealized_gain': monthly_unrealized_gain,
+                'monthly_realized_gain': monthly_realized_gain_with_rate,
+                'monthly_unrealized_gain': monthly_unrealized_gain_with_rate,
                 'monthly_return_percent': monthly_return_percent,
-                'monthly_dividends': dividends,
-                'monthly_interest': interest,
+                'monthly_dividends': dividends_with_rate,
+                'monthly_interest': interest_with_rate,
                 'transaction_count': transaction_count,
-                'buy_amount': buy_amount,
-                'sell_amount': sell_amount,
+                'buy_amount': buy_amount_with_rate,
+                'sell_amount': sell_amount_with_rate,
                 'currency_breakdown': {
                     'total_assets_cad': total_assets_cad,
                     'total_assets_usd': total_assets_usd,

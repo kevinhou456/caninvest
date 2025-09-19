@@ -176,6 +176,43 @@ const familyId = {{ family.id if family else 'null' }};
 const memberId = new URLSearchParams(window.location.search).get('member_id');
 const accountId = new URLSearchParams(window.location.search).get('account_id');
 
+// Apply current exchange rate to recalculate all distribution values
+function applyCurrentExchangeRateToDistribution(distribution) {
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+
+    // Helper function to recalculate value from currency breakdown
+    function recalculateValue(item) {
+        if (item.currency_breakdown) {
+            const cadValue = item.currency_breakdown.CAD || 0;
+            const usdValue = item.currency_breakdown.USD || 0;
+            return cadValue + usdValue * currentRate;
+        }
+        return item.value || 0;
+    }
+
+    // Deep clone the distribution to avoid modifying original data
+    const correctedDistribution = JSON.parse(JSON.stringify(distribution));
+
+    // Update summary total value
+    if (correctedDistribution.summary && correctedDistribution.summary.currency_breakdown) {
+        const cadValue = correctedDistribution.summary.currency_breakdown.CAD || 0;
+        const usdValue = correctedDistribution.summary.currency_breakdown.USD || 0;
+        correctedDistribution.summary.total_value_cad = cadValue + usdValue * currentRate;
+    }
+
+    // Update all distribution arrays
+    ['by_stocks', 'by_categories', 'by_currencies', 'by_accounts'].forEach(arrayKey => {
+        if (correctedDistribution[arrayKey] && Array.isArray(correctedDistribution[arrayKey])) {
+            correctedDistribution[arrayKey].forEach(item => {
+                item.value = recalculateValue(item);
+            });
+        }
+    });
+
+    console.log('Holdings distribution updated with current exchange rate:', currentRate);
+    return correctedDistribution;
+}
+
 function loadHoldingsDistribution() {
     let apiUrl = `/api/v1/families/${familyId}/reports/holdings-distribution`;
     let params = new URLSearchParams();
@@ -190,8 +227,8 @@ function loadHoldingsDistribution() {
     fetch(apiUrl)
         .then(response => response.json())
         .then(data => {
-            distributionData = data.distribution;
-            updateSummaryCards(data.distribution.summary);
+            distributionData = applyCurrentExchangeRateToDistribution(data.distribution);
+            updateSummaryCards(distributionData.summary);
             updateStocksChart();
             updateCategoryChart();
             updateCurrencyChart();
@@ -204,9 +241,21 @@ function loadHoldingsDistribution() {
 }
 
 function updateSummaryCards(summary) {
-    document.getElementById('total-value').textContent = 
-        '$' + (summary.total_value_cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    
+    // Get current exchange rate for USD to CAD conversion
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+
+    let totalValueCorrect = summary.total_value_cad || 0;
+
+    // If summary contains currency breakdown, recalculate with current exchange rate
+    if (summary.currency_breakdown) {
+        const cadValue = summary.currency_breakdown.CAD || 0;
+        const usdValue = summary.currency_breakdown.USD || 0;
+        totalValueCorrect = cadValue + usdValue * currentRate;
+    }
+
+    document.getElementById('total-value').textContent =
+        '$' + totalValueCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
     document.getElementById('unique-stocks').textContent = summary.unique_stocks || 0;
     document.getElementById('categories-count').textContent = summary.categories_count || 0;
     document.getElementById('accounts-count').textContent = summary.accounts_count || 0;

@@ -1025,6 +1025,71 @@ function saveCashForAccount() {
     });
 }
 
+// Apply current exchange rate logic to overview metrics
+document.addEventListener('DOMContentLoaded', function() {
+    {% if metrics and exchange_rates %}
+    // Get current exchange rate for USD to CAD conversion
+    const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
+
+    // Original USD-only values from metrics
+    const totalAssetsCad = {{ metrics.total_assets.cad_only if metrics else 0 }};
+    const totalAssetsUsd = {{ metrics.total_assets.usd_only if metrics else 0 }};
+    const totalReturnCad = {{ metrics.total_return.cad_only if metrics else 0 }};
+    const totalReturnUsd = {{ metrics.total_return.usd_only if metrics else 0 }};
+    const realizedGainCad = {{ metrics.realized_gain.cad_only if metrics else 0 }};
+    const realizedGainUsd = {{ metrics.realized_gain.usd_only if metrics else 0 }};
+    const unrealizedGainCad = {{ metrics.unrealized_gain.cad_only if metrics else 0 }};
+    const unrealizedGainUsd = {{ metrics.unrealized_gain.usd_only if metrics else 0 }};
+
+    // Recalculate with current exchange rate
+    const totalAssetsCorrect = totalAssetsCad + totalAssetsUsd * currentRate;
+    const totalReturnCorrect = totalReturnCad + totalReturnUsd * currentRate;
+    const realizedGainCorrect = realizedGainCad + realizedGainUsd * currentRate;
+    const unrealizedGainCorrect = unrealizedGainCad + unrealizedGainUsd * currentRate;
+
+    // Recalculate return rate based on corrected values
+    const totalReturnRateCorrect = totalAssetsCorrect > 0 ? (totalReturnCorrect / (totalAssetsCorrect - totalReturnCorrect)) * 100 : 0;
+
+    // Update the DOM elements
+    const totalAssetsElements = document.querySelectorAll('h4.text-primary');
+    if (totalAssetsElements.length > 0) {
+        totalAssetsElements[0].textContent = '$' + totalAssetsCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // Update total return display
+    const totalReturnElements = document.querySelectorAll('h4 span');
+    if (totalReturnElements.length > 0) {
+        const sign = totalReturnCorrect >= 0 ? '+' : '';
+        totalReturnElements[0].textContent = sign + '$' + totalReturnCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        totalReturnElements[0].className = totalReturnCorrect >= 0 ? 'text-success' : 'text-danger';
+
+        // Update return rate
+        const returnRateElement = totalReturnElements[0].parentElement.querySelector('small');
+        if (returnRateElement) {
+            const rateSign = totalReturnRateCorrect >= 0 ? '+' : '';
+            returnRateElement.textContent = '(' + rateSign + totalReturnRateCorrect.toFixed(2) + '%)';
+            returnRateElement.className = 'ms-2 ' + (totalReturnRateCorrect >= 0 ? 'text-success' : 'text-danger');
+        }
+    }
+
+    // Update realized gain display
+    const realizedGainElements = document.querySelectorAll('h4');
+    if (realizedGainElements.length >= 3) {
+        const sign = realizedGainCorrect >= 0 ? '+' : '';
+        realizedGainElements[2].textContent = sign + '$' + realizedGainCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        realizedGainElements[2].className = (realizedGainCorrect >= 0 ? 'text-success' : 'text-danger') + ' mb-1';
+    }
+
+    // Update unrealized gain display
+    if (realizedGainElements.length >= 4) {
+        const sign = unrealizedGainCorrect >= 0 ? '+' : '';
+        realizedGainElements[3].textContent = sign + '$' + unrealizedGainCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        realizedGainElements[3].className = (unrealizedGainCorrect >= 0 ? 'text-success' : 'text-danger') + ' mb-1';
+    }
+
+    console.log('Overview metrics updated with current exchange rate:', currentRate);
+    {% endif %}
+});
 
 </script>
 {% endblock %}

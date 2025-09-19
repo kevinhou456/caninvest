@@ -1579,7 +1579,12 @@ def annual_stats():
         from app import db
         db.session.add(family)
         db.session.commit()
-    
+
+    # 获取汇率信息
+    from app.services.currency_service import CurrencyService
+    currency_service = CurrencyService()
+    exchange_rates = currency_service.get_cad_usd_rates()
+
     # 获取年度数据（简化版）
     from datetime import datetime, timedelta
     from sqlalchemy import func, extract
@@ -1609,7 +1614,8 @@ def annual_stats():
     return render_template('investment/annual_stats.html',
                          title=_('Annual Statistics'),
                          annual_data=annual_data,
-                         current_year=current_year)
+                         current_year=current_year,
+                         exchange_rates=exchange_rates)
 
 
 
@@ -1623,9 +1629,15 @@ def monthly_stats():
         from app import db
         db.session.add(family)
         db.session.commit()
-    
+
+    # 获取汇率信息
+    from app.services.currency_service import CurrencyService
+    currency_service = CurrencyService()
+    exchange_rates = currency_service.get_cad_usd_rates()
+
     return render_template('investment/monthly_stats.html',
-                         title=_('Monthly Statistics'))
+                         title=_('Monthly Statistics'),
+                         exchange_rates=exchange_rates)
 
 
 @bp.route('/quarterly-stats')
@@ -1678,26 +1690,38 @@ def quarterly_stats():
             })
     
     quarterly_data.reverse()  # 按时间顺序排列
-    
+
+    # 获取汇率信息
+    from app.services.currency_service import CurrencyService
+    currency_service = CurrencyService()
+    exchange_rates = currency_service.get_cad_usd_rates()
+
     return render_template('investment/quarterly_stats.html',
                          title=_('Quarterly Statistics'),
-                         quarterly_data=quarterly_data)
+                         quarterly_data=quarterly_data,
+                         exchange_rates=exchange_rates)
 
 
 @bp.route('/daily-stats')
 def daily_stats():
     """每日统计视图"""
     from flask_babel import _
+    from app.services.currency_service import CurrencyService
+
     family = Family.query.first()
     if not family:
         family = Family(name="我的家庭")
         from app import db
         db.session.add(family)
         db.session.commit()
-    
+
+    currency_service = CurrencyService()
+    exchange_rates = currency_service.get_cad_usd_rates()
+
     return render_template('investment/daily_stats.html',
                          title=_('Daily Statistics'),
-                         family=family)
+                         family=family,
+                         exchange_rates=exchange_rates)
 
 
 @bp.route('/comparison')
@@ -1719,16 +1743,22 @@ def performance_comparison():
 @bp.route('/holdings-analysis')
 def holdings_analysis():
     """持仓分析视图"""
+    from app.services.currency_service import CurrencyService
+
     family = Family.query.first()
     if not family:
         family = Family(name="我的家庭")
         from app import db
         db.session.add(family)
         db.session.commit()
-    
+
+    currency_service = CurrencyService()
+    exchange_rates = currency_service.get_cad_usd_rates()
+
     return render_template('investment/holdings_analysis.html',
                          title=_('Holdings Analysis'),
-                         family=family)
+                         family=family,
+                         exchange_rates=exchange_rates)
 
 
 @bp.route('/transactions/delete-all', methods=['POST'])
