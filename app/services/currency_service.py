@@ -5,15 +5,17 @@
 1. CAD/USD 汇率获取和缓存
 2. 货币金额转换
 3. 汇率历史记录
+4. 年度平均汇率自动获取
 """
 
 import requests
 import yfinance as yf
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import logging
 from sqlalchemy import func
+import json
 
 from app import db
 
@@ -313,16 +315,245 @@ class CurrencyService:
         """清除汇率缓存"""
         self._cache.clear()
         self._cache_expiry.clear()
-    
+
     def _clean_expired_cache(self):
         """清理过期的缓存项"""
         now = datetime.utcnow()
-        expired_keys = [key for key, expiry_time in self._cache_expiry.items() 
+        expired_keys = [key for key, expiry_time in self._cache_expiry.items()
                        if now >= expiry_time]
-        
+
         for key in expired_keys:
             self._cache.pop(key, None)
             self._cache_expiry.pop(key, None)
+
+    def get_annual_average_rate(self, year: int, from_currency: str = 'USD', to_currency: str = 'CAD') -> Optional[Decimal]:
+        """
+        获取年度平均汇率
+
+        Args:
+            year: 年份
+            from_currency: 基础货币 (默认USD)
+            to_currency: 目标货币 (默认CAD)
+
+        Returns:
+            年度平均汇率 (Decimal)
+        """
+        current_year = datetime.now().year
+
+        # 检查缓存
+        cache_key = f"annual_{from_currency}_{to_currency}_{year}"
+        if cache_key in self._cache:
+            logger.debug(f"Using cached annual rate for {year}: {self._cache[cache_key]}")
+            return self._cache[cache_key]
+
+        # 检查数据库中是否已有年度平均汇率
+        db_rate = self._get_annual_rate_from_db(year, from_currency, to_currency)
+        if db_rate:
+            self._cache[cache_key] = db_rate
+            return db_rate
+
+        # 如果是当前年份，使用Yahoo Finance计算年初至今平均值
+        if year == current_year:
+            rate = self._calculate_current_year_average(from_currency, to_currency)
+        else:
+            # 历史年份优先从加拿大银行获取
+            rate = self._fetch_annual_rate_from_bank_of_canada(year, from_currency, to_currency)
+            if not rate:
+                # 备选方案：通过Yahoo Finance获取历史数据计算
+                rate = self._calculate_historical_year_average(year, from_currency, to_currency)
+
+        if rate:
+            # 保存到数据库和缓存
+            self._save_annual_rate_to_db(year, from_currency, to_currency, rate)
+            self._cache[cache_key] = rate
+            return rate
+
+        logger.warning(f"Unable to get annual rate for {year} {from_currency}/{to_currency}")
+        return None
+
+    def _get_annual_rate_from_db(self, year: int, from_currency: str, to_currency: str) -> Optional[Decimal]:
+        """从数据库获取年度平均汇率"""
+        # 查找年度平均汇率（使用年份的1月1日作为标识）
+        year_date = date(year, 1, 1)
+
+        rate_record = ExchangeRate.query.filter(
+            ExchangeRate.from_currency == from_currency,
+            ExchangeRate.to_currency == to_currency,
+            ExchangeRate.date == year_date,
+            ExchangeRate.source == 'ANNUAL_AVERAGE'
+        ).first()
+
+        return Decimal(str(rate_record.rate)) if rate_record else None
+
+    def _fetch_annual_rate_from_bank_of_canada(self, year: int, from_currency: str, to_currency: str) -> Optional[Decimal]:
+        """
+        从加拿大银行获取年度平均汇率
+
+        加拿大银行API文档: https://www.bankofcanada.ca/valet/docs
+        """
+        try:
+            # 加拿大银行的API端点
+            # USD/CAD 的系列ID是 FXUSDCAD
+            if from_currency == 'USD' and to_currency == 'CAD':
+                series_id = 'FXUSDCAD'
+            elif from_currency == 'CAD' and to_currency == 'USD':
+                # 对于CAD/USD，我们获取USD/CAD然后取倒数
+                series_id = 'FXUSDCAD'
+            else:
+                logger.warning(f"Unsupported currency pair for Bank of Canada: {from_currency}/{to_currency}")
+                return None
+
+            # 构建API URL - 获取年度数据
+            start_date = f"{year}-01-01"
+            end_date = f"{year}-12-31"
+            url = f"https://www.bankofcanada.ca/valet/observations/{series_id}/json"
+            params = {
+                'start_date': start_date,
+                'end_date': end_date
+            }
+
+            logger.info(f"Fetching annual rate from Bank of Canada for {year}")
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+
+            data = response.json()
+            observations = data.get('observations', [])
+
+            if observations:
+                # 计算年度平均值
+                valid_rates = []
+                for obs in observations:
+                    if obs.get(f'd.{series_id}') and obs[f'd.{series_id}']['v'] is not None:
+                        valid_rates.append(float(obs[f'd.{series_id}']['v']))
+
+                if valid_rates:
+                    annual_average = sum(valid_rates) / len(valid_rates)
+
+                    # 如果请求的是CAD/USD，取倒数
+                    if from_currency == 'CAD' and to_currency == 'USD':
+                        annual_average = 1.0 / annual_average
+
+                    rate = Decimal(str(round(annual_average, 6)))
+                    logger.info(f"Fetched annual rate from Bank of Canada: {from_currency}/{to_currency} {year} = {rate}")
+                    return rate
+
+            logger.warning(f"No valid data from Bank of Canada for {year}")
+
+        except Exception as e:
+            logger.error(f"Failed to fetch annual rate from Bank of Canada: {e}")
+
+        return None
+
+    def _calculate_current_year_average(self, from_currency: str, to_currency: str) -> Optional[Decimal]:
+        """计算当前年份的年初至今平均汇率（使用Yahoo Finance）"""
+        try:
+            current_year = datetime.now().year
+            start_date = date(current_year, 1, 1)
+            end_date = date.today()
+
+            # 构建货币对代码
+            currency_pair = f"{from_currency}{to_currency}=X"
+
+            logger.info(f"Calculating current year average for {currency_pair}")
+            ticker = yf.Ticker(currency_pair)
+
+            # 获取年初至今的历史数据
+            data = ticker.history(start=start_date, end=end_date, interval="1d")
+
+            if not data.empty and 'Close' in data.columns:
+                # 计算平均收盘价
+                average_rate = data['Close'].mean()
+                rate = Decimal(str(round(average_rate, 6)))
+                logger.info(f"Calculated current year average: {from_currency}/{to_currency} = {rate}")
+                return rate
+            else:
+                logger.warning(f"No data returned from Yahoo Finance for {currency_pair}")
+
+        except Exception as e:
+            logger.error(f"Failed to calculate current year average: {e}")
+
+        return None
+
+    def _calculate_historical_year_average(self, year: int, from_currency: str, to_currency: str) -> Optional[Decimal]:
+        """计算历史年份的年度平均汇率（使用Yahoo Finance）"""
+        try:
+            start_date = date(year, 1, 1)
+            end_date = date(year, 12, 31)
+
+            # 构建货币对代码
+            currency_pair = f"{from_currency}{to_currency}=X"
+
+            logger.info(f"Calculating historical year average for {currency_pair} in {year}")
+            ticker = yf.Ticker(currency_pair)
+
+            # 获取历史数据
+            data = ticker.history(start=start_date, end=end_date, interval="1d")
+
+            if not data.empty and 'Close' in data.columns:
+                # 计算平均收盘价
+                average_rate = data['Close'].mean()
+                rate = Decimal(str(round(average_rate, 6)))
+                logger.info(f"Calculated historical year average: {from_currency}/{to_currency} {year} = {rate}")
+                return rate
+            else:
+                logger.warning(f"No historical data for {currency_pair} in {year}")
+
+        except Exception as e:
+            logger.error(f"Failed to calculate historical year average: {e}")
+
+        return None
+
+    def _save_annual_rate_to_db(self, year: int, from_currency: str, to_currency: str, rate: Decimal):
+        """保存年度平均汇率到数据库"""
+        try:
+            # 使用年份的1月1日作为年度平均汇率的标识日期
+            year_date = date(year, 1, 1)
+
+            # 检查是否已存在
+            existing = ExchangeRate.query.filter(
+                ExchangeRate.from_currency == from_currency,
+                ExchangeRate.to_currency == to_currency,
+                ExchangeRate.date == year_date,
+                ExchangeRate.source == 'ANNUAL_AVERAGE'
+            ).first()
+
+            if existing:
+                existing.rate = rate
+                existing.created_at = datetime.utcnow()
+            else:
+                new_rate = ExchangeRate(
+                    from_currency=from_currency,
+                    to_currency=to_currency,
+                    rate=rate,
+                    date=year_date,
+                    source='ANNUAL_AVERAGE'
+                )
+                db.session.add(new_rate)
+
+            db.session.commit()
+            logger.info(f"Saved annual rate to DB: {from_currency}/{to_currency} {year} = {rate}")
+
+        except Exception as e:
+            logger.error(f"Failed to save annual rate to DB: {e}")
+            db.session.rollback()
+
+    def get_annual_rates_for_years(self, years: List[int], from_currency: str = 'USD', to_currency: str = 'CAD') -> Dict[int, Optional[Decimal]]:
+        """
+        批量获取多个年份的年度平均汇率
+
+        Args:
+            years: 年份列表
+            from_currency: 基础货币
+            to_currency: 目标货币
+
+        Returns:
+            年份到汇率的字典
+        """
+        result = {}
+        for year in years:
+            result[year] = self.get_annual_average_rate(year, from_currency, to_currency)
+
+        return result
 
 
 # 全局货币服务实例

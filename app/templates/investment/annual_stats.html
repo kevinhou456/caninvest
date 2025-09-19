@@ -10,37 +10,6 @@
     </div>
 </div>
 
-<!-- Charts Row -->
-<div class="row mb-4">
-    <!-- Total Assets Chart -->
-    <div class="col-lg-4">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3 bg-primary">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets') }}</h6>
-            </div>
-            <div class="card-body">
-                <div class="chart-area" style="height: 350px;">
-                    <canvas id="annualAssetsChart"></canvas>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Annual Returns Breakdown Chart -->
-    <div class="col-lg-8">
-        <div class="card shadow mb-4">
-            <div class="card-header py-3 bg-success">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Returns Breakdown') }}</h6>
-            </div>
-            <div class="card-body">
-                <div class="chart-area" style="height: 350px;">
-                    <canvas id="annualReturnsChart"></canvas>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Annual Data Analysis Table -->
 <div class="card shadow mb-4">
     <div class="card-header py-3 d-flex justify-content-between align-items-center bg-info">
@@ -58,12 +27,12 @@
                         <th>{{ _('Year') }}</th>
                         <th>{{ _('Total Assets') }}</th>
                         <th>{{ _('Realized Gain/Loss') }}</th>
+                        <th>{{ _('Div+Int') }}</th>
+                        <th>{{ _('Deposits') }}</th>
+                        <th>{{ _('Withdrawals') }}</th>
                         <th>{{ _('Unrealized Gain/Loss') }}</th>
-                        <th>{{ _('Total Dividends') }}</th>
-                        <th>{{ _('Total Interest') }}</th>
-                        <th>{{ _('Transactions') }}</th>
-                        <th>{{ _('Buy Amount') }}</th>
-                        <th>{{ _('Sell Amount') }}</th>
+                        <th>{{ _('Return Rate') }}</th>
+                        <th>{{ _('USD/CAD Rate') }}</th>
                     </tr>
                 </thead>
                 <tbody id="annual-data-tbody">
@@ -74,15 +43,46 @@
                         <td>{{ _('Total') }}</td>
                         <td id="total-assets-footer">-</td>
                         <td id="total-realized-footer">-</td>
+                        <td id="total-income-footer">-</td>
+                        <td id="total-deposits-footer">-</td>
+                        <td id="total-withdrawals-footer">-</td>
                         <td id="total-unrealized-footer">-</td>
-                        <td id="total-dividends-footer">-</td>
-                        <td id="total-interest-footer">-</td>
-                        <td id="total-transactions-footer">-</td>
-                        <td id="total-buy-footer">-</td>
-                        <td id="total-sell-footer">-</td>
+                        <td id="total-return-rate-footer">-</td>
+                        <td id="total-usd-cad-rate-footer">-</td>
                     </tr>
                 </tfoot>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row mb-4">
+    <!-- Total Assets Chart -->
+    <div class="col-lg-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 bg-primary">
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area" style="height: 350px;">
+                    <canvas id="annualAssetsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Annual Returns Breakdown Chart -->
+    <div class="col-lg-8">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 bg-success">
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Returns Breakdown') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area" style="height: 350px;">
+                    <canvas id="annualReturnsChart"></canvas>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -94,6 +94,61 @@
     <p class="mt-2 text-muted">{{ _('Loading annual analysis data...') }}</p>
 </div>
 
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.detail-row {
+    background-color: rgba(108, 117, 125, 0.1) !important;
+}
+
+.detail-row td {
+    border-top: 1px dashed #dee2e6 !important;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+.detail-row:hover {
+    background-color: rgba(108, 117, 125, 0.15) !important;
+}
+
+.account-type-indent {
+    margin-left: 20px;
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.account-type-indent::before {
+    content: "├─ ";
+    color: #adb5bd;
+}
+
+.member-row {
+    background-color: rgba(13, 202, 240, 0.1) !important;
+}
+
+.member-row td {
+    border-top: 1px dashed #0dcaf0 !important;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+.member-row:hover {
+    background-color: rgba(13, 202, 240, 0.15) !important;
+}
+
+.member-name-indent {
+    margin-left: 20px;
+    color: #0dcaf0;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+.member-name-indent::before {
+    content: "👤 ";
+    color: #0dcaf0;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
@@ -175,13 +230,13 @@ function loadAnnualAnalysis() {
 // Update annual assets chart
 function updateAnnualAssetsChart() {
     const ctx = document.getElementById('annualAssetsChart').getContext('2d');
-    
+
     if (annualAssetsChart) {
         annualAssetsChart.destroy();
     }
-    
-    // Sort data by year ascending for charts
-    const chartData = [...annualData].sort((a, b) => a.year - b.year);
+
+    // Sort data by year ascending for charts, exclude detail rows and member rows
+    const chartData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row).sort((a, b) => a.year - b.year);
     const years = chartData.map(item => item.year);
     const assets = chartData.map(item => item.total_assets);
     
@@ -248,13 +303,13 @@ function updateAnnualAssetsChart() {
 // Update annual returns breakdown chart
 function updateAnnualReturnsChart() {
     const ctx = document.getElementById('annualReturnsChart').getContext('2d');
-    
+
     if (annualReturnsChart) {
         annualReturnsChart.destroy();
     }
-    
-    // Sort data by year ascending for charts
-    const chartData = [...annualData].sort((a, b) => a.year - b.year);
+
+    // Sort data by year ascending for charts, exclude detail rows and member rows
+    const chartData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row).sort((a, b) => a.year - b.year);
     const years = chartData.map(item => item.year);
     const realizedGains = chartData.map(item => item.annual_realized_gain || 0);
     const unrealizedGains = chartData.map(item => item.annual_unrealized_gain || 0);
@@ -358,22 +413,70 @@ function updateAnnualTable() {
     tbody.innerHTML = '';
     
     let totalAssets = 0, totalRealized = 0, totalUnrealized = 0;
-    let totalDividends = 0, totalInterest = 0, totalTransactions = 0;
-    let totalBuy = 0, totalSell = 0;
+    let totalIncome = 0, totalDeposits = 0, totalWithdrawals = 0;
+    let totalReturnsSum = 0, totalInvestmentSum = 0;
+    let latestUsdCadRate = null;
     
-    // Sort data by year descending for table (newest first)
-    const tableData = [...annualData].sort((a, b) => b.year - a.year);
+    // Sort data by year descending for table (newest first), with detail/member rows following main rows
+    const tableData = [...annualData].sort((a, b) => {
+        // First sort by year (descending)
+        if (a.year !== b.year) {
+            return b.year - a.year;
+        }
+        // Within the same year, main row first, then detail/member rows
+        const aIsSubRow = a.is_detail_row || a.is_member_row;
+        const bIsSubRow = b.is_detail_row || b.is_member_row;
+
+        if (aIsSubRow && !bIsSubRow) {
+            return 1; // a comes after b
+        }
+        if (!aIsSubRow && bIsSubRow) {
+            return -1; // a comes before b
+        }
+        // Both are sub rows or both are main rows, maintain order
+        return 0;
+    });
     
     tableData.forEach(item => {
         const row = document.createElement('tr');
-        
+
+        // 如果是详细行或成员行，添加特殊样式
+        if (item.is_detail_row) {
+            row.classList.add('table-secondary', 'detail-row');
+            row.style.fontSize = '0.9em';
+        } else if (item.is_member_row) {
+            row.classList.add('table-info', 'member-row');
+            row.style.fontSize = '0.9em';
+        }
+
         const realizedClass = item.annual_realized_gain >= 0 ? 'text-success' : 'text-danger';
         const unrealizedClass = item.annual_unrealized_gain >= 0 ? 'text-success' : 'text-danger';
-        
+
         const currencyBreakdown = item.currency_breakdown || {};
         
+        // Calculate return rate: (realized + unrealized + dividends + interest) / (beginning assets + deposits - withdrawals)
+        const totalReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
+        const netInvestment = item.total_assets - item.annual_unrealized_gain + (item.deposit_amount || 0) - (item.withdrawal_amount || 0);
+        const returnRate = netInvestment > 0 ? (totalReturns / netInvestment) * 100 : 0;
+        const returnRateClass = returnRate >= 0 ? 'text-success' : 'text-danger';
+
+        // Calculate combined income
+        const combinedIncome = item.annual_dividends + item.annual_interest;
+        const combinedIncomeCad = (currencyBreakdown.dividends_cad || 0) + (currencyBreakdown.interest_cad || 0);
+        const combinedIncomeUsd = (currencyBreakdown.dividends_usd || 0) + (currencyBreakdown.interest_usd || 0);
+
+        // 显示年份、账户类型或成员名称
+        let displayYear;
+        if (item.is_detail_row) {
+            displayYear = `<span class="account-type-indent">${item.account_type}</span>`;
+        } else if (item.is_member_row) {
+            displayYear = `<span class="member-name-indent">${item.member_name}</span>`;
+        } else {
+            displayYear = item.year;
+        }
+
         row.innerHTML = `
-            <td class="font-weight-bold">${item.year}</td>
+            <td class="font-weight-bold">${displayYear}</td>
             <td>
                 $${formatNumber(item.total_assets, 2)}
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.total_assets_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.total_assets_usd || 0, 2)}</small>
@@ -382,53 +485,67 @@ function updateAnnualTable() {
                 $${formatNumber(item.annual_realized_gain, 2, true)}
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.realized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.realized_gain_usd || 0, 2, true)}</small>
             </td>
+            <td class="text-info">
+                $${formatNumber(combinedIncome, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(combinedIncomeCad, 2)} | USD: $${formatNumber(combinedIncomeUsd, 2)}</small>
+            </td>
+            <td class="text-primary">
+                $${formatNumber(item.deposit_amount || 0, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.deposit_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.deposit_usd || 0, 2)}</small>
+            </td>
+            <td class="text-warning">
+                $${formatNumber(item.withdrawal_amount || 0, 2)}
+                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.withdrawal_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.withdrawal_usd || 0, 2)}</small>
+            </td>
             <td class="${unrealizedClass}">
                 $${formatNumber(item.annual_unrealized_gain, 2, true)}
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.unrealized_gain_cad || 0, 2, true)} | USD: $${formatNumber(currencyBreakdown.unrealized_gain_usd || 0, 2, true)}</small>
             </td>
-            <td class="text-info">
-                $${formatNumber(item.annual_dividends, 2)}
-                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
+            <td class="${returnRateClass}">
+                ${formatNumber(returnRate, 2, true)}%
             </td>
-            <td class="text-info">
-                $${formatNumber(item.annual_interest, 2)}
-                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.interest_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.interest_usd || 0, 2)}</small>
-            </td>
-            <td class="text-center">${item.transaction_count}</td>
-            <td class="text-success">
-                $${formatNumber(item.buy_amount, 2)}
-                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.buy_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.buy_usd || 0, 2)}</small>
-            </td>
-            <td class="text-danger">
-                $${formatNumber(item.sell_amount, 2)}
-                <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.sell_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.sell_usd || 0, 2)}</small>
+            <td class="text-muted">
+                ${item.annual_usd_cad_rate ? formatNumber(item.annual_usd_cad_rate, 4) : 'N/A'}
             </td>
         `;
         
         tbody.appendChild(row);
         
-        // Update totals (use latest year for assets)
-        if (item === tableData[0]) {
-            totalAssets = item.total_assets;
+        // Update totals (only for main rows, not detail rows or member rows)
+        if (!item.is_detail_row && !item.is_member_row) {
+            // Use the first main row for latest assets and exchange rate
+            if (totalAssets === 0) {
+                totalAssets = item.total_assets;
+                latestUsdCadRate = item.annual_usd_cad_rate;
+            }
+            totalRealized += item.annual_realized_gain;
+            totalUnrealized += item.annual_unrealized_gain;
+            totalIncome += (item.annual_dividends + item.annual_interest);
+            totalDeposits += (item.deposit_amount || 0);
+            totalWithdrawals += (item.withdrawal_amount || 0);
         }
-        totalRealized += item.annual_realized_gain;
-        totalUnrealized += item.annual_unrealized_gain;
-        totalDividends += item.annual_dividends;
-        totalInterest += item.annual_interest;
-        totalTransactions += item.transaction_count;
-        totalBuy += item.buy_amount;
-        totalSell += item.sell_amount;
+
+        // Calculate totals for overall return rate (only for main rows, not detail rows or member rows)
+        if (!item.is_detail_row && !item.is_member_row) {
+            const itemReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
+            const itemInvestment = item.total_assets - item.annual_unrealized_gain + (item.deposit_amount || 0) - (item.withdrawal_amount || 0);
+            totalReturnsSum += itemReturns;
+            totalInvestmentSum += Math.max(itemInvestment, 0);
+        }
     });
     
+    // Calculate overall return rate
+    const overallReturnRate = totalInvestmentSum > 0 ? (totalReturnsSum / totalInvestmentSum) * 100 : 0;
+
     // Update footer totals
     document.getElementById('total-assets-footer').textContent = '$' + formatNumber(totalAssets, 2);
     document.getElementById('total-realized-footer').textContent = '$' + formatNumber(totalRealized, 2, true);
+    document.getElementById('total-income-footer').textContent = '$' + formatNumber(totalIncome, 2);
+    document.getElementById('total-deposits-footer').textContent = '$' + formatNumber(totalDeposits, 2);
+    document.getElementById('total-withdrawals-footer').textContent = '$' + formatNumber(totalWithdrawals, 2);
     document.getElementById('total-unrealized-footer').textContent = '$' + formatNumber(totalUnrealized, 2, true);
-    document.getElementById('total-dividends-footer').textContent = '$' + formatNumber(totalDividends, 2);
-    document.getElementById('total-interest-footer').textContent = '$' + formatNumber(totalInterest, 2);
-    document.getElementById('total-transactions-footer').textContent = totalTransactions;
-    document.getElementById('total-buy-footer').textContent = '$' + formatNumber(totalBuy, 2);
-    document.getElementById('total-sell-footer').textContent = '$' + formatNumber(totalSell, 2);
+    document.getElementById('total-return-rate-footer').textContent = formatNumber(overallReturnRate, 2, true) + '%';
+    document.getElementById('total-usd-cad-rate-footer').textContent = latestUsdCadRate ? formatNumber(latestUsdCadRate, 4) : 'N/A';
 
     updateCurrencyBreakdownVisibility();
 }
