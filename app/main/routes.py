@@ -76,7 +76,7 @@ def overview():
                     ownership_map[membership.account_id] = Decimal('0')
         else:
             accounts = Account.query.filter_by(family_id=family.id).all()
-            filter_description = "全部成员"
+            filter_description = "All Members"
 
         # 获取汇率信息
         exchange_rates = currency_service.get_cad_usd_rates()
@@ -390,7 +390,7 @@ def overview():
                              cleared_holdings=[],
                              exchange_rates=None,
                              recent_transactions=[],
-                             filter_description="全部成员",
+                             filter_description="All Members",
                              cash_data={'usd': 0, 'cad': 0, 'total_cad': 0},
                              current_period='all_time',
                              member_id=None,

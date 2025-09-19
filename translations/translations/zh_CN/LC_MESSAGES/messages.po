@@ -668,20 +668,20 @@ msgstr "账户删除成功"
 #: app/main/routes.py:1278
 #, python-brace-format
 msgid "Error deleting account: {}"
-msgstr "无法删除账户："
+msgstr ""
 
 #: app/main/routes.py:1334
 msgid "Transaction"
-msgstr "交易记录"
+msgstr ""
 
 #: app/main/routes.py:1378 app/templates/base/investment_base.html:385
 #: app/templates/stocks/categories.html:12
 msgid "Manage Stock Category"
-msgstr "管理股票类型"
+msgstr ""
 
 #: app/main/routes.py:1385
 msgid "Error loading stock categories: "
-msgstr "加载股票类型错误"
+msgstr ""
 
 #: app/main/routes.py:1397 app/main/routes.py:1433
 msgid "Category name is required"
@@ -689,15 +689,15 @@ msgstr "分类名称是必需的"
 
 #: app/main/routes.py:1402 app/main/routes.py:1441
 msgid "Category name already exists"
-msgstr "类别名称已存在"
+msgstr ""
 
 #: app/main/routes.py:1416
 msgid "Category created successfully"
-msgstr "创建类别成功"
+msgstr ""
 
 #: app/main/routes.py:1452
 msgid "Category updated successfully"
-msgstr "类别更新成功"
+msgstr ""
 
 #: app/main/routes.py:1472
 #, python-format
@@ -795,7 +795,7 @@ msgstr ""
 
 #: app/main/routes.py:2478
 msgid "No transactions found for this stock symbol"
-msgstr "未发现该股票的交易记录"
+msgstr ""
 
 #: app/main/routes.py:2656
 #, python-brace-format
@@ -1507,7 +1507,7 @@ msgstr "交易"
 #: app/templates/transactions/create.html:24
 #: app/templates/transactions/list.html:418
 msgid "Stock Symbol"
-msgstr "股票代码"
+msgstr ""
 
 #: app/templates/imports/index.html:641
 msgid "Fee/Commission"
@@ -1552,7 +1552,7 @@ msgstr ""
 
 #: app/templates/imports/index.html:844
 msgid "Stock symbols corrected: "
-msgstr "股票代码矫正："
+msgstr ""
 
 #: app/templates/imports/index.html:856
 msgid "Error importing CSV: "
@@ -1560,11 +1560,11 @@ msgstr ""
 
 #: app/templates/imports/index.html:861
 msgid "Error importing CSV. Please try again."
-msgstr "无法导入CSV文件，请重试。"
+msgstr ""
 
 #: app/templates/imports/index.html:918
 msgid "No encoding information available"
-msgstr "没有发现编码信息"
+msgstr ""
 
 #: app/templates/imports/index.html:942
 msgid "Copied!"
@@ -1576,7 +1576,7 @@ msgstr ""
 
 #: app/templates/investment/annual_stats.html:7
 msgid "Annual Analysis"
-msgstr "年度分析"
+msgstr ""
 
 #: app/templates/investment/annual_stats.html:9
 #, fuzzy
@@ -1590,14 +1590,14 @@ msgstr ""
 #: app/templates/investment/annual_stats.html:19
 #: app/templates/investment/monthly_stats.html:35
 #: app/templates/investment/quarterly_stats.html:35
-msgid "Currency Details"
-msgstr "显示货币明细"
+msgid "显示货币明细"
+msgstr ""
 
 #: app/templates/investment/annual_stats.html:27
 #: app/templates/investment/annual_stats.html:271
 #: app/templates/investment/annual_stats.html:360
 msgid "Year"
-msgstr "年度"
+msgstr ""
 
 #: app/templates/investment/annual_stats.html:28
 #: app/templates/investment/annual_stats.html:249
@@ -1959,12 +1959,12 @@ msgstr ""
 #: app/templates/investment/performance_comparison.html:288
 #: app/templates/investment/quarterly_stats.html:47
 msgid "Return Percent"
-msgstr "回报率"
+msgstr ""
 
 #: app/templates/investment/monthly_stats.html:49
 #: app/templates/investment/quarterly_stats.html:49
 msgid "Total Interest"
-msgstr "总利息"
+msgstr ""
 
 #: app/templates/investment/monthly_stats.html:51
 #: app/templates/investment/quarterly_stats.html:51
@@ -1996,7 +1996,7 @@ msgstr "总收益"
 
 #: app/templates/investment/overview.html:265
 msgid "Div+Int"
-msgstr "分红+利息"
+msgstr "分红+收益"
 
 #: app/templates/investment/overview.html:281
 msgid "Cash Balance"
@@ -2320,22 +2320,22 @@ msgstr ""
 #: app/templates/investment/stock_detail.html:119
 #, fuzzy
 msgid "Transaction History"
-msgstr "交易记录"
+msgstr "交易"
 
 #: app/templates/investment/stock_detail.html:122
 #, fuzzy
 msgid "transactions"
-msgstr "交易记录"
+msgstr "交易"
 
 #: app/templates/investment/stock_detail.html:157
 #: app/templates/transactions/create.html:64
 msgid "Dividend"
-msgstr "分红"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:208
 #: app/templates/investment/stock_detail.html:823
 msgid "Edit Notes"
-msgstr "编辑笔记"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:645
 #: app/templates/transactions/list.html:232
@@ -2352,17 +2352,17 @@ msgstr ""
 msgid ""
 "Are you sure you want to delete this transaction? This action cannot be "
 "undone."
-msgstr "确定删除该交易记录？删除后无法恢复，需重新输入。"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:668
 #: app/templates/transactions/list.html:255
 msgid "Error deleting transaction: "
-msgstr "无法删除交易记录："
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:673
 #: app/templates/transactions/list.html:260
 msgid "Error deleting transaction. Please try again."
-msgstr "无法删除交易记录。请重试。"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:715
 #: app/templates/transactions/list.html:302
@@ -2372,7 +2372,7 @@ msgstr ""
 #: app/templates/investment/stock_detail.html:731
 #: app/templates/transactions/list.html:318
 msgid "Error updating transaction: "
-msgstr "无法更新交易记录："
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:736
 #: app/templates/transactions/list.html:323
@@ -2386,15 +2386,15 @@ msgstr ""
 #: app/templates/investment/stock_detail.html:804
 #: app/templates/investment/stock_detail.html:809
 msgid "Failed to update notes"
-msgstr "更新笔记失败。"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:832
 msgid "Enter notes..."
-msgstr "输入笔记..."
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:838
 msgid "Save Notes"
-msgstr "保存笔记"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:852
 #: app/templates/transactions/list.html:388
@@ -2405,7 +2405,7 @@ msgstr "交易"
 #: app/templates/investment/stock_detail.html:863
 #: app/templates/transactions/list.html:399
 msgid "Trade Date"
-msgstr "交易日期"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:910
 #: app/templates/transactions/create.html:88
@@ -2414,13 +2414,13 @@ msgstr "交易日期"
 #: app/templates/transactions/create.html:509
 #: app/templates/transactions/list.html:444
 msgid "Price per Share"
-msgstr "每股价格"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:918
 #: app/templates/transactions/create.html:35
 #: app/templates/transactions/list.html:452
 msgid "Select Currency"
-msgstr "选择货币"
+msgstr ""
 
 #: app/templates/investment/stock_detail.html:929
 #: app/templates/transactions/create.html:93
@@ -2448,7 +2448,7 @@ msgstr ""
 
 #: app/templates/main/dashboard.html:7
 msgid "Overview of your family investment portfolio"
-msgstr "家庭投资组合概览"
+msgstr ""
 
 #: app/templates/main/dashboard.html:114
 msgid "CAD to USD"
@@ -2456,7 +2456,7 @@ msgstr ""
 
 #: app/templates/main/dashboard.html:130
 msgid "Holdings"
-msgstr "持仓"
+msgstr ""
 
 #: app/templates/main/dashboard.html:131
 msgid "stocks tracked"
@@ -2485,7 +2485,7 @@ msgstr "账户"
 
 #: app/templates/main/dashboard.html:344
 msgid "shares"
-msgstr "数量"
+msgstr ""
 
 #: app/templates/main/dashboard.html:406
 msgid "Record Transaction"
@@ -2493,7 +2493,7 @@ msgstr ""
 
 #: app/templates/main/dashboard.html:427
 msgid "Manage Stocks"
-msgstr "管理股票"
+msgstr ""
 
 #: app/templates/main/index.html:7 app/templates/settings/about.html:8
 msgid "Canadian Family Investment Management"
@@ -2771,7 +2771,7 @@ msgstr ""
 #: app/templates/stocks/list.html:11
 #, fuzzy
 msgid "Manage Categories"
-msgstr "管理分类"
+msgstr "管理家庭"
 
 #: app/templates/stocks/list.html:40
 msgid "Uncategorized"

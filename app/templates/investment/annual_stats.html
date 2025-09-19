@@ -16,7 +16,7 @@
         <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Data Analysis') }}</h6>
         <div class="form-check form-switch text-white mb-0">
             <input class="form-check-input" type="checkbox" id="toggleCurrencyBreakdown">
-            <label class="form-check-label" for="toggleCurrencyBreakdown">{{ _('显示货币明细') }}</label>
+            <label class="form-check-label" for="toggleCurrencyBreakdown">{{ _('Currency Details') }}</label>
         </div>
     </div>
     <div class="card-body">
@@ -32,7 +32,7 @@
                         <th>{{ _('Withdrawals') }}</th>
                         <th>{{ _('Unrealized Gain/Loss') }}</th>
                         <th>{{ _('Return Rate') }}</th>
-                        <th>{{ _('USD/CAD Rate') }}</th>
+                        <th>{{ _('Annual exchange rates') }}</th>
                     </tr>
                 </thead>
                 <tbody id="annual-data-tbody">
@@ -41,12 +41,30 @@
                 <tfoot>
                     <tr class="bg-light font-weight-bold">
                         <td>{{ _('Total') }}</td>
-                        <td id="total-assets-footer">-</td>
-                        <td id="total-realized-footer">-</td>
-                        <td id="total-income-footer">-</td>
-                        <td id="total-deposits-footer">-</td>
-                        <td id="total-withdrawals-footer">-</td>
-                        <td id="total-unrealized-footer">-</td>
+                        <td id="total-assets-footer">
+                            -
+                            <br><small class="text-muted currency-breakdown">CAD: - | USD: -</small>
+                        </td>
+                        <td id="total-realized-footer">
+                            -
+                            <br><small class="text-muted currency-breakdown">CAD: - | USD: -</small>
+                        </td>
+                        <td id="total-income-footer">
+                            -
+                            <br><small class="text-muted currency-breakdown">CAD: - | USD: -</small>
+                        </td>
+                        <td id="total-deposits-footer">
+                            -
+                            <br><small class="text-muted currency-breakdown">CAD: - | USD: -</small>
+                        </td>
+                        <td id="total-withdrawals-footer">
+                            -
+                            <br><small class="text-muted currency-breakdown">CAD: - | USD: -</small>
+                        </td>
+                        <td id="total-unrealized-footer">
+                            -
+                            <br><small class="text-muted currency-breakdown">CAD: - | USD: -</small>
+                        </td>
                         <td id="total-return-rate-footer">-</td>
                         <td id="total-usd-cad-rate-footer">-</td>
                     </tr>
@@ -411,12 +429,21 @@ function updateAnnualReturnsChart() {
 function updateAnnualTable() {
     const tbody = document.getElementById('annual-data-tbody');
     tbody.innerHTML = '';
-    
+
     let totalAssets = 0, totalRealized = 0, totalUnrealized = 0;
     let totalIncome = 0, totalDeposits = 0, totalWithdrawals = 0;
     let totalReturnsSum = 0, totalInvestmentSum = 0;
     let latestUsdCadRate = null;
-    
+
+    // Currency breakdown totals
+    let totalAssetsCad = 0, totalAssetsUsd = 0;
+    let totalRealizedCad = 0, totalRealizedUsd = 0;
+    let totalIncomeCad = 0, totalIncomeUsd = 0;
+    let totalDepositsCad = 0, totalDepositsUsd = 0;
+    let totalWithdrawalsCad = 0, totalWithdrawalsUsd = 0;
+    let totalUnrealizedCad = 0, totalUnrealizedUsd = 0;
+
+
     // Sort data by year descending for table (newest first), with detail/member rows following main rows
     const tableData = [...annualData].sort((a, b) => {
         // First sort by year (descending)
@@ -436,7 +463,7 @@ function updateAnnualTable() {
         // Both are sub rows or both are main rows, maintain order
         return 0;
     });
-    
+
     tableData.forEach(item => {
         const row = document.createElement('tr');
 
@@ -505,7 +532,7 @@ function updateAnnualTable() {
                 ${formatNumber(returnRate, 2, true)}%
             </td>
             <td class="text-muted">
-                ${item.annual_usd_cad_rate ? formatNumber(item.annual_usd_cad_rate, 4) : 'N/A'}
+                ${item.is_detail_row || item.is_member_row ? '' : (item.annual_usd_cad_rate ? formatNumber(item.annual_usd_cad_rate, 4) : 'N/A')}
             </td>
         `;
         
@@ -523,6 +550,20 @@ function updateAnnualTable() {
             totalIncome += (item.annual_dividends + item.annual_interest);
             totalDeposits += (item.deposit_amount || 0);
             totalWithdrawals += (item.withdrawal_amount || 0);
+
+            // Currency breakdown totals
+            totalAssetsCad += (currencyBreakdown.total_assets_cad || 0);
+            totalAssetsUsd += (currencyBreakdown.total_assets_usd || 0);
+            totalRealizedCad += (currencyBreakdown.realized_gain_cad || 0);
+            totalRealizedUsd += (currencyBreakdown.realized_gain_usd || 0);
+            totalIncomeCad += (currencyBreakdown.dividends_cad || 0) + (currencyBreakdown.interest_cad || 0);
+            totalIncomeUsd += (currencyBreakdown.dividends_usd || 0) + (currencyBreakdown.interest_usd || 0);
+            totalDepositsCad += (currencyBreakdown.deposit_cad || 0);
+            totalDepositsUsd += (currencyBreakdown.deposit_usd || 0);
+            totalWithdrawalsCad += (currencyBreakdown.withdrawal_cad || 0);
+            totalWithdrawalsUsd += (currencyBreakdown.withdrawal_usd || 0);
+            totalUnrealizedCad += (currencyBreakdown.unrealized_gain_cad || 0);
+            totalUnrealizedUsd += (currencyBreakdown.unrealized_gain_usd || 0);
         }
 
         // Calculate totals for overall return rate (only for main rows, not detail rows or member rows)
@@ -538,12 +579,30 @@ function updateAnnualTable() {
     const overallReturnRate = totalInvestmentSum > 0 ? (totalReturnsSum / totalInvestmentSum) * 100 : 0;
 
     // Update footer totals
-    document.getElementById('total-assets-footer').textContent = '$' + formatNumber(totalAssets, 2);
-    document.getElementById('total-realized-footer').textContent = '$' + formatNumber(totalRealized, 2, true);
-    document.getElementById('total-income-footer').textContent = '$' + formatNumber(totalIncome, 2);
-    document.getElementById('total-deposits-footer').textContent = '$' + formatNumber(totalDeposits, 2);
-    document.getElementById('total-withdrawals-footer').textContent = '$' + formatNumber(totalWithdrawals, 2);
-    document.getElementById('total-unrealized-footer').textContent = '$' + formatNumber(totalUnrealized, 2, true);
+    document.getElementById('total-assets-footer').innerHTML = `
+        $${formatNumber(totalAssets, 2)}
+        <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalAssetsCad, 2)} | USD: $${formatNumber(totalAssetsUsd, 2)}</small>
+    `;
+    document.getElementById('total-realized-footer').innerHTML = `
+        $${formatNumber(totalRealized, 2, true)}
+        <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalRealizedCad, 2, true)} | USD: $${formatNumber(totalRealizedUsd, 2, true)}</small>
+    `;
+    document.getElementById('total-income-footer').innerHTML = `
+        $${formatNumber(totalIncome, 2)}
+        <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalIncomeCad, 2)} | USD: $${formatNumber(totalIncomeUsd, 2)}</small>
+    `;
+    document.getElementById('total-deposits-footer').innerHTML = `
+        $${formatNumber(totalDeposits, 2)}
+        <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalDepositsCad, 2)} | USD: $${formatNumber(totalDepositsUsd, 2)}</small>
+    `;
+    document.getElementById('total-withdrawals-footer').innerHTML = `
+        $${formatNumber(totalWithdrawals, 2)}
+        <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalWithdrawalsCad, 2)} | USD: $${formatNumber(totalWithdrawalsUsd, 2)}</small>
+    `;
+    document.getElementById('total-unrealized-footer').innerHTML = `
+        $${formatNumber(totalUnrealized, 2, true)}
+        <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalUnrealizedCad, 2, true)} | USD: $${formatNumber(totalUnrealizedUsd, 2, true)}</small>
+    `;
     document.getElementById('total-return-rate-footer').textContent = formatNumber(overallReturnRate, 2, true) + '%';
     document.getElementById('total-usd-cad-rate-footer').textContent = latestUsdCadRate ? formatNumber(latestUsdCadRate, 4) : 'N/A';
 

@@ -555,7 +555,7 @@ def get_family_annual_analysis(family_id):
     try:
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
-        analysis_data = portfolio_service.get_annual_analysis(account_ids, years, member_id=member_id)
+        analysis_data = portfolio_service.get_annual_analysis(account_ids, years, member_id=member_id, selected_account_id=account_id)
         
         return jsonify({
             'family': family.to_dict(),

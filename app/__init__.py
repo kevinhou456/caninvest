@@ -51,6 +51,14 @@ def create_app(config_name=None):
     
     # 初始化 Babel
     babel.init_app(app)
+
+    # 配置翻译目录
+    app.config['BABEL_TRANSLATION_DIRECTORIES'] = 'translations'
+
+    # 向Jinja2模板环境添加翻译函数
+    from flask_babel import gettext, ngettext
+    app.jinja_env.globals['_'] = gettext
+    app.jinja_env.globals['ngettext'] = ngettext
     
     # 语言选择函数 - Flask-Babel 2.0 语法
     @babel.localeselector
