@@ -655,6 +655,168 @@ def account_types():
                          account_types=account_types)
 
 
+@bp.route('/holdings-board')
+def holdings_board():
+    """Holdings Board - 持仓板块页面"""
+    try:
+        # 获取默认家庭
+        family = Family.query.first()
+        if not family:
+            family = Family(name="我的家庭")
+            db.session.add(family)
+            db.session.commit()
+
+        # 获取所有账户供选择
+        accounts = Account.query.filter_by(family_id=family.id).all()
+
+        # 按照左侧导航栏的顺序排序账户
+        # 定义账户类型排序顺序（与 __init__.py 保持一致）
+        account_type_order = {
+            'Regular': 1,
+            'Margin': 2,
+            'TFSA': 3,
+            'RRSP': 4,
+            'RESP': 5,
+            'FHSA': 6
+        }
+
+        # 按成员分组并排序
+        def get_account_sort_key(account):
+            # 联名账户优先级最低，排在所有个人账户之后
+            if account.is_joint:
+                return (9999, 1000, account.name)  # 联名账户排在最后
+
+            # 获取账户成员信息
+            account_members = account.account_members.all()
+
+            # 获取主要成员或第一个成员的ID（用于匹配sidebar顺序）
+            if account_members:
+                primary_member = next((am.member for am in account_members if am.is_primary), None)
+                if primary_member:
+                    member_id = primary_member.id
+                else:
+                    member_id = account_members[0].member.id
+            else:
+                member_id = 9998  # 没有成员的账户排在倒数第二
+
+            # 账户类型排序值
+            account_type = account.account_type.name if account.account_type else ''
+            type_order = account_type_order.get(account_type, 999)
+
+            return (member_id, type_order, account.name)
+
+        accounts = sorted(accounts, key=get_account_sort_key)
+
+        # 获取所有成员供显示
+        members = Member.query.filter_by(family_id=family.id).all()
+
+        # 获取汇率信息
+        from app.services.currency_service import CurrencyService
+        currency_service = CurrencyService()
+        exchange_rates = currency_service.get_cad_usd_rates()
+
+        # 获取持仓服务
+        from app.services.holdings_service import holdings_service
+
+        return render_template('investment/holdings_board.html',
+                             title=_('Holdings Board'),
+                             accounts=accounts,
+                             members=members,
+                             exchange_rates=exchange_rates,
+                             current_view='holdings_board')
+
+    except Exception as e:
+        current_app.logger.error(f"Holdings board error: {e}")
+        flash(_('Error loading holdings board'), 'error')
+        return redirect(url_for('main.overview'))
+
+
+@bp.route('/api/holdings-board')
+def api_holdings_board():
+    """Holdings Board API - 获取持仓数据"""
+    try:
+        account_ids = request.args.getlist('account_ids')
+        separate = request.args.get('separate', 'false').lower() == 'true'
+        force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
+
+        if not account_ids:
+            return jsonify({'success': False, 'error': 'No accounts selected'})
+
+        # 获取账户信息
+        accounts = Account.query.filter(Account.id.in_(account_ids)).all()
+        if not accounts:
+            return jsonify({'success': False, 'error': 'Invalid account IDs'})
+
+        # 转换为整数列表
+        account_ids = [int(id) for id in account_ids]
+
+        # 如果需要强制刷新价格，先更新所有相关股票的价格
+        if force_refresh:
+            from app.services.stock_price_service import StockPriceService
+            from app.models.stocks_cache import StocksCache
+
+            # 获取这些账户中所有股票的symbol和currency组合
+            symbols_currencies = db.session.query(
+                StocksCache.symbol,
+                StocksCache.currency
+            ).join(
+                Transaction, StocksCache.symbol == Transaction.stock
+            ).filter(
+                Transaction.account_id.in_(account_ids)
+            ).distinct().all()
+
+            if symbols_currencies:
+                stock_service = StockPriceService()
+                symbol_currency_pairs = [(sc.symbol, sc.currency) for sc in symbols_currencies]
+                update_result = stock_service.update_prices_for_symbols(symbol_currency_pairs, force_refresh=True)
+                current_app.logger.info(f"Force refresh result: {update_result['updated']} updated, {update_result['failed']} failed")
+
+        # 使用与overview完全相同的服务
+        from app.services.asset_valuation_service import AssetValuationService
+        asset_service = AssetValuationService()
+
+        # 获取详细的投资组合数据 - 与overview使用相同方法
+        portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
+        raw_holdings = portfolio_data.get('current_holdings', [])
+
+        # 按账户分组数据，按选择顺序返回，使用带成员信息的账户名
+        def get_account_name_with_members(account):
+            """获取带成员信息的账户名（复用全局函数逻辑）"""
+            if not account.account_members:
+                return account.name
+
+            member_names = []
+            for am in account.account_members:
+                if am.is_primary:
+                    member_names.insert(0, am.member.name)  # 主要成员放在前面
+                else:
+                    member_names.append(am.member.name)
+
+            if member_names:
+                return f"{account.name} - {', '.join(member_names)}"
+            return account.name
+
+        account_name_map = {acc.id: get_account_name_with_members(acc) for acc in accounts}
+        result_data = []
+
+        for account_id in account_ids:
+            # 为每个账户单独获取数据
+            account_portfolio_data = asset_service.get_detailed_portfolio_data([account_id])
+            account_holdings = account_portfolio_data.get('current_holdings', [])
+
+            result_data.append({
+                'account_id': account_id,
+                'account_name': account_name_map[account_id],
+                'holdings': account_holdings
+            })
+
+        return jsonify({'success': True, 'data': result_data})
+
+    except Exception as e:
+        current_app.logger.error(f"Holdings board API error: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
 @bp.route('/transactions')
 def transactions():
     """交易记录列表页面"""

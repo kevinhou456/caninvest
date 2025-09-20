@@ -1,0 +1,712 @@
+{% extends "base/investment_base.html" %}
+
+{% block extra_css %}
+<style>
+    /* 复制overview页面的所有样式 */
+    .metric-card {
+        border: none;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+    }
+
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+
+    .metric-icon {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        margin-right: 0.5rem;
+        flex-shrink: 0;
+    }
+
+    .holdings-table {
+        font-size: 0.9rem;
+    }
+
+    .stock-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .return-badge {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+    }
+
+    /* 账户详情悬停提示样式 - 优雅白色风格 */
+    .account-tooltip {
+        cursor: help;
+        position: relative;
+    }
+
+    .tooltip {
+        --bs-tooltip-bg: #ffffff;
+        --bs-tooltip-border-color: #dee2e6;
+        --bs-tooltip-color: #212529;
+        --bs-tooltip-max-width: 500px;
+    }
+
+    .tooltip-inner {
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        color: #212529;
+        border: 1px solid #dee2e6;
+        border-radius: 12px;
+        padding: 16px;
+        font-size: 0.85rem;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1);
+        text-align: left;
+        max-width: 500px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+
+    /* 多选下拉框样式 */
+    .multiselect-dropdown {
+        position: relative;
+        display: inline-block;
+        min-width: 250px;
+    }
+
+    .multiselect-dropdown .dropdown-toggle {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid #ced4da;
+        border-radius: 0.375rem;
+        background: white;
+        cursor: pointer;
+        text-align: left;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+    }
+
+    .multiselect-dropdown .dropdown-menu {
+        width: 100%;
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #ced4da;
+        border-radius: 0.375rem;
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    }
+
+    .multiselect-dropdown .dropdown-item {
+        padding: 0.5rem 0.75rem;
+        display: flex;
+        align-items: center;
+    }
+
+    .multiselect-dropdown .dropdown-item input[type="checkbox"] {
+        margin-right: 0.5rem;
+    }
+
+    .account-section-divider {
+        border-bottom: 2px solid #e9ecef;
+        background-color: #f8f9fa;
+        margin-bottom: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Holdings Board Header -->
+<div class="row mb-3">
+    <div class="col-12">
+        <h4>{{ _('Holdings Board') }}</h4>
+    </div>
+</div>
+
+<div class="container-fluid">
+    <!-- 控制面板 -->
+    <div class="row mb-3 align-items-end">
+        <div class="col-4">
+            <label class="form-label mb-2">
+                <i class="fas fa-university me-1"></i>{{ _('Select Accounts') }}:
+            </label>
+            <div class="multiselect-dropdown">
+                <div class="dropdown-toggle" id="accountDropdownToggle">
+                    <span id="selectedAccountsText">{{ _('All Accounts') }}</span>
+                </div>
+                <div class="dropdown-menu" id="accountDropdownMenu" style="display: none;">
+                    <div class="dropdown-item">
+                        <input type="checkbox" id="selectAll" checked>
+                        <label for="selectAll"><strong>{{ _('Select All') }}</strong></label>
+                    </div>
+                    <div class="dropdown-divider"></div>
+                    {% for account in accounts %}
+                    <div class="dropdown-item">
+                        <input type="checkbox" id="account{{ account.id }}" value="{{ account.id }}" class="account-checkbox" checked>
+                        <label for="account{{ account.id }}">{{ _get_account_name_with_members(account) }}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-4">
+            <div class="form-check" style="margin-bottom: 8px;">
+                <input class="form-check-input" type="checkbox" id="separateByAccount">
+                <label class="form-check-label" for="separateByAccount">
+                    {{ _('Separate by Account') }}
+                </label>
+            </div>
+        </div>
+
+        <div class="col-4 d-flex justify-content-end">
+            <div>
+                <button class="btn btn-primary" onclick="loadHoldings(true)">
+                    <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh') }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 持仓显示区域 -->
+    <div id="holdingsContent">
+        <div class="text-center p-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">{{ _('Loading...') }}</span>
+            </div>
+            <div class="mt-2">{{ _('Loading holdings data...') }}</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// localStorage keys
+const STORAGE_KEY_ACCOUNTS = 'holdingsBoard_selectedAccounts';
+const STORAGE_KEY_SEPARATE = 'holdingsBoard_separateByAccount';
+
+// 多选下拉框功能
+document.addEventListener('DOMContentLoaded', function() {
+    const dropdownToggle = document.getElementById('accountDropdownToggle');
+    const dropdownMenu = document.getElementById('accountDropdownMenu');
+    const selectAllCheckbox = document.getElementById('selectAll');
+    const accountCheckboxes = document.querySelectorAll('.account-checkbox');
+    const selectedAccountsText = document.getElementById('selectedAccountsText');
+    const separateByAccountCheckbox = document.getElementById('separateByAccount');
+
+    // 恢复保存的选择
+    restoreSavedSelections();
+
+    // 切换下拉菜单显示
+    dropdownToggle.addEventListener('click', function() {
+        const isShown = dropdownMenu.style.display === 'block';
+        dropdownMenu.style.display = isShown ? 'none' : 'block';
+    });
+
+    // 点击外部关闭下拉菜单
+    document.addEventListener('click', function(event) {
+        if (!dropdownToggle.contains(event.target) && !dropdownMenu.contains(event.target)) {
+            dropdownMenu.style.display = 'none';
+        }
+    });
+
+    // 全选/取消全选
+    selectAllCheckbox.addEventListener('change', function() {
+        accountCheckboxes.forEach(checkbox => {
+            checkbox.checked = selectAllCheckbox.checked;
+        });
+        updateSelectedAccountsText();
+        saveSelectedAccounts();
+        loadHoldings();
+    });
+
+    // 单个账户选择
+    accountCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            updateSelectAllState();
+            updateSelectedAccountsText();
+            saveSelectedAccounts();
+            loadHoldings();
+        });
+    });
+
+    // 显示模式改变
+    separateByAccountCheckbox.addEventListener('change', function() {
+        saveSeparateByAccount();
+        loadHoldings();
+    });
+
+    // 更新全选状态
+    function updateSelectAllState() {
+        const checkedCount = Array.from(accountCheckboxes).filter(cb => cb.checked).length;
+        selectAllCheckbox.checked = checkedCount === accountCheckboxes.length;
+        selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < accountCheckboxes.length;
+    }
+
+    // 更新选中账户显示文本
+    function updateSelectedAccountsText() {
+        const checkedBoxes = Array.from(accountCheckboxes).filter(cb => cb.checked);
+        if (checkedBoxes.length === 0) {
+            selectedAccountsText.textContent = '{{ _("No accounts selected") }}';
+        } else if (checkedBoxes.length === accountCheckboxes.length) {
+            selectedAccountsText.textContent = '{{ _("All Accounts") }}';
+        } else if (checkedBoxes.length === 1) {
+            const label = checkedBoxes[0].nextElementSibling.textContent;
+            selectedAccountsText.textContent = label;
+        } else {
+            selectedAccountsText.textContent = `{{ _("Selected") }} ${checkedBoxes.length} {{ _("accounts") }}`;
+        }
+    }
+
+    // 页面加载后自动加载数据
+    setTimeout(() => {
+        loadHoldings();
+    }, 500);
+});
+
+function loadHoldings(forceRefresh = false) {
+    console.log('Loading holdings...', forceRefresh ? 'with forced price refresh' : '');
+
+    // 获取选中的账户
+    const checkedBoxes = Array.from(document.querySelectorAll('.account-checkbox:checked'));
+    const selectedAccountIds = checkedBoxes.map(cb => cb.value);
+    const separateByAccount = document.getElementById('separateByAccount').checked;
+
+    console.log('Selected accounts:', selectedAccountIds);
+    console.log('Separate by account:', separateByAccount);
+
+    if (selectedAccountIds.length === 0) {
+        document.getElementById('holdingsContent').innerHTML = `
+            <div class="alert alert-warning m-3">
+                <i class="fas fa-exclamation-triangle me-2"></i>{{ _('Please select at least one account') }}
+            </div>
+        `;
+        return;
+    }
+
+    // 显示加载状态
+    const loadingMessage = forceRefresh ? '{{ _("Refreshing prices from Yahoo Finance...") }}' : '{{ _("Loading holdings data...") }}';
+    document.getElementById('holdingsContent').innerHTML = `
+        <div class="text-center p-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">{{ _('Loading...') }}</span>
+            </div>
+            <div class="mt-2">${loadingMessage}</div>
+        </div>
+    `;
+
+    // 构建API URL
+    let apiUrl = '/api/holdings-board?' + selectedAccountIds.map(id => `account_ids=${id}`).join('&');
+    if (forceRefresh) {
+        apiUrl += '&force_refresh=true';
+    }
+    console.log('API URL:', apiUrl);
+
+    // 发起API请求
+    fetch(apiUrl)
+        .then(response => {
+            console.log('Response status:', response.status);
+            return response.json();
+        })
+        .then(data => {
+            console.log('API Response:', data);
+            if (data.success) {
+                renderHoldings(data.data, separateByAccount, selectedAccountIds);
+            } else {
+                document.getElementById('holdingsContent').innerHTML = `
+                    <div class="alert alert-danger m-3">
+                        <i class="fas fa-exclamation-circle me-2"></i>{{ _('Error') }}: ${data.error || '{{ _("Failed to load holdings") }}'}
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Fetch error:', error);
+            document.getElementById('holdingsContent').innerHTML = `
+                <div class="alert alert-danger m-3">
+                    <i class="fas fa-exclamation-circle me-2"></i>{{ _('Network error') }}: ${error.message}
+                </div>
+            `;
+        });
+}
+
+function renderHoldings(accountsData, separateByAccount, selectedAccountIds) {
+    console.log('Rendering holdings:', accountsData, 'Separate by account:', separateByAccount);
+
+    if (!accountsData || accountsData.length === 0) {
+        document.getElementById('holdingsContent').innerHTML = `
+            <div class="alert alert-warning m-3">
+                <i class="fas fa-info-circle me-2"></i>{{ _('No accounts found') }}
+            </div>
+        `;
+        return;
+    }
+
+    if (separateByAccount) {
+        renderSequentialView(accountsData);
+    } else {
+        renderMergedView(accountsData);
+    }
+}
+
+function renderMergedView(accountsData) {
+    // 合并所有持仓
+    let allHoldings = [];
+    accountsData.forEach(account => {
+        if (account.holdings && account.holdings.length > 0) {
+            account.holdings.forEach(holding => {
+                holding.account_name = account.account_name;
+                allHoldings.push(holding);
+            });
+        }
+    });
+
+    if (allHoldings.length === 0) {
+        document.getElementById('holdingsContent').innerHTML = `
+            <div class="alert alert-info m-3">
+                <i class="fas fa-chart-pie me-2"></i>{{ _('No holdings found') }}
+            </div>
+        `;
+        return;
+    }
+
+    // 使用完全相同的overview样式
+    let html = `
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-pie me-2"></i>{{ _('Current Holdings') }}
+                </h5>
+                <span class="badge bg-secondary">${allHoldings.length} {{ _('stocks') }}</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 holdings-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">{{ _('Stock Symbol') }}</th>
+                                <th class="text-end">{{ _('Shares') }}</th>
+                                <th class="text-end">{{ _('Avg Cost') }}</th>
+                                <th class="text-end">{{ _('Current Price') }}</th>
+                                <th class="text-end">{{ _('Daily Change') }}</th>
+                                <th class="text-end">{{ _('Market Value') }}</th>
+                                <th class="text-end">{{ _('Unrealized P&L') }}</th>
+                                <th class="text-end">{{ _('Realized Gains') }}</th>
+                                <th class="text-end">{{ _('Dividends') }}</th>
+                                <th class="text-end">{{ _('Interest') }}</th>
+                                <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+    `;
+
+    allHoldings.forEach(holding => {
+        // 使用与overview完全相同的字段名
+        const unrealizedGain = holding.unrealized_gain || 0;
+        const returnPct = holding.unrealized_gain_percent || 0;
+
+        html += `
+            <tr class="align-middle">
+                <!-- Stock Symbol -->
+                <td class="ps-3">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar"
+                             style="color: ${holding.currency === 'CAD' ? 'black' : 'white'};">
+                            ${holding.currency === 'CAD' ? 'C$' : '$'}
+                        </div>
+                        <div>
+                            <strong>${holding.symbol}</strong>
+                            <br><small class="text-muted">${holding.sector || 'Unknown'}</small>
+                        </div>
+                    </div>
+                </td>
+
+                <!-- Shares -->
+                <td class="text-end">
+                    <span class="fw-medium">${(holding.shares || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                </td>
+
+                <!-- Average Cost -->
+                <td class="text-end">
+                    <span class="text-muted">$${(holding.average_cost || 0).toFixed(2)}</span>
+                    <br><small class="text-muted">${holding.currency}</small>
+                </td>
+
+                <!-- Current Price -->
+                <td class="text-end">
+                    <span class="fw-medium">$${(holding.current_price || 0).toFixed(2)}</span>
+                    <br><small class="text-muted">${holding.currency}</small>
+                </td>
+
+                <!-- Daily Change -->
+                <td class="text-end">
+                    <span class="fw-medium ${(holding.daily_change_value || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                        ${(holding.daily_change_value || 0) >= 0 ? '+' : ''}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
+                    </span>
+                    <br>
+                    <small class="${(holding.daily_change_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                        ${(holding.daily_change_percent || 0) >= 0 ? '+' : ''}${(holding.daily_change_percent || 0).toFixed(2)}%
+                    </small>
+                </td>
+
+                <!-- Market Value -->
+                <td class="text-end">
+                    <span class="fw-bold">$${(holding.current_value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    <br><small class="text-muted">${holding.currency}</small>
+                </td>
+
+                <!-- Unrealized Gain/Loss -->
+                <td class="text-end">
+                    <span class="fw-bold ${unrealizedGain >= 0 ? 'text-success' : 'text-danger'}">
+                        ${unrealizedGain >= 0 ? '+' : ''}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </span>
+                </td>
+
+                <!-- Realized Gains -->
+                <td class="text-end">
+                    <span class="fw-medium ${(holding.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                        ${(holding.realized_gain || 0) >= 0 ? '+' : ''}$${Math.abs(holding.realized_gain || 0).toFixed(2)}
+                    </span>
+                </td>
+
+                <!-- Dividends -->
+                <td class="text-end">
+                    <span class="fw-medium text-info">
+                        $${(holding.dividends || 0).toFixed(2)}
+                    </span>
+                </td>
+
+                <!-- Interest -->
+                <td class="text-end">
+                    <span class="fw-medium text-warning">
+                        $${(holding.interest || 0).toFixed(2)}
+                    </span>
+                </td>
+
+                <!-- Return Percentage -->
+                <td class="text-end pe-3">
+                    <span class="badge ${returnPct >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
+                        ${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%
+                    </span>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('holdingsContent').innerHTML = html;
+}
+
+function renderSequentialView(accountsData) {
+    let html = '';
+
+    accountsData.forEach((account, index) => {
+        if (!account.holdings || account.holdings.length === 0) return;
+
+        html += `
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center account-section-divider">
+                    <h5 class="mb-0">
+                        <i class="fas fa-university me-2"></i>${account.account_name}
+                    </h5>
+                    <span class="badge bg-secondary">${account.holdings.length} {{ _('stocks') }}</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 holdings-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">{{ _('Stock Symbol') }}</th>
+                                    <th class="text-end">{{ _('Shares') }}</th>
+                                    <th class="text-end">{{ _('Avg Cost') }}</th>
+                                    <th class="text-end">{{ _('Current Price') }}</th>
+                                    <th class="text-end">{{ _('Daily Change') }}</th>
+                                    <th class="text-end">{{ _('Market Value') }}</th>
+                                    <th class="text-end">{{ _('Unrealized P&L') }}</th>
+                                    <th class="text-end">{{ _('Realized Gains') }}</th>
+                                    <th class="text-end">{{ _('Dividends') }}</th>
+                                    <th class="text-end">{{ _('Interest') }}</th>
+                                    <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+        `;
+
+        account.holdings.forEach(holding => {
+            const unrealizedGain = holding.unrealized_gain || 0;
+            const returnPct = holding.unrealized_gain_percent || 0;
+
+            html += `
+                <tr class="align-middle">
+                    <!-- Stock Symbol -->
+                    <td class="ps-3">
+                        <div class="d-flex align-items-center">
+                            <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar"
+                                 style="color: ${holding.currency === 'CAD' ? 'black' : 'white'};">
+                                ${holding.currency === 'CAD' ? 'C$' : '$'}
+                            </div>
+                            <div>
+                                <strong>${holding.symbol}</strong>
+                                <br><small class="text-muted">${holding.sector || 'Unknown'}</small>
+                            </div>
+                        </div>
+                    </td>
+
+                    <!-- Shares -->
+                    <td class="text-end">
+                        <span class="fw-medium">${(holding.shares || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    </td>
+
+                    <!-- Average Cost -->
+                    <td class="text-end">
+                        <span class="text-muted">$${(holding.average_cost || 0).toFixed(2)}</span>
+                        <br><small class="text-muted">${holding.currency}</small>
+                    </td>
+
+                    <!-- Current Price -->
+                    <td class="text-end">
+                        <span class="fw-medium">$${(holding.current_price || 0).toFixed(2)}</span>
+                        <br><small class="text-muted">${holding.currency}</small>
+                    </td>
+
+                    <!-- Daily Change -->
+                    <td class="text-end">
+                        <span class="fw-medium ${(holding.daily_change_value || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(holding.daily_change_value || 0) >= 0 ? '+' : ''}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
+                        </span>
+                        <br>
+                        <small class="${(holding.daily_change_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(holding.daily_change_percent || 0) >= 0 ? '+' : ''}${(holding.daily_change_percent || 0).toFixed(2)}%
+                        </small>
+                    </td>
+
+                    <!-- Market Value -->
+                    <td class="text-end">
+                        <span class="fw-bold">$${(holding.current_value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        <br><small class="text-muted">${holding.currency}</small>
+                    </td>
+
+                    <!-- Unrealized Gain/Loss -->
+                    <td class="text-end">
+                        <span class="fw-bold ${unrealizedGain >= 0 ? 'text-success' : 'text-danger'}">
+                            ${unrealizedGain >= 0 ? '+' : ''}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </span>
+                    </td>
+
+                    <!-- Realized Gains -->
+                    <td class="text-end">
+                        <span class="fw-medium ${(holding.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(holding.realized_gain || 0) >= 0 ? '+' : ''}$${Math.abs(holding.realized_gain || 0).toFixed(2)}
+                        </span>
+                    </td>
+
+                    <!-- Dividends -->
+                    <td class="text-end">
+                        <span class="fw-medium text-info">
+                            $${(holding.dividends || 0).toFixed(2)}
+                        </span>
+                    </td>
+
+                    <!-- Interest -->
+                    <td class="text-end">
+                        <span class="fw-medium text-warning">
+                            $${(holding.interest || 0).toFixed(2)}
+                        </span>
+                    </td>
+
+                    <!-- Return Percentage -->
+                    <td class="text-end pe-3">
+                        <span class="badge ${returnPct >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
+                            ${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%
+                        </span>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    if (html === '') {
+        html = `
+            <div class="alert alert-info m-3">
+                <i class="fas fa-chart-pie me-2"></i>{{ _('No holdings found in selected accounts') }}
+            </div>
+        `;
+    }
+
+    document.getElementById('holdingsContent').innerHTML = html;
+}
+
+// localStorage 功能
+function saveSelectedAccounts() {
+    try {
+        const checkedBoxes = Array.from(document.querySelectorAll('.account-checkbox:checked'));
+        const selectedIds = checkedBoxes.map(cb => cb.value);
+        localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(selectedIds));
+    } catch (e) {
+        console.warn('Failed to save selected accounts:', e);
+    }
+}
+
+function saveSeparateByAccount() {
+    try {
+        const separateByAccount = document.getElementById('separateByAccount').checked;
+        localStorage.setItem(STORAGE_KEY_SEPARATE, JSON.stringify(separateByAccount));
+    } catch (e) {
+        console.warn('Failed to save separate by account setting:', e);
+    }
+}
+
+function restoreSavedSelections() {
+    try {
+        // 恢复账户选择
+        const savedAccounts = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
+        if (savedAccounts) {
+            const selectedIds = JSON.parse(savedAccounts);
+            const accountCheckboxes = document.querySelectorAll('.account-checkbox');
+            const selectAllCheckbox = document.getElementById('selectAll');
+
+            // 首先取消所有选择
+            accountCheckboxes.forEach(cb => cb.checked = false);
+            selectAllCheckbox.checked = false;
+
+            // 根据保存的选择恢复
+            selectedIds.forEach(id => {
+                const checkbox = document.getElementById('account' + id);
+                if (checkbox) {
+                    checkbox.checked = true;
+                }
+            });
+
+            // 更新全选状态和显示文本
+            updateSelectAllState();
+            updateSelectedAccountsText();
+        }
+
+        // 恢复分账户显示选择
+        const savedSeparate = localStorage.getItem(STORAGE_KEY_SEPARATE);
+        if (savedSeparate) {
+            const separateByAccount = JSON.parse(savedSeparate);
+            document.getElementById('separateByAccount').checked = separateByAccount;
+        }
+    } catch (e) {
+        console.warn('Failed to restore saved selections:', e);
+    }
+}
+</script>
+{% endblock %}
