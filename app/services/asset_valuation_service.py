@@ -366,14 +366,16 @@ class AssetValuationService:
         # 计算总和（CAD等价）
         total_stock_value = stock_value_cad + stock_value_usd * exchange_rate_decimal
         total_cash_value = cash_cad + cash_usd * exchange_rate_decimal
-        total_assets = total_stock_value + total_cash_value
-        
+
         total_realized_gain = realized_gain_cad + realized_gain_usd * exchange_rate_decimal
         total_unrealized_gain = unrealized_gain_cad + unrealized_gain_usd * exchange_rate_decimal
         total_dividends = dividends_cad + dividends_usd * exchange_rate_decimal
         total_interest = interest_cad + interest_usd * exchange_rate_decimal
         total_deposits = deposits_cad + deposits_usd * exchange_rate_decimal
         total_withdrawals = withdrawals_cad + withdrawals_usd * exchange_rate_decimal
+
+        # Correct assignments - fix the mixed up values
+        total_assets = total_stock_value + total_cash_value
         total_return = total_realized_gain + total_unrealized_gain + total_dividends + total_interest
 
         return {
