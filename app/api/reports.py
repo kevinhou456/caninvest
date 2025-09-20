@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from app.models.family import Family
 from app.models.member import Member
 from app.models.account import Account, AccountMember
+from app.services.account_service import AccountService
 # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
 from app.models.transaction import Transaction
 from app.models.contribution import Contribution
@@ -175,8 +176,9 @@ def get_family_portfolio_report(family_id):
     portfolio_summary = family.get_portfolio_summary()
     
     # 按账户分组的持仓
+    accounts = AccountService.get_accounts_display_list(family.id)
     accounts_data = []
-    for account in family.accounts:
+    for account in accounts:
         holdings_summary = account.get_holdings_summary()
         accounts_data.append({
             'account': account.to_dict(),
@@ -197,7 +199,7 @@ def get_family_portfolio_report(family_id):
     
     # 按分类分组的持仓
     categories_data = {}
-    for account in family.accounts:
+    for account in accounts:
         for holding in account.holdings:
             if holding.total_shares > 0 and holding.stock and holding.stock.category:
                 category = holding.stock.category
@@ -379,7 +381,8 @@ def get_family_tax_summary(family_id):
     realized_gains_by_account = {}
     total_realized_gains = 0
     
-    for account in family.accounts:
+    accounts = AccountService.get_accounts_display_list(family.id)
+    for account in accounts:
         if account.account_type and account.account_type.tax_advantaged:
             # 税收优惠账户的收益通常不需要报税
             realized_gains_by_account[account.name] = {
@@ -542,7 +545,7 @@ def get_family_annual_analysis(family_id):
         account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
-        account_ids = [acc.id for acc in family.accounts]
+        account_ids = AccountService.get_account_ids_display_list(family.id)
     
     # 解析年份参数
     years = None
@@ -600,7 +603,7 @@ def get_family_quarterly_analysis(family_id):
         account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
-        account_ids = [acc.id for acc in family.accounts]
+        account_ids = AccountService.get_account_ids_display_list(family.id)
     
     # 解析年份参数
     years = None
@@ -658,7 +661,7 @@ def get_family_monthly_analysis(family_id):
         account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
-        account_ids = [acc.id for acc in family.accounts]
+        account_ids = AccountService.get_account_ids_display_list(family.id)
     
     try:
         # 调用统一的投资组合服务
@@ -708,7 +711,7 @@ def get_family_daily_analysis(family_id):
         account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
-        account_ids = [acc.id for acc in family.accounts]
+        account_ids = AccountService.get_account_ids_display_list(family.id)
     
     try:
         # 调用统一的投资组合服务
@@ -761,7 +764,7 @@ def get_family_performance_comparison(family_id):
         account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
-        account_ids = [acc.id for acc in family.accounts]
+        account_ids = AccountService.get_account_ids_display_list(family.id)
     range_param = request.args.get('range', '1m')
 
     try:
@@ -812,7 +815,7 @@ def get_family_holdings_distribution(family_id):
         account_ids = [am.account_id for am in account_memberships]
     else:
         # 家庭的所有账户
-        account_ids = [acc.id for acc in family.accounts]
+        account_ids = AccountService.get_account_ids_display_list(family.id)
     
     try:
         # 调用统一的投资组合服务

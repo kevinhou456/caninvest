@@ -393,11 +393,15 @@
         <!-- Statistics Views Navigation -->
         <nav class="top-nav">
             <div class="nav nav-tabs border-0" role="tablist">
-                <a class="nav-link {{ 'active' if current_view == 'overview' }}" 
+                <a class="nav-link {{ 'active' if current_view == 'overview' }}"
                    href="{{ url_for('main.overview', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-eye me-2"></i>{{ _('Overview') }}
                 </a>
-                <a class="nav-link {{ 'active' if current_view == 'transactions' }}" 
+                <a class="nav-link {{ 'active' if current_view == 'holdings_board' }}"
+                   href="{{ url_for('main.holdings_board') }}">
+                    <i class="fas fa-th-large me-2"></i>{{ _('Holdings Board') }}
+                </a>
+                <a class="nav-link {{ 'active' if current_view == 'transactions' }}"
                    href="{{ url_for('main.transactions', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
                     <i class="fas fa-exchange-alt me-2"></i>{{ _('Transactions') }}
                 </a>

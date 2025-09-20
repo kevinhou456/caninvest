@@ -1641,7 +1641,7 @@ msgstr "收益率"
 #: app/templates/investment/annual_stats.html:35
 #: app/templates/investment/overview.html:620
 msgid "USD/CAD Rate"
-msgstr "美元/加币汇率"
+msgstr "美元/加币年度汇率"
 
 #: app/templates/investment/annual_stats.html:43
 #: app/templates/investment/annual_stats.html:397

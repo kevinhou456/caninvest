@@ -19,6 +19,7 @@ from app.services.currency_service import currency_service
 from app.services.holdings_service import holdings_service
 from app.services.asset_valuation_service import AssetValuationService
 from app.services.report_service import ReportService
+from app.services.account_service import AccountService
 
 
 @bp.route('/')
@@ -666,46 +667,9 @@ def holdings_board():
             db.session.add(family)
             db.session.commit()
 
-        # 获取所有账户供选择
-        accounts = Account.query.filter_by(family_id=family.id).all()
-
-        # 按照左侧导航栏的顺序排序账户
-        # 定义账户类型排序顺序（与 __init__.py 保持一致）
-        account_type_order = {
-            'Regular': 1,
-            'Margin': 2,
-            'TFSA': 3,
-            'RRSP': 4,
-            'RESP': 5,
-            'FHSA': 6
-        }
-
-        # 按成员分组并排序
-        def get_account_sort_key(account):
-            # 联名账户优先级最低，排在所有个人账户之后
-            if account.is_joint:
-                return (9999, 1000, account.name)  # 联名账户排在最后
-
-            # 获取账户成员信息
-            account_members = account.account_members.all()
-
-            # 获取主要成员或第一个成员的ID（用于匹配sidebar顺序）
-            if account_members:
-                primary_member = next((am.member for am in account_members if am.is_primary), None)
-                if primary_member:
-                    member_id = primary_member.id
-                else:
-                    member_id = account_members[0].member.id
-            else:
-                member_id = 9998  # 没有成员的账户排在倒数第二
-
-            # 账户类型排序值
-            account_type = account.account_type.name if account.account_type else ''
-            type_order = account_type_order.get(account_type, 999)
-
-            return (member_id, type_order, account.name)
-
-        accounts = sorted(accounts, key=get_account_sort_key)
+        # 使用统一的账户服务获取排序后的账户列表
+        from app.services.account_service import AccountService
+        accounts = AccountService.get_accounts_display_list(family.id)
 
         # 获取所有成员供显示
         members = Member.query.filter_by(family_id=family.id).all()
@@ -780,23 +744,7 @@ def api_holdings_board():
         raw_holdings = portfolio_data.get('current_holdings', [])
 
         # 按账户分组数据，按选择顺序返回，使用带成员信息的账户名
-        def get_account_name_with_members(account):
-            """获取带成员信息的账户名（复用全局函数逻辑）"""
-            if not account.account_members:
-                return account.name
-
-            member_names = []
-            for am in account.account_members:
-                if am.is_primary:
-                    member_names.insert(0, am.member.name)  # 主要成员放在前面
-                else:
-                    member_names.append(am.member.name)
-
-            if member_names:
-                return f"{account.name} - {', '.join(member_names)}"
-            return account.name
-
-        account_name_map = {acc.id: get_account_name_with_members(acc) for acc in accounts}
+        account_name_map = {acc.id: AccountService.get_account_name_with_members(acc) for acc in accounts}
         result_data = []
 
         for account_id in account_ids:
@@ -855,7 +803,8 @@ def transactions():
         )
         
         # 获取所有账户（预加载account_members关系）
-        accounts = Account.query.all()
+        from app.services.account_service import AccountService
+        accounts = AccountService.get_accounts_display_list()
         
         return render_template('transactions/list.html',
                              title=_('Transactions'),
@@ -1113,7 +1062,8 @@ def create_transaction():
                 return redirect(url_for('main.transactions', account_id=account_id))
     
     # GET request - show form
-    accounts = Account.query.all()
+    from app.services.account_service import AccountService
+    accounts = AccountService.get_accounts_display_list()
     # stocks = StocksCache.query.all()  # 暂时不需要预加载股票
     family_members = Member.query.all()
     
@@ -1174,7 +1124,8 @@ def categories():
 @bp.route('/import-transactions')
 def import_transactions():
     """数据导入页面"""
-    accounts = Account.query.all()
+    from app.services.account_service import AccountService
+    accounts = AccountService.get_accounts_display_list()
     
     # 获取预选账户ID
     preselected_account_id = request.args.get('account_id', type=int)
@@ -1212,7 +1163,8 @@ def portfolio_reports():
 @bp.route('/performance-reports')
 def performance_reports():
     """表现报告页面"""
-    accounts = Account.query.all()
+    from app.services.account_service import AccountService
+    accounts = AccountService.get_accounts_display_list()
     return render_template('reports/performance.html',
                          title=_('Performance Reports'),
                          accounts=accounts)
@@ -2625,8 +2577,9 @@ def stock_detail(stock_symbol):
         # Get account members for display
         from app.models.account import AccountMember, Account
         from app.models.member import Member
+        from app.services.account_service import AccountService
         account_members = AccountMember.query.all()
-        accounts = Account.query.all()
+        accounts = AccountService.get_accounts_display_list()
         members = Member.query.all()
         
         # Convert stock_info to dictionary to avoid JSON serialization issues

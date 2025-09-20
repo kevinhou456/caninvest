@@ -300,8 +300,8 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
                         <label for="accountSelect" class="form-label">{{ _('Target Account') }} <span class="text-danger">*</span></label>
                         <select class="form-select" name="account_id" id="accountSelect" required>
                             <option value="">{{ _('Select Account') }}</option>
-                            {% for account in get_sorted_accounts_with_members(accounts) %}
-                            <option value="{{ account.id }}" 
+                            {% for account in accounts %}
+                            <option value="{{ account.id }}"
                                     {% if preselected_account_id and account.id == preselected_account_id %}selected{% endif %}>
                                     {{ _get_account_name_with_members(account) }}
                             </option>

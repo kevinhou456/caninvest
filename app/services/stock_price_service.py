@@ -80,8 +80,14 @@ class StockPriceService:
             logger.error(f"获取{symbol}价格失败: {str(e)}")
             return None
     
-    def update_stock_price(self, symbol: str, currency: str) -> bool:
-        """更新数据库中的股票价格"""
+    def update_stock_price(self, symbol: str, currency: str, force_refresh: bool = False) -> bool:
+        """更新数据库中的股票价格
+
+        Args:
+            symbol: 股票代码
+            currency: 货币类型
+            force_refresh: 是否强制刷新价格，忽略缓存时间限制
+        """
         # 验证符号不为空
         if not symbol or not symbol.strip():
             logger.warning(f"无效的股票代码：'{symbol}'，跳过更新")
@@ -90,11 +96,28 @@ class StockPriceService:
        
 
         try:
+            # 使用联合主键查询
+            stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+
+            # 检查是否需要更新价格（15分钟过期机制，除非强制刷新）
+            needs_update = force_refresh
+            if not needs_update:
+                if not stock:
+                    needs_update = True
+                elif not stock.price_updated_at:
+                    needs_update = True
+                else:
+                    time_diff = datetime.utcnow() - stock.price_updated_at
+                    if time_diff.total_seconds() > 900:  # 15分钟 = 900秒
+                        needs_update = True
+
+            # 如果不需要更新，直接返回成功
+            if not needs_update:
+                return True
+
             # 不传入期望货币进行验证，让Yahoo Finance返回实际货币信息
             price_data = self.get_stock_price(symbol)
 
-            # 使用联合主键查询
-            stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
             created_new = False
             if not stock:
                 # 如果stocks_cache中没有该股票，创建新记录，使用指定的currency
@@ -163,9 +186,12 @@ class StockPriceService:
         
         return results
     
-    def update_prices_for_symbols(self, symbol_currency_pairs: List[tuple]) -> Dict:
+    def update_prices_for_symbols(self, symbol_currency_pairs: List[tuple], force_refresh: bool = False) -> Dict:
         """更新指定股票列表的价格
-        参数: symbol_currency_pairs - 包含(symbol, currency)元组的列表
+
+        Args:
+            symbol_currency_pairs: 包含(symbol, currency)元组的列表
+            force_refresh: 是否强制刷新价格，忽略缓存时间限制
         """
         results = {
             'total': len(symbol_currency_pairs),
@@ -173,10 +199,10 @@ class StockPriceService:
             'failed': 0,
             'errors': []
         }
-        
+
         for symbol, currency in symbol_currency_pairs:
             try:
-                if self.update_stock_price(symbol, currency):
+                if self.update_stock_price(symbol, currency, force_refresh):
                     results['updated'] += 1
                 else:
                     results['failed'] += 1

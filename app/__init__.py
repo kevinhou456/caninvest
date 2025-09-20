@@ -93,71 +93,64 @@ def create_app(config_name=None):
         """
         if not account:
             return ""
-        
-        display_text = account.name
-        
-        # 为所有账户显示成员信息，不仅仅是联名账户
-        if account.account_members:
-            member_names = [am.member.name for am in account.account_members]
-            display_text += f" - {', '.join(member_names)}"
-        
-        return display_text
+
+        from app.services.account_service import AccountService
+        return AccountService.get_account_name_with_members(account)
     
     @app.template_global()
     def get_sorted_accounts_with_members(accounts):
         """
         获取按成员排序的账户列表，联合账户放在最后
-        
+
         Args:
             accounts: 账户列表
-            
+
         Returns:
-            list: 排序后的账户列表，按以下规则排序：
-                  1. 个人账户按成员名字排序
-                  2. 联合账户放在最后
+            list: 排序后的账户列表，使用统一的排序规则
         """
         if not accounts:
             return []
-        
-        individual_accounts = []
-        joint_accounts = []
-        
-        for account in accounts:
-            # 获取账户成员数量
-            try:
-                member_count = len(account.account_members) if account.account_members else 0
-            except TypeError:
-                # 如果account_members是AppenderQuery对象，使用count()方法
-                member_count = account.account_members.count() if account.account_members else 0
-            
-            if member_count <= 1:
-                # 个人账户（包括没有成员的账户）
-                individual_accounts.append(account)
+
+        from app.services.account_service import AccountService
+        # 使用统一的排序逻辑，但这里是对现有账户列表排序而不是查询数据库
+
+        # 定义账户类型排序顺序
+        account_type_order = {
+            'Regular': 1,
+            'Margin': 2,
+            'TFSA': 3,
+            'RRSP': 4,
+            'RESP': 5,
+            'FHSA': 6
+        }
+
+        def get_account_sort_key(account):
+            """获取账户排序键"""
+            # 联合账户优先级最低，排在所有个人账户之后
+            if account.is_joint:
+                return (9999, 1000, account.name)
+
+            # 获取账户成员信息
+            account_members = account.account_members.all()
+
+            # 获取主要成员或第一个成员的ID（用于匹配sidebar顺序）
+            if account_members:
+                primary_member = next((am.member for am in account_members if am.is_primary), None)
+                if primary_member:
+                    member_id = primary_member.id
+                else:
+                    member_id = account_members[0].member.id
             else:
-                # 联合账户（多个成员）
-                joint_accounts.append(account)
-        
-        # 个人账户按第一个成员名字排序
-        def get_sort_key(acc):
-            try:
-                if acc.account_members and len(acc.account_members) > 0:
-                    return acc.account_members[0].member.name
-                else:
-                    return acc.name
-            except TypeError:
-                # 如果account_members是AppenderQuery对象
-                if acc.account_members and acc.account_members.count() > 0:
-                    return acc.account_members[0].member.name
-                else:
-                    return acc.name
-        
-        individual_accounts.sort(key=get_sort_key)
-        
-        # 联合账户按账户名排序
-        joint_accounts.sort(key=lambda acc: acc.name)
-        
-        # 合并：个人账户在前，联合账户在后
-        return individual_accounts + joint_accounts
+                member_id = 9998  # 没有成员的账户排在倒数第二
+
+            # 账户类型排序值
+            account_type = account.account_type.name if account.account_type else ''
+            type_order = account_type_order.get(account_type, 999)
+
+            return (member_id, type_order, account.name)
+
+        # 排序并返回
+        return sorted(accounts, key=get_account_sort_key)
     
     @app.template_global()
     def get_current_filter_display(family, member_id=None, account_id=None, include_members=False, account_members=None):

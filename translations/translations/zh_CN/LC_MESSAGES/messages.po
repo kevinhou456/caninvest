@@ -1590,8 +1590,8 @@ msgstr ""
 #: app/templates/investment/annual_stats.html:19
 #: app/templates/investment/monthly_stats.html:35
 #: app/templates/investment/quarterly_stats.html:35
-msgid "显示货币明细"
-msgstr ""
+msgid "Currency Details"
+msgstr "显示货币明细"
 
 #: app/templates/investment/annual_stats.html:27
 #: app/templates/investment/annual_stats.html:271
