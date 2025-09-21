@@ -758,7 +758,6 @@ msgstr "基准对比"
 
 #: app/main/routes.py:1730 app/templates/base/investment_base.html:426
 #: app/templates/investment/holdings_analysis.html:7
-#, fuzzy
 msgid "Holdings Analysis"
 msgstr "投资组合分析"
 
@@ -1782,9 +1781,8 @@ msgstr "总收益/损失"
 
 #: app/templates/investment/dashboard.html:76
 #: app/templates/investment/overview.html:612
-#, fuzzy
 msgid "Active Accounts"
-msgstr "所有账户"
+msgstr "账户"
 
 #: app/templates/investment/dashboard.html:82
 msgid "holdings"
@@ -1794,11 +1792,11 @@ msgstr "持仓"
 #: app/templates/investment/dashboard.html:278
 #: app/templates/main/dashboard.html:313
 msgid "Recent Transactions"
-msgstr ""
+msgstr "最近交易记录"
 
 #: app/templates/investment/dashboard.html:105
 msgid "dividends"
-msgstr ""
+msgstr "分红"
 
 #: app/templates/investment/dashboard.html:124
 #: app/templates/investment/dashboard.html:178
@@ -1847,7 +1845,6 @@ msgid "Add some transactions to see your portfolio"
 msgstr "请添加交易记录"
 
 #: app/templates/investment/dashboard.html:193
-#, fuzzy
 msgid "Portfolio Summary"
 msgstr "投资组合分析"
 
@@ -1857,7 +1854,7 @@ msgstr "当前汇率"
 
 #: app/templates/investment/dashboard.html:211
 msgid "Updated"
-msgstr ""
+msgstr "更新"
 
 #: app/templates/investment/dashboard.html:242
 #: app/templates/investment/monthly_stats.html:48
@@ -1904,7 +1901,7 @@ msgstr ""
 
 #: app/templates/investment/holdings_analysis.html:41
 msgid "Unique Stocks"
-msgstr ""
+msgstr "股票数量"
 
 #: app/templates/investment/holdings_analysis.html:102
 msgid "Holdings by Stock"
@@ -1919,21 +1916,18 @@ msgid "Holdings by Currency"
 msgstr "按照货币分布"
 
 #: app/templates/investment/holdings_analysis.html:146
-#, fuzzy
 msgid "Holdings by Account"
-msgstr "加拿大账户"
+msgstr "按账户分布"
 
 #: app/templates/investment/holdings_analysis.html:572
 msgid "No holdings data available"
-msgstr ""
+msgstr "没有持仓股票数据"
 
 #: app/templates/investment/monthly_stats.html:7
-#, fuzzy
 msgid "Monthly Analysis"
 msgstr "月度报表"
 
 #: app/templates/investment/monthly_stats.html:9
-#, fuzzy
 msgid "Comprehensive monthly investment performance analysis"
 msgstr "面向加拿大家庭的全面投资跟踪"
 
@@ -1948,7 +1942,7 @@ msgstr "月度数据分析"
 #: app/templates/investment/monthly_stats.html:43
 #: app/templates/investment/monthly_stats.html:240
 msgid "Month"
-msgstr ""
+msgstr "月份"
 
 #: app/templates/investment/monthly_stats.html:47
 #: app/templates/investment/overview.html:321
@@ -1970,7 +1964,6 @@ msgstr "买入总额"
 
 #: app/templates/investment/monthly_stats.html:52
 #: app/templates/investment/quarterly_stats.html:52
-#, fuzzy
 msgid "Sell Amount"
 msgstr "卖出总额"
 
@@ -2038,17 +2031,16 @@ msgid "Sold Shares"
 msgstr "卖出数量"
 
 #: app/templates/investment/overview.html:471
-#, fuzzy
 msgid "Total Invested"
-msgstr "家庭投资"
+msgstr "总投资额"
 
 #: app/templates/investment/overview.html:472
 msgid "Total Received"
-msgstr "共收到"
+msgstr "回收额"
 
 #: app/templates/investment/overview.html:586
 msgid "No cleared holdings found"
-msgstr ""
+msgstr "没有清仓股票"
 
 #: app/templates/investment/overview.html:587
 msgid "Stocks you have completely sold will appear here"
@@ -2059,21 +2051,20 @@ msgid "Portfolio Statistics & Financial Summary"
 msgstr ""
 
 #: app/templates/investment/overview.html:616
-#, fuzzy
 msgid "Total Transactions"
 msgstr "交易"
 
 #: app/templates/investment/overview.html:624
 msgid "CAD/USD Rate"
-msgstr ""
+msgstr "加币/美元汇率"
 
 #: app/templates/investment/overview.html:631
 msgid "Total Deposits"
-msgstr ""
+msgstr "共存入"
 
 #: app/templates/investment/overview.html:636
 msgid "Total Withdrawals"
-msgstr ""
+msgstr "共取出"
 
 #: app/templates/investment/overview.html:644
 msgid "Exchange rates updated"
@@ -2081,37 +2072,36 @@ msgstr ""
 
 #: app/templates/investment/overview.html:660
 msgid "Cash Adjustment"
-msgstr ""
+msgstr "现金额矫正"
 
 #: app/templates/investment/overview.html:667
 msgid "Select an account to adjust its cash balance."
-msgstr ""
+msgstr "选择一个账户矫正其现金额"
 
 #: app/templates/investment/overview.html:676
 #: app/templates/investment/overview.html:928
 msgid "Please select an account..."
-msgstr ""
+msgstr "请选择一个账户"
 
 #: app/templates/investment/overview.html:685
 msgid "Cash Balance Adjustment"
-msgstr ""
+msgstr "现金额矫正"
 
 #: app/templates/investment/overview.html:692
-#, fuzzy
 msgid "CAD Amount"
-msgstr "加拿大账户"
+msgstr "加币"
 
 #: app/templates/investment/overview.html:709
 msgid "USD Amount"
-msgstr ""
+msgstr "美元"
 
 #: app/templates/investment/overview.html:757
 msgid "Search stocks..."
-msgstr ""
+msgstr "搜索股票..."
 
 #: app/templates/investment/overview.html:763
 msgid "holdings displayed"
-msgstr ""
+msgstr "持仓股票"
 
 #: app/templates/investment/overview.html:823
 msgid "Search cleared stocks..."
@@ -3108,4 +3098,7 @@ msgstr ""
 
 #~ msgid "Record First Transaction"
 #~ msgstr ""
+
+msgid "Holdings Board"
+msgstr "持仓看板"
 
