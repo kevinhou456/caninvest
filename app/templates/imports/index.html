@@ -284,6 +284,85 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
     </div>
 </div>
 
+<!-- CFP账户确认模态框 -->
+<div class="modal fade" id="cfpAccountConfirmModal" tabindex="-1" aria-labelledby="cfpAccountConfirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cfpAccountConfirmModalLabel">
+                    <i class="fas fa-info-circle text-info me-2"></i>{{ _('System Export File Detected') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-lightbulb me-2"></i>
+                    {{ _('This CSV file appears to be exported from this system and contains account information. You have two options:') }}
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card border-success">
+                            <div class="card-header bg-success text-white">
+                                <h6 class="card-title mb-0">
+                                    <i class="fas fa-magic me-2"></i>{{ _('Smart Import (Recommended)') }}
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <p>{{ _('Import transactions directly to their original accounts.') }}</p>
+                                <ul class="list-unstyled mb-0">
+                                    <li><i class="fas fa-check text-success me-2"></i>{{ _('Automatically uses correct accounts') }}</li>
+                                    <li><i class="fas fa-check text-success me-2"></i>{{ _('Faster import process') }}</li>
+                                    <li><i class="fas fa-check text-success me-2"></i>{{ _('No manual mapping needed') }}</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-secondary">
+                            <div class="card-header bg-secondary text-white">
+                                <h6 class="card-title mb-0">
+                                    <i class="fas fa-cog me-2"></i>{{ _('Manual Import') }}
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <p>{{ _('Import as a regular CSV file with manual account selection.') }}</p>
+                                <ul class="list-unstyled mb-0">
+                                    <li><i class="fas fa-info text-muted me-2"></i>{{ _('Choose target account manually') }}</li>
+                                    <li><i class="fas fa-info text-muted me-2"></i>{{ _('Standard import flow') }}</li>
+                                    <li><i class="fas fa-info text-muted me-2"></i>{{ _('More control over process') }}</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-3" id="cfpAccountInfo">
+                    <div class="card-header">
+                        <h6 class="card-title mb-0">{{ _('Detected Accounts') }}</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="accountInfoList">
+                            <!-- Will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-2"></i>{{ _('Cancel') }}
+                </button>
+                <button type="button" class="btn btn-outline-secondary" onclick="proceedWithManualImport()">
+                    <i class="fas fa-cog me-2"></i>{{ _('Manual Import') }}
+                </button>
+                <button type="button" class="btn btn-success" onclick="proceedWithSmartImport()">
+                    <i class="fas fa-magic me-2"></i>{{ _('Smart Import') }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- CSV导入模态框 -->
 <div class="modal fade" id="importCSVModal" tabindex="-1" aria-labelledby="importCSVModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -495,7 +574,13 @@ function handleCsvUpload(event) {
     .then(data => {
         if (data.success) {
             csvPreviewData = data;
-            showMappingModal(data);
+
+            // 检查是否检测到CFP_Account_ID（系统导出的文件）
+            if (data.cfp_account_data && data.cfp_account_data.detected) {
+                showCFPAccountDialog(data);
+            } else {
+                showMappingModal(data);
+            }
         } else {
             // Check if this is an encoding detection error
             if (data.error === 'Encoding detection required' && data.encoding_analysis) {
@@ -949,6 +1034,142 @@ Generated by Family Investment System - CSV Import Tool`;
     }).catch(err => {
         console.error('Failed to copy encoding info:', err);
         alert('{{ _("Failed to copy to clipboard") }}');
+    });
+}
+
+// CFP账户检测相关函数
+function showCFPAccountDialog(data) {
+    console.log('CFP Account data detected:', data.cfp_account_data);
+
+    // 关闭上传模态框
+    const uploadModal = bootstrap.Modal.getInstance(document.getElementById('importCSVModal'));
+    if (uploadModal) {
+        uploadModal.hide();
+    }
+
+    // 填充账户信息
+    populateAccountInfo(data.cfp_account_data);
+
+    // 显示CFP账户确认模态框
+    setTimeout(() => {
+        const cfpModal = new bootstrap.Modal(document.getElementById('cfpAccountConfirmModal'));
+        cfpModal.show();
+    }, 300);
+}
+
+function populateAccountInfo(cfpAccountData) {
+    const accountInfoList = document.getElementById('accountInfoList');
+    accountInfoList.innerHTML = '';
+
+    if (!cfpAccountData.account_info || Object.keys(cfpAccountData.account_info).length === 0) {
+        accountInfoList.innerHTML = '<p class="text-muted">{{ _("No valid accounts found in the file.") }}</p>';
+        return;
+    }
+
+    Object.entries(cfpAccountData.account_info).forEach(([accountId, info]) => {
+        const accountDiv = document.createElement('div');
+        accountDiv.className = 'mb-2 p-2 border rounded';
+        accountDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${info.name}</strong>
+                    <span class="badge bg-primary ms-2">${info.type}</span>
+                </div>
+                <div class="text-muted">
+                    <i class="fas fa-receipt me-1"></i>${info.transaction_count} {{ _('transactions') }}
+                </div>
+            </div>
+        `;
+        accountInfoList.appendChild(accountDiv);
+    });
+}
+
+function proceedWithSmartImport() {
+    // 执行智能导入（使用CFP_Account_ID）
+    const cfpModal = bootstrap.Modal.getInstance(document.getElementById('cfpAccountConfirmModal'));
+    if (cfpModal) {
+        cfpModal.hide();
+    }
+
+    // 调用智能导入API
+    importWithCFPAccountID();
+}
+
+function proceedWithManualImport() {
+    // 继续常规导入流程
+    const cfpModal = bootstrap.Modal.getInstance(document.getElementById('cfpAccountConfirmModal'));
+    if (cfpModal) {
+        cfpModal.hide();
+    }
+
+    // 显示常规的列映射模态框
+    setTimeout(() => {
+        showMappingModal(csvPreviewData);
+    }, 300);
+}
+
+function importWithCFPAccountID() {
+    if (!csvPreviewData) {
+        alert('{{ _("No CSV data available for import") }}');
+        return;
+    }
+
+    // 准备导入数据，标识这是智能导入
+    const importData = {
+        session_id: csvPreviewData.session_id,
+        use_cfp_account_id: true
+    };
+
+    // 显示加载状态
+    const body = document.querySelector('body');
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'loadingOverlay';
+    loadingOverlay.innerHTML = `
+        <div class="d-flex justify-content-center align-items-center h-100">
+            <div class="text-center text-white">
+                <div class="spinner-border mb-3" role="status"></div>
+                <h5>{{ _('Importing transactions...') }}</h5>
+                <p>{{ _('This may take a few moments') }}</p>
+            </div>
+        </div>
+    `;
+    loadingOverlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.8); z-index: 9999; display: flex;
+    `;
+    body.appendChild(loadingOverlay);
+
+    fetch('/api/v1/import-csv-smart', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(importData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`{{ _('Import completed successfully!') }}\n{{ _('Imported:') }} ${data.imported_count} {{ _('transactions') }}\n{{ _('Skipped:') }} ${data.skipped_count} {{ _('transactions') }}`);
+
+            // 如果有重定向URL，跳转到交易记录页面，否则刷新当前页面
+            if (data.redirect_url) {
+                window.location.href = data.redirect_url;
+            } else {
+                location.reload(); // 刷新页面以显示最新的导入记录
+            }
+        } else {
+            alert('{{ _("Import failed: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+        }
+    })
+    .catch(error => {
+        console.error('Smart import error:', error);
+        alert('{{ _("Import failed. Please try again.") }}');
+    })
+    .finally(() => {
+        // 移除加载遮罩
+        if (loadingOverlay && loadingOverlay.parentNode) {
+            loadingOverlay.parentNode.removeChild(loadingOverlay);
+        }
     });
 }
 </script>

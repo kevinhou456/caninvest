@@ -114,6 +114,68 @@
         background-color: #f8f9fa;
         margin-bottom: 1rem;
     }
+
+    /* 拖拽样式 */
+    .currency-symbol {
+        cursor: move;
+        user-select: none;
+        transition: all 0.3s ease;
+    }
+
+    .currency-symbol:hover {
+        transform: scale(1.1);
+    }
+
+    .currency-symbol.dragging {
+        opacity: 0.5;
+        transform: rotate(15deg);
+    }
+
+    .holdings-row {
+        transition: all 0.3s ease;
+    }
+
+    .holdings-row.dragging {
+        opacity: 0.7;
+        background-color: #e3f2fd;
+        transform: scale(0.95);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+
+    .holdings-row.drag-over {
+        background-color: #f8f9fa;
+        border-left: 4px solid #007bff;
+        transform: translateX(5px);
+    }
+
+    /* 右键菜单样式 */
+    .context-menu {
+        position: absolute;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        padding: 8px 0;
+        z-index: 1000;
+        min-width: 150px;
+        display: none;
+    }
+
+    .context-menu-item {
+        padding: 8px 16px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .context-menu-item:hover {
+        background-color: #f8f9fa;
+    }
+
+    .context-menu-divider {
+        height: 1px;
+        background-color: #eee;
+        margin: 4px 0;
+    }
 </style>
 {% endblock %}
 
@@ -178,6 +240,27 @@
             </div>
             <div class="mt-2">{{ _('Loading holdings data...') }}</div>
         </div>
+    </div>
+</div>
+
+<!-- 右键菜单 -->
+<div id="contextMenu" class="context-menu">
+    <div class="context-menu-item" data-action="moveUp">
+        <i class="fas fa-arrow-up me-2"></i>{{ _('Move Up') }}
+    </div>
+    <div class="context-menu-item" data-action="moveDown">
+        <i class="fas fa-arrow-down me-2"></i>{{ _('Move Down') }}
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" data-action="moveToTop">
+        <i class="fas fa-angle-double-up me-2"></i>{{ _('Move to Top') }}
+    </div>
+    <div class="context-menu-item" data-action="moveToBottom">
+        <i class="fas fa-angle-double-down me-2"></i>{{ _('Move to Bottom') }}
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" data-action="resetOrder">
+        <i class="fas fa-undo me-2"></i>{{ _('Reset Default Order') }}
     </div>
 </div>
 
@@ -407,12 +490,14 @@ function renderMergedView(accountsData) {
         const returnPct = holding.unrealized_gain_percent || 0;
 
         html += `
-            <tr class="align-middle">
+            <tr class="align-middle holdings-row" data-symbol="${holding.symbol}">
                 <!-- Stock Symbol -->
                 <td class="ps-3">
                     <div class="d-flex align-items-center">
-                        <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar"
-                             style="color: ${holding.currency === 'CAD' ? 'black' : 'white'};">
+                        <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar currency-symbol"
+                             style="color: ${holding.currency === 'CAD' ? 'black' : 'white'};"
+                             draggable="true"
+                             data-symbol="${holding.symbol}">
                             ${holding.currency === 'CAD' ? 'C$' : '$'}
                         </div>
                         <div>
@@ -503,6 +588,10 @@ function renderMergedView(accountsData) {
     `;
 
     document.getElementById('holdingsContent').innerHTML = html;
+
+    // 添加拖拽和右键菜单事件监听器
+    setupDragAndDropEvents();
+    setupContextMenuEvents();
 }
 
 function renderSequentialView(accountsData) {
@@ -545,7 +634,7 @@ function renderSequentialView(accountsData) {
             const returnPct = holding.unrealized_gain_percent || 0;
 
             html += `
-                <tr class="align-middle">
+                <tr class="align-middle holdings-row" data-symbol="${holding.symbol}">
                     <!-- Stock Symbol -->
                     <td class="ps-3">
                         <div class="d-flex align-items-center">
@@ -650,6 +739,10 @@ function renderSequentialView(accountsData) {
     }
 
     document.getElementById('holdingsContent').innerHTML = html;
+
+    // 添加拖拽和右键菜单事件监听器
+    setupDragAndDropEvents();
+    setupContextMenuEvents();
 }
 
 // localStorage 功能
@@ -707,6 +800,220 @@ function restoreSavedSelections() {
     } catch (e) {
         console.warn('Failed to restore saved selections:', e);
     }
+}
+
+// 拖拽和右键菜单相关变量
+let draggedElement = null;
+let currentContextRow = null;
+
+// 设置拖拽事件
+function setupDragAndDropEvents() {
+    const currencySymbols = document.querySelectorAll('.currency-symbol');
+    const holdingsRows = document.querySelectorAll('.holdings-row');
+
+    // 为货币符号添加拖拽事件
+    currencySymbols.forEach(symbol => {
+        symbol.addEventListener('dragstart', handleDragStart);
+        symbol.addEventListener('dragend', handleDragEnd);
+    });
+
+    // 为表格行添加拖拽接收事件
+    holdingsRows.forEach(row => {
+        row.addEventListener('dragover', handleDragOver);
+        row.addEventListener('drop', handleDrop);
+        row.addEventListener('dragenter', handleDragEnter);
+        row.addEventListener('dragleave', handleDragLeave);
+    });
+}
+
+// 拖拽开始
+function handleDragStart(e) {
+    draggedElement = this;
+    this.classList.add('dragging');
+
+    // 为整行添加拖拽样式
+    const row = this.closest('tr');
+    if (row) {
+        row.classList.add('dragging');
+    }
+
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.outerHTML);
+}
+
+// 拖拽结束
+function handleDragEnd(e) {
+    this.classList.remove('dragging');
+
+    // 清除整行的拖拽样式
+    const row = this.closest('tr');
+    if (row) {
+        row.classList.remove('dragging');
+    }
+
+    // 清除所有拖拽样式
+    document.querySelectorAll('.holdings-row').forEach(row => {
+        row.classList.remove('drag-over');
+    });
+
+    draggedElement = null;
+}
+
+// 拖拽悬停
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+// 拖拽进入
+function handleDragEnter(e) {
+    e.preventDefault();
+    if (draggedElement && this !== draggedElement.closest('tr')) {
+        this.classList.add('drag-over');
+    }
+}
+
+// 拖拽离开
+function handleDragLeave(e) {
+    e.preventDefault();
+    this.classList.remove('drag-over');
+}
+
+// 放置
+function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    this.classList.remove('drag-over');
+
+    if (draggedElement && this !== draggedElement.closest('tr')) {
+        // 获取被拖拽的行和目标行
+        const draggedRow = draggedElement.closest('tr');
+        const targetRow = this;
+
+        // 重新排列表格行
+        const tbody = targetRow.parentNode;
+        const draggedRowNextSibling = draggedRow.nextSibling;
+
+        // 移动行
+        tbody.insertBefore(draggedRow, targetRow.nextSibling);
+
+        console.log('Moved', draggedElement.dataset.symbol, 'near', this.dataset.symbol);
+    }
+
+    return false;
+}
+
+// 设置右键菜单事件
+function setupContextMenuEvents() {
+    const holdingsRows = document.querySelectorAll('.holdings-row');
+    const contextMenu = document.getElementById('contextMenu');
+
+    // 为每个持仓行添加右键事件
+    holdingsRows.forEach(row => {
+        row.addEventListener('contextmenu', handleContextMenu);
+    });
+
+    // 点击其他地方关闭菜单
+    document.addEventListener('click', hideContextMenu);
+
+    // 菜单项点击事件
+    const menuItems = document.querySelectorAll('.context-menu-item');
+    menuItems.forEach(item => {
+        item.addEventListener('click', handleContextMenuAction);
+    });
+}
+
+// 处理右键菜单
+function handleContextMenu(e) {
+    e.preventDefault();
+
+    currentContextRow = this;
+    const contextMenu = document.getElementById('contextMenu');
+
+    // 显示菜单
+    contextMenu.style.display = 'block';
+    contextMenu.style.left = e.pageX + 'px';
+    contextMenu.style.top = e.pageY + 'px';
+
+    console.log('Context menu for:', this.dataset.symbol);
+}
+
+// 隐藏右键菜单
+function hideContextMenu() {
+    const contextMenu = document.getElementById('contextMenu');
+    contextMenu.style.display = 'none';
+    currentContextRow = null;
+}
+
+// 处理右键菜单动作
+function handleContextMenuAction(e) {
+    const action = this.dataset.action;
+    const symbol = currentContextRow ? currentContextRow.dataset.symbol : null;
+
+    hideContextMenu();
+
+    if (!symbol) return;
+
+    switch (action) {
+        case 'moveUp':
+            moveRowUp(currentContextRow);
+            break;
+        case 'moveDown':
+            moveRowDown(currentContextRow);
+            break;
+        case 'moveToTop':
+            moveRowToTop(currentContextRow);
+            break;
+        case 'moveToBottom':
+            moveRowToBottom(currentContextRow);
+            break;
+        case 'resetOrder':
+            resetDefaultOrder();
+            break;
+    }
+}
+
+// 移动行到顶部
+function moveRowToTop(row) {
+    const tbody = row.parentNode;
+    const firstRow = tbody.firstElementChild;
+    if (row !== firstRow) {
+        tbody.insertBefore(row, firstRow);
+        console.log('Moved', row.dataset.symbol, 'to top');
+    }
+}
+
+// 移动行到底部
+function moveRowToBottom(row) {
+    const tbody = row.parentNode;
+    tbody.appendChild(row);
+    console.log('Moved', row.dataset.symbol, 'to bottom');
+}
+
+// 向上移动一行
+function moveRowUp(row) {
+    const prevRow = row.previousElementSibling;
+    if (prevRow) {
+        row.parentNode.insertBefore(row, prevRow);
+        console.log('Moved', row.dataset.symbol, 'up');
+    }
+}
+
+// 向下移动一行
+function moveRowDown(row) {
+    const nextRow = row.nextElementSibling;
+    if (nextRow) {
+        row.parentNode.insertBefore(nextRow, row);
+        console.log('Moved', row.dataset.symbol, 'down');
+    }
+}
+
+// 重置默认顺序
+function resetDefaultOrder() {
+    // 重新加载数据以恢复默认顺序
+    loadHoldings();
+    console.log('Reset to default order');
 }
 </script>
 {% endblock %}

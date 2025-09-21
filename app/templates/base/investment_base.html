@@ -306,7 +306,7 @@
             <div class="header-controls">
                 <div class="dropdown">
                     <button class="btn language-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                        {% if get_current_language() == 'zh_CN' %}中文{% else %}EN{% endif %}
+                        {% if get_current_language() in ['zh_CN', 'zh_Hans_CN'] %}中文{% else %}EN{% endif %}
                     </button>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="?lang=en">English</a></li>

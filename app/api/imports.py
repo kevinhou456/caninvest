@@ -218,14 +218,48 @@ def csv_preview():
         # 检查用户是否手动选择了其他格式（优先级较低）
         saved_format_name = request.form.get('saved_format', '').strip()
         format_name = request.form.get('format_name', '').strip()
-        
+
         if saved_format_name and not auto_matched_format:
             # 只在没有自动匹配时才使用用户选择的格式
             manual_format = CsvFormat.get_by_name(saved_format_name)
             if manual_format:
                 suggested_mapping = manual_format.mappings
                 print(f"DEBUG: Using manually selected format '{saved_format_name}'")
-        
+
+        # 检测是否包含CFP_Account_ID列（系统导出的文件标识）
+        cfp_account_id_detected = 'CFP_Account_ID' in columns
+        cfp_account_data = {}
+
+        if cfp_account_id_detected:
+            # 获取文件中的账户ID信息
+            unique_account_ids = df['CFP_Account_ID'].dropna().unique().tolist()
+            # 获取对应的账户信息
+            from app.models.account import Account
+            from app.services.account_service import AccountService
+            account_info = {}
+            for account_id in unique_account_ids:
+                try:
+                    account_id = int(account_id)
+                    account = Account.query.get(account_id)
+                    if account:
+                        account_info[account_id] = {
+                            'name': AccountService.get_account_name_with_members(account),
+                            'type': account.account_type.name if account.account_type else 'Unknown',
+                            'transaction_count': len(df[df['CFP_Account_ID'] == account_id])
+                        }
+                except (ValueError, AttributeError):
+                    continue
+
+            cfp_account_data = {
+                'detected': True,
+                'account_ids': unique_account_ids,
+                'account_info': account_info,
+                'total_transactions': len(df)
+            }
+            print(f"DEBUG: Detected CFP_Account_ID column with accounts: {unique_account_ids}")
+        else:
+            cfp_account_data = {'detected': False}
+
         return jsonify({
             'success': True,
             'session_id': session_id,
@@ -236,11 +270,159 @@ def csv_preview():
             'auto_matched_format': {
                 'name': auto_matched_format.format_name,
                 'usage_count': auto_matched_format.usage_count
-            } if auto_matched_format else None
+            } if auto_matched_format else None,
+            'cfp_account_data': cfp_account_data
         })
         
     except Exception as e:
         return jsonify({'success': False, 'error': f'CSV analysis error: {str(e)}'}), 500
+
+
+@bp.route('/import-csv-smart', methods=['POST'])
+def import_csv_smart():
+    """智能导入CSV文件（使用CFP_Account_ID）"""
+    import pandas as pd
+    import os
+    from app.models.transaction import Transaction
+    from app.models.account import Account
+    from datetime import datetime
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': _('No data provided')}), 400
+
+    session_id = data.get('session_id')
+    use_cfp_account_id = data.get('use_cfp_account_id', False)
+
+    if not session_id or not use_cfp_account_id:
+        return jsonify({'success': False, 'error': _('Missing required data')}), 400
+
+    try:
+        # 加载临时保存的CSV文件
+        temp_dir = os.path.join(current_app.config.get('UPLOAD_FOLDER', '/tmp'), 'csv_sessions')
+        temp_file_path = os.path.join(temp_dir, f'{session_id}.csv')
+
+        if not os.path.exists(temp_file_path):
+            return jsonify({'success': False, 'error': _('Session expired or file not found')}), 400
+
+        # 读取CSV文件
+        df = pd.read_csv(temp_file_path)
+
+        # 验证是否包含CFP_Account_ID列
+        if 'CFP_Account_ID' not in df.columns:
+            return jsonify({'success': False, 'error': _('CFP_Account_ID column not found in file')}), 400
+
+        imported_count = 0
+        skipped_count = 0
+        error_count = 0
+        error_details = []
+
+        # 收集成功导入的账户ID，用于生成跳转链接
+        successful_account_ids = []
+
+        # 按账户ID分组处理
+        for account_id, group in df.groupby('CFP_Account_ID'):
+            try:
+                account_id = int(account_id)
+                account = Account.query.get(account_id)
+
+                if not account:
+                    skipped_count += len(group)
+                    error_details.append(f'Account ID {account_id} not found - skipped {len(group)} transactions')
+                    continue
+
+                # 记录成功处理的账户
+                account_has_imports = False
+
+                # 处理该账户的交易记录
+                for index, row in group.iterrows():
+                    try:
+                        # 解析交易数据
+                        transaction_data = {
+                            'trade_date': pd.to_datetime(row.get('Date', '')).date(),
+                            'type': row.get('Type', ''),
+                            'stock': row.get('Stock Symbol', '') or None,
+                            'quantity': float(row.get('Quantity', 0)) if row.get('Quantity', '') else 0,
+                            'price': float(row.get('Price Per Share', 0)) if row.get('Price Per Share', '') else 0,
+                            'fee': float(row.get('Transaction Fee', 0)) if row.get('Transaction Fee', '') else 0,
+                            'currency': row.get('Currency', 'CAD'),
+                            'notes': row.get('Notes', '') or None,
+                            'account_id': account_id
+                        }
+
+                        # 验证必需字段
+                        if not transaction_data['type'] or not transaction_data['trade_date']:
+                            skipped_count += 1
+                            continue
+
+                        # 检查是否已存在相同的交易
+                        existing = Transaction.query.filter_by(
+                            account_id=account_id,
+                            trade_date=transaction_data['trade_date'],
+                            type=transaction_data['type'],
+                            stock=transaction_data['stock'],
+                            quantity=transaction_data['quantity'],
+                            price=transaction_data['price']
+                        ).first()
+
+                        if existing:
+                            skipped_count += 1
+                            continue
+
+                        # 创建新交易记录
+                        transaction = Transaction(**transaction_data)
+                        db.session.add(transaction)
+                        imported_count += 1
+                        account_has_imports = True
+
+                    except Exception as row_error:
+                        error_count += 1
+                        error_details.append(f'Row {index}: {str(row_error)}')
+                        continue
+
+                # 如果该账户有成功导入的交易，记录账户ID
+                if account_has_imports and account_id not in successful_account_ids:
+                    successful_account_ids.append(account_id)
+
+            except Exception as account_error:
+                error_count += len(group)
+                error_details.append(f'Account {account_id}: {str(account_error)}')
+                continue
+
+        # 提交所有更改
+        db.session.commit()
+
+        # 清理临时文件
+        try:
+            os.remove(temp_file_path)
+        except:
+            pass
+
+        # 生成跳转URL
+        redirect_url = '/transactions'  # 默认跳转到所有交易记录
+        if len(successful_account_ids) == 1:
+            # 如果只有一个账户成功导入，跳转到该账户的交易记录页面
+            redirect_url = f'/transactions?account_id={successful_account_ids[0]}'
+        elif len(successful_account_ids) > 1:
+            # 如果有多个账户，跳转到所有交易记录页面
+            redirect_url = '/transactions'
+
+        result = {
+            'success': True,
+            'imported_count': imported_count,
+            'skipped_count': skipped_count,
+            'error_count': error_count,
+            'redirect_url': redirect_url
+        }
+
+        if error_details:
+            result['error_details'] = error_details[:10]  # 只返回前10个错误
+
+        return jsonify(result)
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': f'Smart import error: {str(e)}'}), 500
 
 @bp.route('/import-csv-with-mapping', methods=['POST'])
 def import_csv_with_mapping():

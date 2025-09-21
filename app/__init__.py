@@ -50,7 +50,10 @@ def create_app(config_name=None):
     app.register_blueprint(main_bp)
     
     # 配置翻译目录（在初始化Babel之前）
-    app.config['BABEL_TRANSLATION_DIRECTORIES'] = 'translations'
+    # 翻译目录在项目根目录，需要使用绝对路径
+    project_root = os.path.dirname(app.root_path)
+    translations_path = os.path.join(project_root, 'translations')
+    app.config['BABEL_TRANSLATION_DIRECTORIES'] = translations_path
 
     # 初始化 Babel
     babel.init_app(app)
@@ -70,8 +73,10 @@ def create_app(config_name=None):
         # 2. 会话存储优先
         if 'language' in session:
             requested_lang = session['language']
-            # 直接返回请求的语言，让Flask-Babel查找相应的翻译文件
-            if requested_lang in app.config['LANGUAGES']:
+            # Babel会自动将zh_CN标准化为zh_Hans_CN，所以我们返回zh_Hans_CN
+            if requested_lang == 'zh_CN' or requested_lang == 'zh_Hans_CN':
+                return 'zh_Hans_CN'
+            elif requested_lang in app.config['LANGUAGES']:
                 return requested_lang
 
         # 3. 默认英语

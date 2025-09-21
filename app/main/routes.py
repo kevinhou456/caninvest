@@ -1931,9 +1931,9 @@ def export_transactions():
         
         # 写入标题行
         writer.writerow([
-            'Date', 'Type', 'Stock Symbol', 'Stock Name', 'Quantity', 
-            'Price Per Share', 'Transaction Fee', 'Currency', 'Account', 
-            'Member', 'Exchange Rate', 'Notes'
+            'Date', 'Type', 'Stock Symbol', 'Stock Name', 'Quantity',
+            'Price Per Share', 'Transaction Fee', 'Currency', 'Account',
+            'Member', 'Exchange Rate', 'Notes', 'CFP_Account_ID'
         ])
         
         # 写入数据行
@@ -1950,12 +1950,19 @@ def export_transactions():
                 txn.account.name if txn.account else '',
                 '',  # member信息暂时不可用
                 '',  # exchange_rate字段已移除
-                txn.notes or ''
+                txn.notes or '',
+                txn.account_id  # 添加CFP_Account_ID列
             ])
         
         # 创建响应
         output.seek(0)
-        filename = f"transactions_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        # 生成文件名：account_(account_id)_(时间戳).csv 或 all_accounts_(时间戳).csv
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        if account_id:
+            filename = f"account_{account_id}_{timestamp}.csv"
+        else:
+            filename = f"all_accounts_{timestamp}.csv"
         
         return Response(
             output.getvalue(),

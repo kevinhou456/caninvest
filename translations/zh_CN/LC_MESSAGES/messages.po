@@ -347,9 +347,8 @@ msgstr "更新现金余额失败"
 #: app/main/routes.py:494 app/templates/base/base.html:39
 #: app/templates/families/detail.html:36 app/templates/main/dashboard.html:279
 #: app/templates/members/list.html:7
-#, fuzzy
 msgid "Family Members"
-msgstr "家庭"
+msgstr "家庭成员"
 
 #: app/main/routes.py:503
 msgid "Create Family"
@@ -957,7 +956,7 @@ msgstr ""
 
 #: app/templates/base/base.html:88 app/templates/stocks/list.html:5
 msgid "Stocks & Categories"
-msgstr ""
+msgstr "股票和分类"
 
 #: app/templates/base/base.html:114 app/templates/settings/preferences.html:6
 msgid "Preferences"
@@ -1015,12 +1014,10 @@ msgstr "管理家庭"
 
 #: app/templates/base/investment_base.html:379
 #: app/templates/main/dashboard.html:298
-#, fuzzy
 msgid "Manage Members"
-msgstr "管理家庭成员"
+msgstr "管理成员"
 
 #: app/templates/base/investment_base.html:382
-#, fuzzy
 msgid "Manage Accounts"
 msgstr "管理账户"
 

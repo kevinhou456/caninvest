@@ -374,7 +374,7 @@ class AssetValuationService:
         total_deposits = deposits_cad + deposits_usd * exchange_rate_decimal
         total_withdrawals = withdrawals_cad + withdrawals_usd * exchange_rate_decimal
 
-        # Correct assignments - fix the mixed up values
+        # Fixed assignments - correct the mixed up values between total_assets and total_return
         total_assets = total_stock_value + total_cash_value
         total_return = total_realized_gain + total_unrealized_gain + total_dividends + total_interest
 
@@ -394,7 +394,7 @@ class AssetValuationService:
                 'cad_only': float(realized_gain_cad + unrealized_gain_cad + dividends_cad + interest_cad),
                 'usd_only': float(realized_gain_usd + unrealized_gain_usd + dividends_usd + interest_usd),
                 'realized_gain': float(total_realized_gain),
-                'unrealized_gain': float(total_unrealized_gain), 
+                'unrealized_gain': float(total_unrealized_gain),
                 'dividends': float(total_dividends),
                 'interest': float(total_interest)
             },

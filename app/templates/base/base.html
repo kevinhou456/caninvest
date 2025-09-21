@@ -95,7 +95,7 @@
                     <div class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-globe me-1"></i>
-                            {% if get_current_language() == 'zh_CN' %}中文{% else %}English{% endif %}
+                            {% if get_current_language() in ['zh_CN', 'zh_Hans_CN'] %}中文{% else %}English{% endif %}
                         </a>
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="?lang=en">English</a></li>
