@@ -6,7 +6,7 @@
         <h2 class="h3 mb-0 text-gray-800">
             <i class="fas fa-chart-pie me-2"></i>{{ _('Holdings Analysis') }}
         </h2>
-        <p class="text-muted">{{ _('Current portfolio distribution analysis with four different perspectives') }}</p>
+        <!-- <p class="text-muted">{{ _('Current portfolio distribution analysis with four different perspectives') }}</p> -->
     </div>
 </div>
 
@@ -318,6 +318,14 @@ function updateStocksChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    top: 40,
+                    bottom: 40,
+                    left: 60,
+                    right: 60
+                }
+            },
             plugins: {
                 tooltip: {
                     callbacks: {
@@ -335,11 +343,29 @@ function updateStocksChart() {
                 },
                 datalabels: {
                     display: true,
-                    color: 'white',
+                    color: '#2c3e50',
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    borderColor: '#dee2e6',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    padding: 4,
                     font: {
-                        weight: 'bold',
-                        size: 11
+                        size: 12,
+                        weight: 'bold'
                     },
+                    anchor: 'end',
+                    align: 'end',
+                    offset: 15,
+                    // 连接线配置
+                    listeners: {
+                        enter: function(context) {
+                            // 鼠标悬停时显示连接线
+                            return true;
+                        }
+                    },
+                    // 尝试Chart.js 3.x的连接线语法
+                    clip: false,
+                    clamp: false,
                     formatter: function(value, context) {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
                         if (!total) return '';
@@ -396,6 +422,14 @@ function updateCategoryChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    top: 40,
+                    bottom: 40,
+                    left: 60,
+                    right: 60
+                }
+            },
             plugins: {
                 tooltip: {
                     callbacks: {
@@ -416,11 +450,29 @@ function updateCategoryChart() {
                 },
                 datalabels: {
                     display: true,
-                    color: 'white',
+                    color: '#2c3e50',
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    borderColor: '#dee2e6',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    padding: 4,
                     font: {
-                        weight: 'bold',
-                        size: 11
+                        size: 12,
+                        weight: 'bold'
                     },
+                    anchor: 'end',
+                    align: 'end',
+                    offset: 15,
+                    // 连接线配置
+                    listeners: {
+                        enter: function(context) {
+                            // 鼠标悬停时显示连接线
+                            return true;
+                        }
+                    },
+                    // 尝试Chart.js 3.x的连接线语法
+                    clip: false,
+                    clamp: false,
                     formatter: function(value, context) {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
                         if (!total) return '';
@@ -465,6 +517,14 @@ function updateCurrencyChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    top: 40,
+                    bottom: 40,
+                    left: 60,
+                    right: 60
+                }
+            },
             plugins: {
                 tooltip: {
                     callbacks: {
@@ -481,20 +541,30 @@ function updateCurrencyChart() {
                     position: 'right'
                 },
                 datalabels: {
-                    display: true, // 货币分布只有两个，都显示
-                    color: function(context) {
-                        const currency = distributionData.by_currency[context.dataIndex].currency;
-                        if (!currency) return 'white';
-                        const upper = currency.toUpperCase();
-                        if (upper === 'CAD' || upper === 'USD') {
-                            return '#1f2a4a';
-                        }
-                        return 'white';
-                    },
+                    display: true,
+                    color: '#2c3e50',
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    borderColor: '#dee2e6',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    padding: 4,
                     font: {
-                        weight: 'bold',
-                        size: 14
+                        size: 12,
+                        weight: 'bold'
                     },
+                    anchor: 'end',
+                    align: 'end',
+                    offset: 15,
+                    // 连接线配置
+                    listeners: {
+                        enter: function(context) {
+                            // 鼠标悬停时显示连接线
+                            return true;
+                        }
+                    },
+                    // 尝试Chart.js 3.x的连接线语法
+                    clip: false,
+                    clamp: false,
                     formatter: function(value, context) {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
                         const percentage = ((value / total) * 100).toFixed(1);
@@ -567,6 +637,14 @@ function updateAccountChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    top: 40,
+                    bottom: 40,
+                    left: 60,
+                    right: 60
+                }
+            },
             plugins: {
                 tooltip: {
                     callbacks: {
@@ -588,11 +666,29 @@ function updateAccountChart() {
                 },
                 datalabels: {
                     display: true,
-                    color: 'white',
+                    color: '#2c3e50',
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    borderColor: '#dee2e6',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    padding: 4,
                     font: {
-                        weight: 'bold',
-                        size: 11
+                        size: 12,
+                        weight: 'bold'
                     },
+                    anchor: 'end',
+                    align: 'end',
+                    offset: 15,
+                    // 连接线配置
+                    listeners: {
+                        enter: function(context) {
+                            // 鼠标悬停时显示连接线
+                            return true;
+                        }
+                    },
+                    // 尝试Chart.js 3.x的连接线语法
+                    clip: false,
+                    clamp: false,
                     formatter: function(value, context) {
                         const total = context.dataset.data.reduce((a, b) => a + b, 0);
                         if (!total) return '';
