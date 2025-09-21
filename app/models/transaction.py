@@ -33,7 +33,7 @@ class Transaction(db.Model):
     def is_duplicate(cls, account_id, trade_date, type, stock, quantity, price, currency, fee, notes=''):
         """
         检查是否存在重复的交易记录
-        
+
         Args:
             account_id: 账户ID
             trade_date: 交易日期
@@ -44,23 +44,34 @@ class Transaction(db.Model):
             currency: 货币
             fee: 手续费
             notes: 备注
-            
+
         Returns:
             bool: True if duplicate exists, False otherwise
         """
-        # 检查是否存在完全相同的记录
-        existing = cls.query.filter_by(
-            account_id=account_id,
-            trade_date=trade_date,
-            type=type,
-            stock=stock,
-            quantity=quantity,
-            price=price,
-            currency=currency,
-            fee=fee,
-            notes=notes
-        ).first()
-        
+        # 对于存入/取出交易，使用不同的重复检测逻辑
+        if type in ['DEPOSIT', 'WITHDRAWAL']:
+            # 存入/取出交易不检查stock和price，notes允许不同
+            existing = cls.query.filter_by(
+                account_id=account_id,
+                trade_date=trade_date,
+                type=type,
+                quantity=quantity,
+                currency=currency,
+                fee=fee
+            ).first()
+        else:
+            # 股票买卖交易检查所有关键字段，但notes可以不同
+            existing = cls.query.filter_by(
+                account_id=account_id,
+                trade_date=trade_date,
+                type=type,
+                stock=stock,
+                quantity=quantity,
+                price=price,
+                currency=currency,
+                fee=fee
+            ).first()
+
         return existing is not None
     
     @classmethod

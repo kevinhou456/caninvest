@@ -356,14 +356,25 @@ def import_csv_smart():
                             continue
 
                         # 检查是否已存在相同的交易
-                        existing = Transaction.query.filter_by(
-                            account_id=account_id,
-                            trade_date=transaction_data['trade_date'],
-                            type=transaction_data['type'],
-                            stock=transaction_data['stock'],
-                            quantity=transaction_data['quantity'],
-                            price=transaction_data['price']
-                        ).first()
+                        # 对于存入/取出交易，使用不同的重复检测逻辑
+                        if transaction_data['type'] in ['DEPOSIT', 'WITHDRAWAL']:
+                            existing = Transaction.query.filter_by(
+                                account_id=account_id,
+                                trade_date=transaction_data['trade_date'],
+                                type=transaction_data['type'],
+                                quantity=transaction_data['quantity'],
+                                currency=transaction_data['currency']
+                            ).first()
+                        else:
+                            # 股票买卖交易的重复检测
+                            existing = Transaction.query.filter_by(
+                                account_id=account_id,
+                                trade_date=transaction_data['trade_date'],
+                                type=transaction_data['type'],
+                                stock=transaction_data['stock'],
+                                quantity=transaction_data['quantity'],
+                                price=transaction_data['price']
+                            ).first()
 
                         if existing:
                             skipped_count += 1
