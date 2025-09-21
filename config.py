@@ -18,7 +18,7 @@ class Config:
     # 国际化配置
     LANGUAGES = ['en', 'zh_CN']
     BABEL_DEFAULT_LOCALE = 'en'
-    BABEL_TRANSLATION_DIRECTORIES = 'app/translations'
+    BABEL_TRANSLATION_DIRECTORIES = 'translations'
     BABEL_DEFAULT_TIMEZONE = 'UTC'
     
     # 文件上传配置
