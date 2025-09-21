@@ -189,7 +189,7 @@
                     </div>
                     <h6 class="card-title text-muted mb-0">{{ _('Total Assets') }}</h6>
                 </div>
-                <h4 class="text-primary mb-1">${{ "{:,.2f}".format(metrics.total_assets.cad if metrics else 0) }}</h4>
+                <h4 id="total-assets-display" class="text-primary mb-1">${{ "{:,.2f}".format(metrics.total_assets.cad if metrics else 0) }}</h4>
                 <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_assets.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_assets.usd_only if metrics else 0) }}</small>
             </div>
         </div>
@@ -206,10 +206,10 @@
                     <h6 class="card-title text-muted mb-0">{{ _('Total Return') }}</h6>
                 </div>
                 <h4 class="mb-1">
-                    <span class="{{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }}">
+                    <span id="total-return-display" class="{{ 'text-success' if metrics and metrics.total_return.cad >= 0 else 'text-danger' }}">
                         {% if metrics and metrics.total_return.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.total_return.cad if metrics else 0) }}
                     </span>
-                    <small class="ms-2 {{ 'text-success' if metrics and metrics.total_return_rate >= 0 else 'text-danger' }}">
+                    <small id="total-return-rate-display" class="ms-2 {{ 'text-success' if metrics and metrics.total_return_rate >= 0 else 'text-danger' }}">
                         ({% if metrics %}{{ "+" if metrics.total_return_rate >= 0 else "" }}{{ "{:.2f}".format(metrics.total_return_rate) }}{% else %}0.00{% endif %}%)
                     </small>
                 </h4>
@@ -228,7 +228,7 @@
                     </div>
                     <h6 class="card-title text-muted mb-0">{{ _('Realized Gain') }}</h6>
                 </div>
-                <h4 class="{{ 'text-success' if metrics and metrics.realized_gain.cad >= 0 else 'text-danger' }} mb-1">
+                <h4 id="realized-gain-display" class="{{ 'text-success' if metrics and metrics.realized_gain.cad >= 0 else 'text-danger' }} mb-1">
                     {% if metrics and metrics.realized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.realized_gain.cad if metrics else 0) }}
                 </h4>
                 <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.realized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.realized_gain.usd_only if metrics else 0) }}</small>
@@ -246,7 +246,7 @@
                     </div>
                     <h6 class="card-title text-muted mb-0">{{ _('Unrealized Gain') }}</h6>
                 </div>
-                <h4 class="{{ 'text-success' if metrics and metrics.unrealized_gain.cad >= 0 else 'text-danger' }} mb-1">
+                <h4 id="unrealized-gain-display" class="{{ 'text-success' if metrics and metrics.unrealized_gain.cad >= 0 else 'text-danger' }} mb-1">
                     {% if metrics and metrics.unrealized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.unrealized_gain.cad if metrics else 0) }}
                 </h4>
                 <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.unrealized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.unrealized_gain.usd_only if metrics else 0) }}</small>
@@ -1050,41 +1050,42 @@ document.addEventListener('DOMContentLoaded', function() {
     // Recalculate return rate based on corrected values
     const totalReturnRateCorrect = totalAssetsCorrect > 0 ? (totalReturnCorrect / (totalAssetsCorrect - totalReturnCorrect)) * 100 : 0;
 
-    // Update the DOM elements
-    const totalAssetsElements = document.querySelectorAll('h4.text-primary');
-    if (totalAssetsElements.length > 0) {
-        totalAssetsElements[0].textContent = '$' + totalAssetsCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Update the DOM elements using precise ID selectors
+    const totalAssetsElement = document.getElementById('total-assets-display');
+    if (totalAssetsElement) {
+        totalAssetsElement.textContent = '$' + totalAssetsCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     // Update total return display
-    const totalReturnElements = document.querySelectorAll('h4 span');
-    if (totalReturnElements.length > 0) {
+    const totalReturnElement = document.getElementById('total-return-display');
+    if (totalReturnElement) {
         const sign = totalReturnCorrect >= 0 ? '+' : '';
-        totalReturnElements[0].textContent = sign + '$' + totalReturnCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        totalReturnElements[0].className = totalReturnCorrect >= 0 ? 'text-success' : 'text-danger';
+        totalReturnElement.textContent = sign + '$' + totalReturnCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        totalReturnElement.className = totalReturnCorrect >= 0 ? 'text-success' : 'text-danger';
+    }
 
-        // Update return rate
-        const returnRateElement = totalReturnElements[0].parentElement.querySelector('small');
-        if (returnRateElement) {
-            const rateSign = totalReturnRateCorrect >= 0 ? '+' : '';
-            returnRateElement.textContent = '(' + rateSign + totalReturnRateCorrect.toFixed(2) + '%)';
-            returnRateElement.className = 'ms-2 ' + (totalReturnRateCorrect >= 0 ? 'text-success' : 'text-danger');
-        }
+    // Update return rate
+    const returnRateElement = document.getElementById('total-return-rate-display');
+    if (returnRateElement) {
+        const rateSign = totalReturnRateCorrect >= 0 ? '+' : '';
+        returnRateElement.textContent = '(' + rateSign + totalReturnRateCorrect.toFixed(2) + '%)';
+        returnRateElement.className = 'ms-2 ' + (totalReturnRateCorrect >= 0 ? 'text-success' : 'text-danger');
     }
 
     // Update realized gain display
-    const realizedGainElements = document.querySelectorAll('h4');
-    if (realizedGainElements.length >= 3) {
+    const realizedGainElement = document.getElementById('realized-gain-display');
+    if (realizedGainElement) {
         const sign = realizedGainCorrect >= 0 ? '+' : '';
-        realizedGainElements[2].textContent = sign + '$' + realizedGainCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        realizedGainElements[2].className = (realizedGainCorrect >= 0 ? 'text-success' : 'text-danger') + ' mb-1';
+        realizedGainElement.textContent = sign + '$' + realizedGainCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        realizedGainElement.className = (realizedGainCorrect >= 0 ? 'text-success' : 'text-danger') + ' mb-1';
     }
 
     // Update unrealized gain display
-    if (realizedGainElements.length >= 4) {
+    const unrealizedGainElement = document.getElementById('unrealized-gain-display');
+    if (unrealizedGainElement) {
         const sign = unrealizedGainCorrect >= 0 ? '+' : '';
-        realizedGainElements[3].textContent = sign + '$' + unrealizedGainCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        realizedGainElements[3].className = (unrealizedGainCorrect >= 0 ? 'text-success' : 'text-danger') + ' mb-1';
+        unrealizedGainElement.textContent = sign + '$' + unrealizedGainCorrect.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        unrealizedGainElement.className = (unrealizedGainCorrect >= 0 ? 'text-success' : 'text-danger') + ' mb-1';
     }
 
     console.log('Overview metrics updated with current exchange rate:', currentRate);
