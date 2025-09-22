@@ -157,13 +157,9 @@ class CurrencyService:
             import yfinance
             logger.info(f"yfinance version: {yfinance.__version__}")
 
-            # 使用Yahoo Finance获取汇率，使用自定义session
-            if self._session:
-                ticker = yf.Ticker(currency_pair, session=self._session)
-                logger.debug(f"Created ticker object for {currency_pair} with custom session")
-            else:
-                ticker = yf.Ticker(currency_pair)
-                logger.debug(f"Created ticker object for {currency_pair} without custom session")
+            # 使用Yahoo Finance获取汇率（不使用自定义session，让yfinance自己处理）
+            ticker = yf.Ticker(currency_pair)
+            logger.debug(f"Created ticker object for {currency_pair}")
 
             # 尝试不同的时间段，从最短开始
             periods = ["1d", "5d", "1mo"]
@@ -198,10 +194,7 @@ class CurrencyService:
                 reverse_pair = f"{to_currency}{from_currency}=X"
                 logger.info(f"Trying reverse pair: {reverse_pair}")
 
-                if self._session:
-                    ticker = yf.Ticker(reverse_pair, session=self._session)
-                else:
-                    ticker = yf.Ticker(reverse_pair)
+                ticker = yf.Ticker(reverse_pair)
                 data = ticker.history(period="1d")
 
                 if not data.empty:

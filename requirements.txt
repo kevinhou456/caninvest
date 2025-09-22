@@ -11,7 +11,7 @@ SQLAlchemy==1.4.53
 # 数据处理和金融数据
 requests==2.31.0
 python-dateutil==2.8.2
-yfinance==0.2.28
+yfinance==0.2.65
 
 # 调度器
 APScheduler==3.10.4
