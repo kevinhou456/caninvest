@@ -45,9 +45,9 @@ class ExchangeRate(db.Model):
 class CurrencyService:
     """货币转换服务"""
     
-    # 默认汇率（作为备选）
-    DEFAULT_CAD_USD_RATE = Decimal('0.74')  # 1 CAD = 0.74 USD
-    DEFAULT_USD_CAD_RATE = Decimal('1.35')  # 1 USD = 1.35 CAD
+    # 默认汇率（作为备选，基于2024年平均值）
+    DEFAULT_CAD_USD_RATE = Decimal('0.7384')  # 1 CAD = 0.7384 USD
+    DEFAULT_USD_CAD_RATE = Decimal('1.3542')  # 1 USD = 1.3542 CAD
     
     def __init__(self):
         self._cache = {}
@@ -117,32 +117,57 @@ class CurrencyService:
     def _fetch_rate_from_api(self, from_currency: str, to_currency: str) -> Optional[Decimal]:
         """
         从Yahoo Finance API获取汇率
-        
+
         使用Yahoo Finance获取实时汇率数据，支持CAD/USD货币对
         """
         try:
             # 构建货币对代码 (如: CADUSD=X, USDCAD=X)
             if from_currency == to_currency:
                 return Decimal('1.0')
-            
+
             currency_pair = f"{from_currency}{to_currency}=X"
-            
+
             # 使用Yahoo Finance获取汇率
             ticker = yf.Ticker(currency_pair)
-            data = ticker.history(period="1d", interval="1m")
-            
-            if not data.empty:
-                # 获取最新收盘价
-                latest_rate = data['Close'].iloc[-1]
-                rate = Decimal(str(round(latest_rate, 6)))
-                logger.info(f"Fetched rate from Yahoo Finance: {from_currency}/{to_currency} = {rate}")
-                return rate
-            else:
-                logger.warning(f"No data returned from Yahoo Finance for {currency_pair}")
-                
+
+            # 尝试不同的时间段，从最短开始
+            periods = ["1d", "5d", "1mo"]
+            for period in periods:
+                try:
+                    data = ticker.history(period=period)
+
+                    if not data.empty:
+                        # 获取最新收盘价
+                        latest_rate = data['Close'].iloc[-1]
+                        rate = Decimal(str(round(latest_rate, 6)))
+                        logger.info(f"Fetched rate from Yahoo Finance: {from_currency}/{to_currency} = {rate} (period: {period})")
+                        return rate
+                except Exception as inner_e:
+                    logger.debug(f"Failed to fetch with period {period}: {inner_e}")
+                    continue
+
+            logger.warning(f"No data returned from Yahoo Finance for {currency_pair} with any period")
+
         except Exception as e:
             logger.error(f"Failed to fetch rate from Yahoo Finance: {e}")
-        
+
+        # 备用方案：尝试反向汇率
+        try:
+            if from_currency != to_currency:
+                reverse_pair = f"{to_currency}{from_currency}=X"
+                logger.info(f"Trying reverse pair: {reverse_pair}")
+
+                ticker = yf.Ticker(reverse_pair)
+                data = ticker.history(period="1d")
+
+                if not data.empty:
+                    reverse_rate = data['Close'].iloc[-1]
+                    rate = Decimal('1.0') / Decimal(str(round(reverse_rate, 6)))
+                    logger.info(f"Fetched reverse rate from Yahoo Finance: {to_currency}/{from_currency} = {reverse_rate}, calculated {from_currency}/{to_currency} = {rate}")
+                    return rate
+        except Exception as e:
+            logger.debug(f"Reverse rate fetch also failed: {e}")
+
         return None
     
     def _save_rate_to_db(self, from_currency: str, to_currency: str, rate: Decimal, rate_date: date):
