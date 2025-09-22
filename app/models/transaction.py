@@ -59,6 +59,9 @@ class Transaction(db.Model):
                 currency=currency,
                 fee=fee
             ).first()
+
+            if existing:
+                print(f"DEBUG: Found duplicate DEPOSIT/WITHDRAWAL - Account: {account_id}, Existing ID: {existing.id}, Date: {existing.trade_date}, Amount: {existing.amount}")
         else:
             # 股票买卖交易检查所有关键字段，但notes可以不同
             existing = cls.query.filter_by(
@@ -71,6 +74,9 @@ class Transaction(db.Model):
                 currency=currency,
                 fee=fee
             ).first()
+
+            if existing:
+                print(f"DEBUG: Found duplicate TRADE - Account: {account_id}, Existing ID: {existing.id}, Stock: {existing.stock}, Date: {existing.trade_date}")
 
         return existing is not None
     

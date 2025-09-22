@@ -534,6 +534,9 @@ def import_csv_with_mapping():
         skipped_count = 0
         corrected_count = 0
         errors = []
+
+        # 跟踪当前批次中已处理的交易，防止同一批次内重复
+        current_batch_transactions = set()
         
         for row_data in transactions_data:
             try:
@@ -578,7 +581,20 @@ def import_csv_with_mapping():
                 fee = row_data.get('fee', 0)
                 notes = row_data.get('notes', '')
                 amount = row_data.get('amount', None)
-                
+
+                # 创建当前交易的唯一标识符用于批次内重复检测
+                if type in ['DEPOSIT', 'WITHDRAWAL']:
+                    batch_key = (account_id, trade_date, type, quantity, currency, fee)
+                else:
+                    batch_key = (account_id, trade_date, type, stock, quantity, price, currency, fee)
+
+                # 检查当前批次内是否已有相同交易
+                if batch_key in current_batch_transactions:
+                    skipped_count += 1
+                    print(f"DEBUG: Skipped duplicate within current batch - Date: {trade_date}, Type: {type}, Stock: {stock}, Quantity: {quantity}, Price: {price}, Amount: {amount}")
+                    continue
+
+                # 检查数据库中是否已存在
                 if Transaction.is_duplicate(
                     account_id=account_id,
                     trade_date=trade_date,
@@ -593,6 +609,9 @@ def import_csv_with_mapping():
                     skipped_count += 1
                     print(f"DEBUG: Skipped duplicate transaction - Date: {trade_date}, Type: {type}, Stock: {stock}, Quantity: {quantity}, Price: {price}, Amount: {amount}")
                     continue
+
+                # 添加到当前批次跟踪
+                current_batch_transactions.add(batch_key)
                 
                 transaction = Transaction(
                     account_id=account_id,
