@@ -12,7 +12,10 @@ class InitializationService:
         """初始化默认数据"""
         print("正在初始化账户类型...")
         self._create_default_account_types()
-        
+
+        print("正在初始化股票分类...")
+        self._create_default_stock_categories()
+
         db.session.commit()
         print("默认数据初始化完成！")
     
@@ -65,8 +68,30 @@ class InitializationService:
                 print(f"  创建账户类型: {data['name']}")
             else:
                 print(f"  账户类型已存在: {data['name']}")
-    
-    
+
+    def _create_default_stock_categories(self):
+        """创建默认股票分类"""
+        from app.models.stock_category import StockCategory
+
+        default_categories = [
+            {'name': '科技股', 'name_en': 'Technology', 'color': '#007bff', 'description': '科技类股票'},
+            {'name': '金融股', 'name_en': 'Financial', 'color': '#28a745', 'description': '金融类股票'},
+            {'name': '消费股', 'name_en': 'Consumer', 'color': '#dc3545', 'description': '消费类股票'},
+            {'name': '医疗股', 'name_en': 'Healthcare', 'color': '#6f42c1', 'description': '医疗保健类股票'},
+            {'name': '能源股', 'name_en': 'Energy', 'color': '#fd7e14', 'description': '能源类股票'},
+            {'name': '房地产', 'name_en': 'Real Estate', 'color': '#20c997', 'description': '房地产相关股票'},
+            {'name': 'ETF', 'name_en': 'ETF', 'color': '#6c757d', 'description': '交易型开放式指数基金'},
+        ]
+
+        for cat_data in default_categories:
+            existing = StockCategory.query.filter_by(name=cat_data['name']).first()
+            if not existing:
+                category = StockCategory(**cat_data)
+                db.session.add(category)
+                print(f"  创建股票分类: {cat_data['name']}")
+            else:
+                print(f"  股票分类已存在: {cat_data['name']}")
+
     def create_demo_family(self):
         """创建演示家庭数据"""
         from app.models.family import Family
