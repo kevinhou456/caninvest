@@ -57,7 +57,6 @@ def create_account():
         family_id=family_id,
         account_type_id=account_type_id,
         is_joint=data.get('is_joint', False),
-        currency=data.get('currency', 'CAD'),
         account_number=data.get('account_number'),
         broker_name=data.get('broker_name')
     )
@@ -88,7 +87,6 @@ def create_family_account(family_id):
         family_id=family_id,
         account_type_id=account_type_id,
         is_joint=data.get('is_joint', False),
-        currency=data.get('currency', 'CAD'),
         account_number=data.get('account_number'),
         broker_name=data.get('broker_name')
     )
