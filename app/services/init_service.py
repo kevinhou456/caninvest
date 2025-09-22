@@ -110,58 +110,51 @@ class InitializationService:
             name="Member1 Non-registered",
             family_id=demo_family.id,
             account_type_id=regular_type.id,
-            currency='CAD',
             broker_name='Questrade'
         )
-        
+
         member1_tfsa = Account(
             name="Member1 TFSA",
             family_id=demo_family.id,
             account_type_id=tfsa_type.id,
-            currency='CAD',
             broker_name='Questrade'
         )
-        
+
         member1_rrsp = Account(
             name="Member1 RRSP",
             family_id=demo_family.id,
             account_type_id=rrsp_type.id,
-            currency='CAD',
             broker_name='Questrade'
         )
-        
+
         # 创建Member2的账户
         member2_regular = Account(
             name="Member2 Non-registered",
             family_id=demo_family.id,
             account_type_id=regular_type.id,
-            currency='CAD',
             broker_name='TD Direct Investing'
         )
-        
+
         member2_tfsa = Account(
             name="Member2 TFSA",
             family_id=demo_family.id,
             account_type_id=tfsa_type.id,
-            currency='CAD',
             broker_name='TD Direct Investing'
         )
-        
+
         member2_rrsp = Account(
             name="Member2 RRSP",
             family_id=demo_family.id,
             account_type_id=rrsp_type.id,
-            currency='CAD',
             broker_name='TD Direct Investing'
         )
-        
-        # 创建Joint账户 
+
+        # 创建Joint账户
         joint_account = Account(
             name="Joint Account",
             family_id=demo_family.id,
             account_type_id=regular_type.id,
             is_joint=True,
-            currency='CAD',
             broker_name='RBC Direct Investing'
         )
         
