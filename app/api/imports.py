@@ -72,9 +72,26 @@ def csv_preview():
         # 执行详细分析
         encoding_analysis = analyze_and_detect_encoding(raw_content)
         
-        # 如果chardet检测到的置信度很低或无法检测，显示详细信息给用户
+        # 如果chardet检测到的置信度很低或无法检测，尝试常用编码并跳过分析模式
         chardet_result = encoding_analysis.get('chardet_result')
-        if chardet_result is None or chardet_result.get('confidence', 0) < 0.8 or chardet_result.get('encoding') is None:
+
+        # 更宽松的编码检测策略，优先尝试常用编码
+        detected_encoding = None
+        if chardet_result and chardet_result.get('encoding') and chardet_result.get('confidence', 0) >= 0.3:
+            detected_encoding = chardet_result.get('encoding')
+        else:
+            # 如果chardet检测不可靠，尝试常用编码
+            common_encodings = ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin1', 'cp1252']
+            for encoding in common_encodings:
+                try:
+                    raw_content.decode(encoding)
+                    detected_encoding = encoding
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+        # 只有在完全无法解码时才触发分析模式
+        if not detected_encoding:
             return jsonify({
                 'success': False,
                 'error': 'Encoding detection required',
@@ -86,51 +103,14 @@ def csv_preview():
                     'message': f'检测到的编码: {(chardet_result or {}).get("encoding", "None")} (置信度: {(chardet_result or {}).get("confidence", 0):.2f})'
                 }
             }), 400
-        
-        # 智能编码检测
-        def detect_encoding(raw_bytes):
-            # 首先尝试使用chardet库进行自动检测（如果可用）
-            try:
-                import chardet
-                detected = chardet.detect(raw_bytes)
-                if detected and detected.get('confidence', 0) > 0.7:
-                    encoding = detected['encoding']
-                    try:
-                        decoded = raw_bytes.decode(encoding)
-                        if decoded.strip():
-                            return encoding, decoded
-                    except (UnicodeDecodeError, UnicodeError):
-                        pass
-            except ImportError:
-                pass
-            
-            # 扩展的编码列表，包括更多边缘情况
-            encodings = [
-                'utf-8-sig', 'utf-8', 
-                'gb2312', 'gbk', 'gb18030', 'hz-gb-2312',
-                'big5', 'big5hkscs',
-                'latin1', 'cp1252', 'iso-8859-1', 'iso-8859-15',
-                'cp437', 'cp850', 'cp858', 'cp1250', 'cp1251', 'cp1253', 'cp1254', 'cp1255', 'cp1256', 'cp1257', 'cp1258',
-                'mac-roman', 'mac-cyrillic',
-                'shift_jis', 'euc-jp', 'iso-2022-jp',
-                'euc-kr', 'cp949', 'iso-2022-kr',
-                'koi8-r', 'koi8-u',
-                'ascii'
-            ]
-            
-            for encoding in encodings:
-                try:
-                    decoded = raw_bytes.decode(encoding)
-                    # 检查解码后的内容是否有意义（不全是乱码）
-                    if decoded.strip():
-                        return encoding, decoded
-                except (UnicodeDecodeError, UnicodeError, LookupError):
-                    continue
-            
-            # 最后的回退：使用latin1并忽略错误
-            return 'latin1', raw_bytes.decode('latin1', errors='ignore')
-        
-        detected_encoding, decoded_content = detect_encoding(raw_content)
+
+        # 使用已检测到的编码进行解码
+        try:
+            decoded_content = raw_content.decode(detected_encoding)
+        except UnicodeDecodeError:
+            # 如果失败，使用latin1作为最后备选
+            detected_encoding = 'latin1'
+            decoded_content = raw_content.decode(detected_encoding, errors='ignore')
         
         # 检查解码后的内容是否为空
         if not decoded_content.strip():
