@@ -52,7 +52,32 @@ class CurrencyService:
     def __init__(self):
         self._cache = {}
         self._cache_expiry = {}  # 缓存过期时间
-    
+
+        # 创建自定义session以避免反爬虫
+        self._session = None
+        self._setup_session()
+
+    def _setup_session(self):
+        """设置自定义HTTP会话"""
+        try:
+            import requests
+            self._session = requests.Session()
+
+            # 设置更真实的User-Agent
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            self._session.headers.update(headers)
+            logger.debug("Custom session configured with headers")
+        except Exception as e:
+            logger.warning(f"Failed to setup custom session: {e}")
+            self._session = None
+
     def get_current_rate(self, from_currency: str, to_currency: str) -> Decimal:
         """
         获取当前汇率
@@ -126,30 +151,46 @@ class CurrencyService:
                 return Decimal('1.0')
 
             currency_pair = f"{from_currency}{to_currency}=X"
+            logger.info(f"Attempting to fetch rate for {currency_pair}")
 
-            # 使用Yahoo Finance获取汇率
-            ticker = yf.Ticker(currency_pair)
+            # 添加调试信息
+            import yfinance
+            logger.info(f"yfinance version: {yfinance.__version__}")
+
+            # 使用Yahoo Finance获取汇率，使用自定义session
+            if self._session:
+                ticker = yf.Ticker(currency_pair, session=self._session)
+                logger.debug(f"Created ticker object for {currency_pair} with custom session")
+            else:
+                ticker = yf.Ticker(currency_pair)
+                logger.debug(f"Created ticker object for {currency_pair} without custom session")
 
             # 尝试不同的时间段，从最短开始
             periods = ["1d", "5d", "1mo"]
             for period in periods:
                 try:
+                    logger.debug(f"Trying period: {period}")
                     data = ticker.history(period=period)
+                    logger.debug(f"Data shape: {data.shape if not data.empty else 'empty'}")
 
                     if not data.empty:
                         # 获取最新收盘价
                         latest_rate = data['Close'].iloc[-1]
                         rate = Decimal(str(round(latest_rate, 6)))
-                        logger.info(f"Fetched rate from Yahoo Finance: {from_currency}/{to_currency} = {rate} (period: {period})")
+                        logger.info(f"SUCCESS: Fetched rate from Yahoo Finance: {from_currency}/{to_currency} = {rate} (period: {period})")
                         return rate
+                    else:
+                        logger.warning(f"Empty data for period {period}")
                 except Exception as inner_e:
-                    logger.debug(f"Failed to fetch with period {period}: {inner_e}")
+                    logger.error(f"Failed to fetch with period {period}: {str(inner_e)}, type: {type(inner_e).__name__}")
                     continue
 
             logger.warning(f"No data returned from Yahoo Finance for {currency_pair} with any period")
 
         except Exception as e:
-            logger.error(f"Failed to fetch rate from Yahoo Finance: {e}")
+            logger.error(f"Failed to fetch rate from Yahoo Finance: {str(e)}, type: {type(e).__name__}")
+            import traceback
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
 
         # 备用方案：尝试反向汇率
         try:
@@ -157,16 +198,21 @@ class CurrencyService:
                 reverse_pair = f"{to_currency}{from_currency}=X"
                 logger.info(f"Trying reverse pair: {reverse_pair}")
 
-                ticker = yf.Ticker(reverse_pair)
+                if self._session:
+                    ticker = yf.Ticker(reverse_pair, session=self._session)
+                else:
+                    ticker = yf.Ticker(reverse_pair)
                 data = ticker.history(period="1d")
 
                 if not data.empty:
                     reverse_rate = data['Close'].iloc[-1]
                     rate = Decimal('1.0') / Decimal(str(round(reverse_rate, 6)))
-                    logger.info(f"Fetched reverse rate from Yahoo Finance: {to_currency}/{from_currency} = {reverse_rate}, calculated {from_currency}/{to_currency} = {rate}")
+                    logger.info(f"SUCCESS: Fetched reverse rate from Yahoo Finance: {to_currency}/{from_currency} = {reverse_rate}, calculated {from_currency}/{to_currency} = {rate}")
                     return rate
+                else:
+                    logger.warning(f"Empty data for reverse pair {reverse_pair}")
         except Exception as e:
-            logger.debug(f"Reverse rate fetch also failed: {e}")
+            logger.error(f"Reverse rate fetch also failed: {str(e)}, type: {type(e).__name__}")
 
         return None
     
