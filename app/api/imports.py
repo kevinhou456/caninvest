@@ -149,22 +149,38 @@ def csv_preview():
         print(f"DEBUG: Detected delimiter: {delimiter!r}")
         
         # 读取CSV文件，使用检测到的编码
-        file.seek(0)
-        try:
-            df = pd.read_csv(file, encoding=detected_encoding, sep=delimiter, skipinitialspace=True)
-            print(f"DEBUG: Successfully read CSV with encoding {detected_encoding} and delimiter {delimiter!r}")
-        except pd.errors.EmptyDataError:
-            return jsonify({'success': False, 'error': _('CSV file contains no data')}), 400
-        except Exception as e:
-            print(f"DEBUG: pandas read_csv error with detected encoding: {e}")
-            # 尝试不指定分隔符，让pandas自动检测
+        df = None
+        successful_encoding = None
+
+        # 尝试多种编码读取CSV
+        encodings_to_try = [detected_encoding, 'utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin1']
+        # 去重并保持顺序
+        encodings_to_try = list(dict.fromkeys(encodings_to_try))
+
+        for encoding in encodings_to_try:
+            file.seek(0)
             try:
-                file.seek(0)
-                df = pd.read_csv(file, encoding=detected_encoding, skipinitialspace=True)
-                print(f"DEBUG: Successfully read CSV with encoding {detected_encoding} without explicit delimiter")
-            except Exception as e2:
-                print(f"DEBUG: Final fallback attempt failed: {e2}")
-                return jsonify({'success': False, 'error': f'Failed to parse CSV file with encoding {detected_encoding}: {str(e2)}'}), 400
+                df = pd.read_csv(file, encoding=encoding, sep=delimiter, skipinitialspace=True)
+                successful_encoding = encoding
+                print(f"DEBUG: Successfully read CSV with encoding {encoding} and delimiter {delimiter!r}")
+                break
+            except pd.errors.EmptyDataError:
+                return jsonify({'success': False, 'error': _('CSV file contains no data')}), 400
+            except Exception as e:
+                print(f"DEBUG: pandas read_csv error with encoding {encoding}: {e}")
+                # 尝试不指定分隔符，让pandas自动检测
+                try:
+                    file.seek(0)
+                    df = pd.read_csv(file, encoding=encoding, skipinitialspace=True)
+                    successful_encoding = encoding
+                    print(f"DEBUG: Successfully read CSV with encoding {encoding} without explicit delimiter")
+                    break
+                except Exception as e2:
+                    print(f"DEBUG: Fallback without delimiter failed for {encoding}: {e2}")
+                    continue
+
+        if df is None:
+            return jsonify({'success': False, 'error': _('Failed to parse CSV file. Please ensure the file is a valid CSV with proper encoding (UTF-8 recommended).')}), 400
         
         print(f"DEBUG: DataFrame shape: {df.shape}")
         print(f"DEBUG: DataFrame columns: {df.columns.tolist()}")
