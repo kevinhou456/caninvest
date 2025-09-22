@@ -13,7 +13,7 @@
 
 ### 数据管理
 - 📊 **智能导入**: CSV文件自动识别券商格式
-- 📷 **OCR识别**: 交易截图智能识别录入
+- 📷 **OCR识别**: 交易截图智能识别录入（正在开发中）
 - 🏷️ **股票分类**: 可自定义的股票分类系统
 - 📝 **交易备注**: 记录投资心得和决策理由
 
@@ -101,18 +101,13 @@ canadian_family_investment/
 └── run.py                   # 启动入口
 ```
 
-## 支持的券商格式
+
 
 ### CSV导入支持
-- ✅ Questrade
-- ✅ TD Direct Investing
-- ✅ Interactive Brokers
-- ✅ Wealthsimple Trade
+智能的CSV文件导入交易记录，支持绝大部分的交易商
 
 ### OCR识别支持
-- 📷 交易确认页面截图
-- 📷 账户报表截图
-- 📷 持仓明细截图
+正在开发
 
 ## 开发指南
 
@@ -131,22 +126,7 @@ pybabel update -i messages.pot -d app/translations
 pybabel compile -d app/translations
 ```
 
-### 添加新券商格式
-在 `app/services/csv_service.py` 中添加新的券商配置:
 
-```python
-BROKER_FORMATS = {
-    'your_broker': {
-        'name': 'Your Broker Name',
-        'date_format': '%Y-%m-%d',
-        'columns': {
-            'transaction_date': 'Date Column',
-            'symbol': 'Symbol Column',
-            # ... 其他字段映射
-        }
-    }
-}
-```
 
 ## 贡献指南
 
@@ -162,7 +142,7 @@ BROKER_FORMATS = {
 
 ## 联系我们
 
-项目链接: https://github.com/yourusername/canadian-family-investment
+项目链接: https://github.com/kevinhou456/caninvest
 
 ## 致谢
 
