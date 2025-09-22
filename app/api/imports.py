@@ -369,6 +369,7 @@ def import_csv_smart():
                         # 验证必需字段
                         if not transaction_data['type'] or not transaction_data['trade_date']:
                             skipped_count += 1
+                            print(f"DEBUG: Skipped transaction due to missing required fields - Type: {transaction_data.get('type')}, Date: {transaction_data.get('trade_date')}, Row data: {row.to_dict()}")
                             continue
 
                         # 检查是否已存在相同的交易
@@ -394,6 +395,7 @@ def import_csv_smart():
 
                         if existing:
                             skipped_count += 1
+                            print(f"DEBUG: Skipped existing transaction - Date: {transaction_data['trade_date']}, Type: {transaction_data['type']}, Stock: {transaction_data.get('stock')}, Amount: {transaction_data.get('amount')}")
                             continue
 
                         # 创建新交易记录
@@ -589,6 +591,7 @@ def import_csv_with_mapping():
                     notes=notes
                 ):
                     skipped_count += 1
+                    print(f"DEBUG: Skipped duplicate transaction - Date: {trade_date}, Type: {type}, Stock: {stock}, Quantity: {quantity}, Price: {price}, Amount: {amount}")
                     continue
                 
                 transaction = Transaction(
@@ -1075,6 +1078,7 @@ def import_csv_flexible():
                     notes=notes
                 ):
                     skipped_count += 1
+                    print(f"DEBUG: Skipped duplicate transaction - Date: {trade_date}, Type: {type}, Stock: {stock}, Quantity: {quantity}, Price: {price}, Amount: {amount}")
                     continue
                 
                 transaction = Transaction(
