@@ -9,9 +9,9 @@ class Config:
     # Flask核心配置
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
     
-    # 数据库配置 - 使用instance目录避免重复创建
+    # 数据库配置 - 使用项目根目录确保可访问性
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        'sqlite:///' + os.path.join(basedir, 'instance', 'app.db')
+        'sqlite:///' + os.path.join(basedir, 'app.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = False
     
@@ -51,7 +51,7 @@ class Config:
     def init_app(app):
         """应用初始化回调"""
         # 创建必要的目录
-        for folder in [Config.UPLOAD_FOLDER, Config.EXPORT_FOLDER, 
+        for folder in [Config.UPLOAD_FOLDER, Config.EXPORT_FOLDER,
                       os.path.dirname(Config.LOG_FILE)]:
             if not os.path.exists(folder):
                 os.makedirs(folder)
