@@ -73,9 +73,9 @@ def create_app(config_name=None):
         # 2. 会话存储优先
         if 'language' in session:
             requested_lang = session['language']
-            # Babel会自动将zh_CN标准化为zh_Hans_CN，所以我们返回zh_Hans_CN
+            # 统一使用zh_CN，避免Windows系统符号链接问题
             if requested_lang == 'zh_CN' or requested_lang == 'zh_Hans_CN':
-                return 'zh_Hans_CN'
+                return 'zh_CN'
             elif requested_lang in app.config['LANGUAGES']:
                 return requested_lang
 
