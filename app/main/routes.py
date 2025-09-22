@@ -594,8 +594,7 @@ def create_account():
                 name=name,
                 family_id=family.id,
                 account_type_id=account_type_id,
-                is_joint=is_joint,
-                currency='CAD'  # 默认CAD
+                is_joint=is_joint
             )
             db.session.add(account)
             db.session.flush()  # 获取account.id
