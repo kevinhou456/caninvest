@@ -109,39 +109,41 @@ class StockPriceHistory(db.Model):
             price_data_list: 价格数据列表，每个元素包含symbol, trade_date, prices等
         """
         try:
-            for data in price_data_list:
-                # 检查是否已存在
-                existing = cls.query.filter_by(
-                    symbol=data['symbol'].upper(),
-                    trade_date=data['trade_date'],
-                    currency=data.get('currency', 'USD').upper()
-                ).first()
-                
-                if existing:
-                    # 更新现有记录
-                    existing.open_price = data.get('open_price')
-                    existing.high_price = data.get('high_price')
-                    existing.low_price = data.get('low_price')
-                    existing.close_price = data['close_price']
-                    existing.adjusted_close = data.get('adjusted_close')
-                    existing.volume = data.get('volume')
-                    existing.updated_at = datetime.utcnow()
-                else:
-                    # 创建新记录
-                    new_record = cls(
+            # 使用no_autoflush避免中间查询触发自动刷新
+            with db.session.no_autoflush:
+                for data in price_data_list:
+                    # 检查是否已存在
+                    existing = cls.query.filter_by(
                         symbol=data['symbol'].upper(),
                         trade_date=data['trade_date'],
-                        open_price=data.get('open_price'),
-                        high_price=data.get('high_price'),
-                        low_price=data.get('low_price'),
-                        close_price=data['close_price'],
-                        adjusted_close=data.get('adjusted_close'),
-                        volume=data.get('volume'),
-                        currency=data.get('currency', 'USD').upper(),
-                        data_source=data.get('data_source', 'yahoo')
-                    )
-                    db.session.add(new_record)
-            
+                        currency=data.get('currency', 'USD').upper()
+                    ).first()
+
+                    if existing:
+                        # 更新现有记录
+                        existing.open_price = data.get('open_price')
+                        existing.high_price = data.get('high_price')
+                        existing.low_price = data.get('low_price')
+                        existing.close_price = data['close_price']
+                        existing.adjusted_close = data.get('adjusted_close')
+                        existing.volume = data.get('volume')
+                        existing.updated_at = datetime.utcnow()
+                    else:
+                        # 创建新记录
+                        new_record = cls(
+                            symbol=data['symbol'].upper(),
+                            trade_date=data['trade_date'],
+                            open_price=data.get('open_price'),
+                            high_price=data.get('high_price'),
+                            low_price=data.get('low_price'),
+                            close_price=data['close_price'],
+                            adjusted_close=data.get('adjusted_close'),
+                            volume=data.get('volume'),
+                            currency=data.get('currency', 'USD').upper(),
+                            data_source=data.get('data_source', 'yahoo')
+                        )
+                        db.session.add(new_record)
+
             db.session.commit()
             return True
             
