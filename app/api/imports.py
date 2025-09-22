@@ -48,7 +48,6 @@ def csv_preview():
         if not raw_content:
             return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
         
-        print(f"DEBUG: CSV file raw bytes sample (first 100 bytes): {raw_content[:100]!r}")
         
         # 详细编码分析和检测
         def analyze_and_detect_encoding(raw_bytes):
@@ -65,9 +64,8 @@ def csv_preview():
                 import chardet
                 chardet_result = chardet.detect(raw_bytes)
                 analysis_info['chardet_result'] = chardet_result
-                print(f"DEBUG: chardet analysis: {chardet_result}")
             except ImportError:
-                print("DEBUG: chardet not available")
+                pass
             
             return analysis_info
         
@@ -100,12 +98,11 @@ def csv_preview():
                     try:
                         decoded = raw_bytes.decode(encoding)
                         if decoded.strip():
-                            print(f"DEBUG: chardet detected encoding: {encoding} (confidence: {detected['confidence']:.2f})")
                             return encoding, decoded
                     except (UnicodeDecodeError, UnicodeError):
                         pass
             except ImportError:
-                print("DEBUG: chardet not available, using manual detection")
+                pass
             
             # 扩展的编码列表，包括更多边缘情况
             encodings = [
@@ -126,18 +123,14 @@ def csv_preview():
                     decoded = raw_bytes.decode(encoding)
                     # 检查解码后的内容是否有意义（不全是乱码）
                     if decoded.strip():
-                        print(f"DEBUG: Successfully decoded with encoding: {encoding}")
                         return encoding, decoded
                 except (UnicodeDecodeError, UnicodeError, LookupError):
                     continue
             
             # 最后的回退：使用latin1并忽略错误
-            print("DEBUG: All encoding detection failed, using latin1 with error handling")
             return 'latin1', raw_bytes.decode('latin1', errors='ignore')
         
         detected_encoding, decoded_content = detect_encoding(raw_content)
-        print(f"DEBUG: Detected encoding: {detected_encoding}")
-        print(f"DEBUG: Decoded content sample (first 200 chars): {decoded_content[:200]!r}")
         
         # 检查解码后的内容是否为空
         if not decoded_content.strip():
@@ -146,7 +139,6 @@ def csv_preview():
         # 使用通用的分隔符检测（基于解码后的内容）
         from app.utils.csv_utils import detect_csv_delimiter
         delimiter = detect_csv_delimiter(decoded_content[:1024])
-        print(f"DEBUG: Detected delimiter: {delimiter!r}")
         
         # 读取CSV文件，使用检测到的编码
         df = None
@@ -162,28 +154,22 @@ def csv_preview():
             try:
                 df = pd.read_csv(file, encoding=encoding, sep=delimiter, skipinitialspace=True)
                 successful_encoding = encoding
-                print(f"DEBUG: Successfully read CSV with encoding {encoding} and delimiter {delimiter!r}")
                 break
             except pd.errors.EmptyDataError:
                 return jsonify({'success': False, 'error': _('CSV file contains no data')}), 400
             except Exception as e:
-                print(f"DEBUG: pandas read_csv error with encoding {encoding}: {e}")
                 # 尝试不指定分隔符，让pandas自动检测
                 try:
                     file.seek(0)
                     df = pd.read_csv(file, encoding=encoding, skipinitialspace=True)
                     successful_encoding = encoding
-                    print(f"DEBUG: Successfully read CSV with encoding {encoding} without explicit delimiter")
                     break
                 except Exception as e2:
-                    print(f"DEBUG: Fallback without delimiter failed for {encoding}: {e2}")
                     continue
 
         if df is None:
             return jsonify({'success': False, 'error': _('Failed to parse CSV file. Please ensure the file is a valid CSV with proper encoding (UTF-8 recommended).')}), 400
         
-        print(f"DEBUG: DataFrame shape: {df.shape}")
-        print(f"DEBUG: DataFrame columns: {df.columns.tolist()}")
         
         if df.empty:
             return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
@@ -225,11 +211,9 @@ def csv_preview():
         if auto_matched_format:
             # 找到完全匹配的格式，使用保存的映射
             suggested_mapping = auto_matched_format.mappings
-            print(f"DEBUG: Auto-matched format '{auto_matched_format.format_name}' (used {auto_matched_format.usage_count} times)")
         else:
             # 没有找到匹配，使用智能建议
             suggested_mapping = smart_header_mapping(columns) or {}
-            print("DEBUG: No auto-match found, using smart mapping")
         
         # 检查用户是否手动选择了其他格式（优先级较低）
         saved_format_name = request.form.get('saved_format', '').strip()
@@ -240,7 +224,6 @@ def csv_preview():
             manual_format = CsvFormat.get_by_name(saved_format_name)
             if manual_format:
                 suggested_mapping = manual_format.mappings
-                print(f"DEBUG: Using manually selected format '{saved_format_name}'")
 
         # 检测是否包含CFP_Account_ID列（系统导出的文件标识）
         cfp_account_id_detected = 'CFP_Account_ID' in columns
@@ -272,7 +255,6 @@ def csv_preview():
                 'account_info': account_info,
                 'total_transactions': len(df)
             }
-            print(f"DEBUG: Detected CFP_Account_ID column with accounts: {unique_account_ids}")
         else:
             cfp_account_data = {'detected': False}
 
@@ -369,7 +351,6 @@ def import_csv_smart():
                         # 验证必需字段
                         if not transaction_data['type'] or not transaction_data['trade_date']:
                             skipped_count += 1
-                            print(f"DEBUG: Skipped transaction due to missing required fields - Type: {transaction_data.get('type')}, Date: {transaction_data.get('trade_date')}, Row data: {row.to_dict()}")
                             continue
 
                         # 检查是否已存在相同的交易
@@ -395,7 +376,6 @@ def import_csv_smart():
 
                         if existing:
                             skipped_count += 1
-                            print(f"DEBUG: Skipped existing transaction - Date: {transaction_data['trade_date']}, Type: {transaction_data['type']}, Stock: {transaction_data.get('stock')}, Amount: {transaction_data.get('amount')}")
                             continue
 
                         # 创建新交易记录
@@ -535,8 +515,6 @@ def import_csv_with_mapping():
         corrected_count = 0
         errors = []
 
-        # 跟踪当前批次中已处理的交易，防止同一批次内重复
-        current_batch_transactions = set()
         
         for row_data in transactions_data:
             try:
@@ -582,19 +560,7 @@ def import_csv_with_mapping():
                 notes = row_data.get('notes', '')
                 amount = row_data.get('amount', None)
 
-                # 创建当前交易的唯一标识符用于批次内重复检测
-                if type in ['DEPOSIT', 'WITHDRAWAL']:
-                    batch_key = (account_id, trade_date, type, quantity, currency, fee)
-                else:
-                    batch_key = (account_id, trade_date, type, stock, quantity, price, currency, fee)
-
-                # 检查当前批次内是否已有相同交易
-                if batch_key in current_batch_transactions:
-                    skipped_count += 1
-                    print(f"DEBUG: Skipped duplicate within current batch - Date: {trade_date}, Type: {type}, Stock: {stock}, Quantity: {quantity}, Price: {price}, Amount: {amount}")
-                    continue
-
-                # 检查数据库中是否已存在
+                # 只检查数据库中是否已存在重复记录
                 if Transaction.is_duplicate(
                     account_id=account_id,
                     trade_date=trade_date,
@@ -604,14 +570,11 @@ def import_csv_with_mapping():
                     price=price,
                     currency=currency,
                     fee=fee,
-                    notes=notes
+                    notes=notes,
+                    amount=amount
                 ):
                     skipped_count += 1
-                    print(f"DEBUG: Skipped duplicate transaction - Date: {trade_date}, Type: {type}, Stock: {stock}, Quantity: {quantity}, Price: {price}, Amount: {amount}")
                     continue
-
-                # 添加到当前批次跟踪
-                current_batch_transactions.add(batch_key)
                 
                 transaction = Transaction(
                     account_id=account_id,
@@ -687,8 +650,6 @@ def process_csv_with_mapping(df, column_mappings):
     transactions = []
     processing_errors = []
     
-    print(f"DEBUG: Processing {len(df)} rows with mappings: {column_mappings}")
-    print(f"DEBUG: Available DataFrame columns: {df.columns.tolist()}")
     
     # 检测是否为描述格式的CSV
     # 方式1: 检查CSV列名是否包含标准描述格式列 (date, transaction, description, amount, balance, currency)
@@ -886,23 +847,28 @@ def process_csv_with_mapping(df, column_mappings):
             currency = 'USD'  # 默认值
             
             if 'currency' in column_mappings and column_mappings['currency']:
-                curr_str = str(row[column_mappings['currency']]).strip().upper()
-                if curr_str and curr_str != 'NAN':
+                mapped_column = column_mappings['currency']
+                curr_str = str(row[mapped_column]).strip().upper()
+
+                # 检查映射的列名是否合理 - 排除明显不相关的列
+                column_name_lower = mapped_column.lower()
+                invalid_currency_columns = ['balance', 'total', 'amount', 'price', 'value', 'quantity', 'shares']
+
+                # 如果列名包含这些关键词，跳过货币提取
+                if any(invalid_word in column_name_lower for invalid_word in invalid_currency_columns):
+                    currency = 'USD'  # 使用默认值
+                elif curr_str and curr_str != 'NAN':
                     # 如果是标准的3位货币代码，直接使用
                     if len(curr_str) == 3 and curr_str.isalpha():
                         currency = curr_str
                     else:
-                        # 否则从文本中智能提取货币（如 "CAD RRSP" -> "CAD"）
+                        # 从文本中智能提取货币（如 "CAD RRSP" -> "CAD", "Account Description USD" -> "USD"）
                         if 'CAD' in curr_str or 'CANADIAN' in curr_str:
                             currency = 'CAD'
                         elif 'USD' in curr_str or 'US ' in curr_str or 'AMERICAN' in curr_str:
                             currency = 'USD'
                         elif 'EUR' in curr_str or 'EURO' in curr_str:
                             currency = 'EUR'
-                        else:
-                            currency = 'USD'
-            else:
-                currency = 'USD'  # 默认货币
                 
                 # 从描述字段中智能提取货币
                 description_text = ''
@@ -956,16 +922,11 @@ def process_csv_with_mapping(df, column_mappings):
         except Exception as e:
             error_msg = f"Row {row_num}: Unexpected error - {str(e)}"
             processing_errors.append(error_msg)
-            print(f"ERROR: {error_msg}")
-            print(f"DEBUG: Exception type: {type(e).__name__}")
-            print(f"DEBUG: Available columns: {df.columns.tolist()}")
-            print(f"DEBUG: Column mappings: {column_mappings}")
             continue
-    
-    print(f"DEBUG: Processed {len(transactions)} valid transactions out of {len(df)} rows")
+
     if processing_errors:
-        print(f"DEBUG: Processing errors: {processing_errors[:5]}")  # 打印前5个错误
-    
+        pass
+
     # 返回结果和错误信息
     return transactions, processing_errors
 
@@ -1097,7 +1058,6 @@ def import_csv_flexible():
                     notes=notes
                 ):
                     skipped_count += 1
-                    print(f"DEBUG: Skipped duplicate transaction - Date: {trade_date}, Type: {type}, Stock: {stock}, Quantity: {quantity}, Price: {price}, Amount: {amount}")
                     continue
                 
                 transaction = Transaction(
@@ -1147,9 +1107,9 @@ def smart_header_mapping(headers):
             'transaction_dt', 'trade_dt', 'exec_date', 'execution_date'
         ],
         'type': [
-            'type', 'transaction_type', 'action', 'side', 'buy/sell',
+            'type', 'transaction_type', 'action', 'Operation', 'buy/sell',
             '类型', '交易类型', '操作', 'tipo', 'typ',
-            'order_type', 'trans_type', 'activity'
+            'order_type', 'trans_type', 'activity','Operation'
         ],
         'symbol': [
             'symbol', 'stock', 'ticker', 'stock_symbol', 'instrument',
@@ -1167,7 +1127,7 @@ def smart_header_mapping(headers):
             'avg_price', 'fill_price', 'trade_price'
         ],
         'currency': [
-            'currency', 'ccy', 'curr', 'denomination',
+            'currency', 'ccy', 'denomination',
             '货币', '币种', 'moneda', 'währung',
             'currency_code', 'ccy_code'
         ],
@@ -1364,18 +1324,18 @@ def process_description_format_csv(df, column_mappings):
                 """根据映射获取字段值，支持多个字段名变体"""
                 if isinstance(field_names, str):
                     field_names = [field_names]
-                
+
                 for field_name in field_names:
                     if field_name in column_mappings and column_mappings[field_name]:
                         # 使用用户映射的列
                         mapped_column = column_mappings[field_name]
                         return str(row.get(mapped_column, default)).strip()
-                
-                # 尝试标准列名
+
+                # 尝试标准列名 - 只进行精确匹配，不进行substring匹配
                 for field_name in field_names:
                     if field_name in row:
                         return str(row.get(field_name, default)).strip()
-                        
+
                 return default
             
             # 构造行字典

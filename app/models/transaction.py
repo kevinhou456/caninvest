@@ -30,7 +30,7 @@ class Transaction(db.Model):
         return f'<Transaction {self.type} {self.stock} {self.quantity}@{self.price}>'
     
     @classmethod
-    def is_duplicate(cls, account_id, trade_date, type, stock, quantity, price, currency, fee, notes=''):
+    def is_duplicate(cls, account_id, trade_date, type, stock, quantity, price, currency, fee, notes='', amount=None):
         """
         检查是否存在重复的交易记录
 
@@ -50,18 +50,18 @@ class Transaction(db.Model):
         """
         # 对于存入/取出交易，使用不同的重复检测逻辑
         if type in ['DEPOSIT', 'WITHDRAWAL']:
-            # 存入/取出交易不检查stock和price，notes允许不同
+            # 存入/取出交易检查amount字段而不是quantity，notes允许不同
             existing = cls.query.filter_by(
                 account_id=account_id,
                 trade_date=trade_date,
                 type=type,
-                quantity=quantity,
+                amount=amount,
                 currency=currency,
                 fee=fee
             ).first()
 
             if existing:
-                print(f"DEBUG: Found duplicate DEPOSIT/WITHDRAWAL - Account: {account_id}, Existing ID: {existing.id}, Date: {existing.trade_date}, Amount: {existing.amount}")
+                pass
         else:
             # 股票买卖交易检查所有关键字段，但notes可以不同
             existing = cls.query.filter_by(
@@ -76,7 +76,7 @@ class Transaction(db.Model):
             ).first()
 
             if existing:
-                print(f"DEBUG: Found duplicate TRADE - Account: {account_id}, Existing ID: {existing.id}, Stock: {existing.stock}, Date: {existing.trade_date}")
+                pass
 
         return existing is not None
     
