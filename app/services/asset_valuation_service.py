@@ -108,31 +108,114 @@ class AssetValuationService:
     def get_detailed_portfolio_data(self, account_ids: List[int], target_date: Optional[date] = None) -> Dict:
         """
         获取详细的投资组合数据，包括持仓和清仓股票列表
-        
+        使用统一的AssetValuationService计算逻辑，确保与汇总数据一致
+
         Args:
             account_ids: 账户ID列表
             target_date: 目标日期，None表示今天
-            
+
         Returns:
             包含current_holdings和cleared_holdings的字典
         """
         if target_date is None:
             target_date = date.today()
-        
-        from app.services.portfolio_service import portfolio_service
-        
+
         try:
-            # 使用现有的portfolio_service获取详细数据
-            portfolio_summary = portfolio_service.get_portfolio_summary(account_ids)
-            return {
-                'current_holdings': portfolio_summary.get('current_holdings', []),
-                'cleared_holdings': portfolio_summary.get('cleared_holdings', [])
-            }
+            # 使用统一的AssetValuationService计算逻辑
+            return self._get_unified_portfolio_data(account_ids, target_date)
         except Exception as e:
             logger.error(f"获取详细投资组合数据失败: {e}", exc_info=True)
             # 回退到简化版本
             return self._get_simplified_portfolio_data(account_ids, target_date)
-    
+
+    def _get_unified_portfolio_data(self, account_ids: List[int], target_date: date) -> Dict:
+        """
+        使用统一的AssetValuationService计算逻辑获取详细投资组合数据
+        确保与get_comprehensive_portfolio_metrics的计算结果一致
+        """
+        current_holdings = []
+        cleared_holdings = []
+
+        # 获取汇率
+        exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
+
+        for account_id in account_ids:
+            account = Account.query.get(account_id)
+            if not account:
+                continue
+
+            # 获取该账户的所有股票交易
+            all_symbols = Transaction.query.filter(
+                Transaction.account_id == account_id,
+                Transaction.stock.isnot(None),
+                Transaction.stock != '',
+                Transaction.trade_date <= target_date
+            ).with_entities(Transaction.stock).distinct().all()
+
+            for (symbol,) in all_symbols:
+                if not symbol:
+                    continue
+
+                # 获取当前持仓
+                holdings = self._get_holdings_at_date(account_id, target_date)
+                current_shares = holdings.get(symbol, 0)
+
+                # 获取股票基本信息
+                currency = Transaction.get_currency_by_stock_symbol(symbol)
+                current_price = self.stock_price_service.get_cached_stock_price(symbol, currency) or 0
+
+                # 计算统计数据（使用统一的计算方法）
+                stock_stats = self._calculate_stock_stats(account_id, symbol, target_date)
+
+                if current_shares > 0:
+                    # 当前持仓 - 使用统一计算的数据
+                    current_value = float(current_shares) * float(current_price)
+                    current_value_cad = current_value * float(exchange_rate) if currency == 'USD' else current_value
+
+                    # 计算成本基础
+                    cost_basis = self._calculate_cost_basis(account_id, symbol, target_date, current_shares)
+                    total_cost = float(cost_basis)
+                    total_cost_cad = total_cost * float(exchange_rate) if currency == 'USD' else total_cost
+
+                    holding_data = {
+                        'symbol': symbol,
+                        'current_shares': float(current_shares),
+                        'shares': float(current_shares),
+                        'current_price': float(current_price),
+                        'currency': currency,
+                        'current_value': current_value,
+                        'current_value_cad': current_value_cad,
+                        'total_cost': total_cost,
+                        'total_cost_cad': total_cost_cad,
+                        'unrealized_gain': float(stock_stats.get('unrealized_gain', 0)),
+                        'unrealized_gain_cad': float(stock_stats.get('unrealized_gain', 0)) * float(exchange_rate) if currency == 'USD' else float(stock_stats.get('unrealized_gain', 0)),
+                        'average_cost': total_cost / float(current_shares) if current_shares > 0 else 0,
+                        'account_id': account_id,
+                        'account_name': account.name,
+                        'company_name': symbol,
+                        'sector': 'Unknown'
+                    }
+                    current_holdings.append(holding_data)
+
+                elif current_shares == 0:
+                    # 已清仓股票
+                    cleared_data = {
+                        'symbol': symbol,
+                        'realized_gain': float(stock_stats.get('realized_gain', 0)),
+                        'realized_gain_cad': float(stock_stats.get('realized_gain', 0)) * float(exchange_rate) if currency == 'USD' else float(stock_stats.get('realized_gain', 0)),
+                        'account_id': account_id,
+                        'account_name': account.name,
+                        'currency': currency,
+                        'company_name': symbol,
+                        'sector': 'Unknown'
+                    }
+                    cleared_holdings.append(cleared_data)
+
+        return {
+            'current_holdings': current_holdings,
+            'cleared_holdings': cleared_holdings
+        }
+
     def _get_simplified_portfolio_data(self, account_ids: List[int], target_date: date) -> Dict:
         """
         获取简化版的投资组合数据（回退方案）
@@ -325,48 +408,55 @@ class AssetValuationService:
         exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
         exchange_rate_decimal = Decimal(str(exchange_rate))
         
-        # 计算每个账户的数据并汇总
+        # 使用AssetValuationService自己的计算逻辑确保数据一致性
+        total_stock_value_cad = Decimal('0')
+        total_unrealized_gain_cad = Decimal('0')
+        total_realized_gain = Decimal('0')
+
+        # 按币种分别计算
+        stock_value_cad = Decimal('0')
+        stock_value_usd = Decimal('0')
+        realized_gain_cad = Decimal('0')
+        realized_gain_usd = Decimal('0')
+        unrealized_gain_cad = Decimal('0')
+        unrealized_gain_usd = Decimal('0')
+
+        # 按账户计算所有数据
         for account_id in account_ids:
             proportion = self._get_account_proportion(account_id, ownership_map)
             if proportion <= 0:
                 continue
-            # 获取现金余额
-            cad_balance, usd_balance = self._calculate_cash_balance(account_id, target_date)
-            cash_cad += cad_balance * proportion
-            cash_usd += usd_balance * proportion
-            
-            # 获取按币种分类的交易统计
-            account_stats = self._get_account_stats_by_currency(account_id, target_date)
-            
-            # 汇总股票市值（按币种）
-            stock_value_cad += account_stats['stock_value_cad'] * proportion
-            stock_value_usd += account_stats['stock_value_usd'] * proportion
-            
-            # 汇总已实现收益（按币种）
-            realized_gain_cad += account_stats['realized_gain_cad'] * proportion
-            realized_gain_usd += account_stats['realized_gain_usd'] * proportion
-            
-            # 汇总未实现收益（按币种）
-            unrealized_gain_cad += account_stats['unrealized_gain_cad'] * proportion
-            unrealized_gain_usd += account_stats['unrealized_gain_usd'] * proportion
-            
-            # 汇总股息和利息（按币种）
-            dividends_cad += account_stats['dividends_cad'] * proportion
-            dividends_usd += account_stats['dividends_usd'] * proportion
-            interest_cad += account_stats['interest_cad'] * proportion
-            interest_usd += account_stats['interest_usd'] * proportion
-            
-            # 计算存款和取款
+
+            # 累计现金余额
+            cash_balance_cad, cash_balance_usd = self._calculate_cash_balance(account_id, target_date)
+            cash_cad += cash_balance_cad * proportion
+            cash_usd += cash_balance_usd * proportion
+
+            # 按币种分别计算股票和收益
+            account_stock_cad, account_stock_usd, account_realized_cad, account_realized_usd, account_unrealized_cad, account_unrealized_usd = self._calculate_account_metrics_by_currency(account_id, target_date)
+
+            stock_value_cad += account_stock_cad * proportion
+            stock_value_usd += account_stock_usd * proportion
+            realized_gain_cad += account_realized_cad * proportion
+            realized_gain_usd += account_realized_usd * proportion
+            unrealized_gain_cad += account_unrealized_cad * proportion
+            unrealized_gain_usd += account_unrealized_usd * proportion
+            # 计算股息、利息、存款和取款
+            dividend_interest_stats = self._calculate_dividend_interest_by_currency(account_id, target_date)
+            dividends_cad += dividend_interest_stats['dividends_cad'] * proportion
+            dividends_usd += dividend_interest_stats['dividends_usd'] * proportion
+            interest_cad += dividend_interest_stats['interest_cad'] * proportion
+            interest_usd += dividend_interest_stats['interest_usd'] * proportion
+
             deposits_withdrawals = self._calculate_deposits_withdrawals_by_currency(account_id, target_date)
             deposits_cad += deposits_withdrawals['deposits_cad'] * proportion
             deposits_usd += deposits_withdrawals['deposits_usd'] * proportion
             withdrawals_cad += deposits_withdrawals['withdrawals_cad'] * proportion
             withdrawals_usd += deposits_withdrawals['withdrawals_usd'] * proportion
-        
+
         # 计算总和（CAD等价）
         total_stock_value = stock_value_cad + stock_value_usd * exchange_rate_decimal
         total_cash_value = cash_cad + cash_usd * exchange_rate_decimal
-
         total_realized_gain = realized_gain_cad + realized_gain_usd * exchange_rate_decimal
         total_unrealized_gain = unrealized_gain_cad + unrealized_gain_usd * exchange_rate_decimal
         total_dividends = dividends_cad + dividends_usd * exchange_rate_decimal
@@ -374,25 +464,28 @@ class AssetValuationService:
         total_deposits = deposits_cad + deposits_usd * exchange_rate_decimal
         total_withdrawals = withdrawals_cad + withdrawals_usd * exchange_rate_decimal
 
-        # Fixed assignments - correct the mixed up values between total_assets and total_return
+        # 计算总值
         total_assets = total_stock_value + total_cash_value
         total_return = total_realized_gain + total_unrealized_gain + total_dividends + total_interest
+
+        # 计算总回报率
+        total_return_rate = float(total_return / total_deposits * 100) if total_deposits > 0 else 0.0
 
         return {
             'total_assets': {
                 'cad': float(total_assets),
-                'cad_only': float(stock_value_cad + cash_cad),
-                'usd_only': float(stock_value_usd + cash_usd),
+                'cad_only': float(stock_value_cad + cash_cad),  # CAD股票+CAD现金
+                'usd_only': float(stock_value_usd + cash_usd),  # USD股票+USD现金
                 'stock_value': float(total_stock_value),
-                'stock_value_cad': float(stock_value_cad),
-                'stock_value_usd': float(stock_value_usd),
+                'stock_value_cad': float(stock_value_cad),  # CAD股票市值
+                'stock_value_usd': float(stock_value_usd),  # USD股票市值
                 'cash_cad': float(cash_cad),
                 'cash_usd': float(cash_usd)
             },
             'total_return': {
                 'cad': float(total_return),
-                'cad_only': float(realized_gain_cad + unrealized_gain_cad + dividends_cad + interest_cad),
-                'usd_only': float(realized_gain_usd + unrealized_gain_usd + dividends_usd + interest_usd),
+                'cad_only': float(realized_gain_cad + unrealized_gain_cad + dividends_cad + interest_cad),  # CAD币种总回报
+                'usd_only': float(realized_gain_usd + unrealized_gain_usd + dividends_usd + interest_usd),  # USD币种总回报
                 'realized_gain': float(total_realized_gain),
                 'unrealized_gain': float(total_unrealized_gain),
                 'dividends': float(total_dividends),
@@ -428,12 +521,17 @@ class AssetValuationService:
                 'cad_only': float(withdrawals_cad),
                 'usd_only': float(withdrawals_usd)
             },
+            'stock_value': {
+                'cad': float(total_stock_value),
+                'total_cad': float(total_stock_value)
+            },
             'cash_balance': {
                 'cad': float(cash_cad),
                 'usd': float(cash_usd),
                 'total_cad': float(total_cash_value)
             },
-            'exchange_rate': float(exchange_rate_decimal)
+            'exchange_rate': float(exchange_rate_decimal),
+            'total_return_rate': total_return_rate
         }
 
     def _get_account_proportion(self, account_id: int,
@@ -460,21 +558,13 @@ class AssetValuationService:
             'interest_usd': Decimal('0')
         }
         
-        # 获取所有交易的股票列表  
-        symbols = Transaction.query.filter(
-            Transaction.account_id == account_id,
-            Transaction.stock.isnot(None),
-            Transaction.stock != '',
-            Transaction.trade_date <= target_date
-        ).with_entities(Transaction.stock).distinct().all()
-        
-        #从交易记录中获取股票的币种
-        
+        # 获取目标日期的实际持仓（只计算仍持有的股票）
+        holdings = self._get_holdings_at_date(account_id, target_date)
 
-        for (symbol,) in symbols:
-            if not symbol:
+        for symbol, shares in holdings.items():
+            if shares <= 0:
                 continue
-            
+
             currency = Transaction.get_currency_by_stock_symbol(symbol)
 
             # 计算该股票的市值和收益
@@ -814,6 +904,7 @@ class AssetValuationService:
             'usd': snapshot.cash_balance_usd,
             'total_cad': snapshot.cash_balance_total_cad
         }
+
     
     def _calculate_stock_market_value(self, account_id: int, target_date: date) -> tuple[Decimal, Dict]:
         """
@@ -928,33 +1019,33 @@ class AssetValuationService:
     def _calculate_cash_balance(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
         """
         计算指定日期的现金余额
-        - 如果是今天：直接从数据库Cash表读取当前现金
-        - 如果是历史日期：通过累计交易记录反推计算
-        
+        - 今天或未来日期：使用Cash表的当前数据
+        - 历史日期：通过交易记录倒推计算
+
         Returns:
             (CAD余额, USD余额)
         """
         logger.debug(f"计算账户{account_id}在{target_date}的现金余额")
-        
-        # 如果是今天，直接从Cash表读取
-        if target_date == date.today():
+
+        today = date.today()
+
+        if target_date >= today:
+            # 今天或未来日期：使用Cash表的当前数据
             cash_record = Cash.get_account_cash(account_id)
             if cash_record:
                 cad_balance = Decimal(str(cash_record.cad or 0))
                 usd_balance = Decimal(str(cash_record.usd or 0))
-                logger.info(f"账户{account_id}当前现金(数据库): CAD=${cad_balance}, USD=${usd_balance}")
                 return cad_balance, usd_balance
             else:
-                logger.warning(f"账户{account_id}没有现金记录，返回0")
                 return Decimal('0'), Decimal('0')
-        
-        # 历史日期：通过交易记录反推计算
-        return self._calculate_historical_cash_balance(account_id, target_date)
+        else:
+            # 历史日期：通过交易记录倒推计算
+            return self._calculate_historical_cash_balance_from_current(account_id, target_date)
     
     def _calculate_historical_cash_balance(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
         """
         通过交易记录计算历史现金余额
-        采用更安全的方法：如果计算出现负余额，则从当前余额反推
+        直接返回计算结果，允许负余额（用户可能没有输入完整的现金记录）
         """
         # 获取目标日期及之前的所有现金相关交易
         transactions = Transaction.query.filter(
@@ -962,83 +1053,73 @@ class AssetValuationService:
             Transaction.trade_date <= target_date,
             Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
         ).order_by(Transaction.trade_date.asc()).all()
-        
-        # 方法1：从零开始累计计算
+
+        # 从零开始累计计算
         cad_balance = Decimal('0')
         usd_balance = Decimal('0')
-        
+
         for transaction in transactions:
             cad_balance, usd_balance = self._apply_transaction_impact(
                 cad_balance, usd_balance, transaction
             )
-        
-        # 检查是否出现负余额，如果是则使用方法2
-        if cad_balance < 0 or usd_balance < 0:
-            # logger.warning(f"账户{account_id}在{target_date}计算出负余额(CAD={cad_balance}, USD={usd_balance})，采用反推方法")
-            return self._calculate_cash_balance_reverse(account_id, target_date)
-        
+
         logger.info(f"账户{account_id}历史现金({target_date}): CAD=${cad_balance}, USD=${usd_balance}")
         return cad_balance, usd_balance
-    
-    def _calculate_cash_balance_reverse(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
+
+    def _calculate_historical_cash_balance_from_current(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
         """
-        反推方法：从当前现金余额出发，减去目标日期后的交易影响
+        从Cash表的当前数据开始，倒推到目标日期的现金余额
         """
-        # 获取当前现金余额
+        # 获取当前现金余额作为基准
         cash_record = Cash.get_account_cash(account_id)
-        if not cash_record:
-            logger.warning(f"账户{account_id}没有现金记录，无法反推历史余额")
-            return Decimal('0'), Decimal('0')
-        
-        current_cad = Decimal(str(cash_record.cad or 0))
-        current_usd = Decimal(str(cash_record.usd or 0))
-        
-        # 获取目标日期后的所有交易
-        future_transactions = Transaction.query.filter(
+        if cash_record:
+            current_cad = Decimal(str(cash_record.cad or 0))
+            current_usd = Decimal(str(cash_record.usd or 0))
+        else:
+            current_cad = Decimal('0')
+            current_usd = Decimal('0')
+
+        # 获取目标日期之后的所有交易（需要倒推的交易）
+        transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.trade_date > target_date,
             Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
-        ).order_by(Transaction.trade_date.desc()).all()
-        
-        # 从当前余额反推到目标日期
-        historical_cad = current_cad
-        historical_usd = current_usd
-        
-        for transaction in future_transactions:
-            # 反向应用交易影响
-            historical_cad, historical_usd = self._reverse_transaction_impact(
-                historical_cad, historical_usd, transaction
+        ).order_by(Transaction.trade_date.desc()).all()  # 按时间倒序，从最近开始倒推
+
+        cad_balance = current_cad
+        usd_balance = current_usd
+
+        # 倒推每笔交易的影响（反向操作）
+        for transaction in transactions:
+            cad_balance, usd_balance = self._reverse_transaction_impact(
+                cad_balance, usd_balance, transaction
             )
-        
-        # 确保不出现负余额
-        historical_cad = max(historical_cad, Decimal('0'))
-        historical_usd = max(historical_usd, Decimal('0'))
-        
-        logger.info(f"账户{account_id}反推历史现金({target_date}): CAD=${historical_cad}, USD=${historical_usd}")
-        return historical_cad, historical_usd
-    
+
+        logger.info(f"账户{account_id}倒推历史现金({target_date}): CAD=${cad_balance}, USD=${usd_balance}")
+        return cad_balance, usd_balance
+
     def _reverse_transaction_impact(self, cad: Decimal, usd: Decimal, transaction: Transaction) -> tuple[Decimal, Decimal]:
-        """反向应用交易对现金的影响（用于反推历史余额）"""
+        """倒推交易对现金的影响（与_apply_transaction_impact相反的操作）"""
         currency = transaction.currency or 'USD'
-        
+
         if transaction.type == 'DEPOSIT':
-            # 存入的逆操作：减少现金
+            # 倒推存入：减少现金
             amount = Decimal(str(transaction.amount or 0))
             if currency == 'CAD':
                 cad -= amount
             else:
                 usd -= amount
-                
+
         elif transaction.type == 'WITHDRAW':
-            # 取出的逆操作：增加现金
+            # 倒推取出：增加现金
             amount = Decimal(str(transaction.amount or 0))
             if currency == 'CAD':
                 cad += amount
             else:
                 usd += amount
-                
+
         elif transaction.type == 'BUY':
-            # 买入的逆操作：增加现金
+            # 倒推买入：增加现金（因为当时减少了现金）
             quantity = Decimal(str(transaction.quantity or 0))
             price = Decimal(str(transaction.price or 0))
             total_cost = quantity * price + Decimal(str(transaction.fee or 0))
@@ -1046,9 +1127,9 @@ class AssetValuationService:
                 cad += total_cost
             else:
                 usd += total_cost
-                
+
         elif transaction.type == 'SELL':
-            # 卖出的逆操作：减少现金
+            # 倒推卖出：减少现金（因为当时增加了现金）
             quantity = Decimal(str(transaction.quantity or 0))
             price = Decimal(str(transaction.price or 0))
             net_proceeds = quantity * price - Decimal(str(transaction.fee or 0))
@@ -1056,24 +1137,189 @@ class AssetValuationService:
                 cad -= net_proceeds
             else:
                 usd -= net_proceeds
-                
-        elif transaction.type == 'DIVIDEND':
-            # 分红的逆操作：减少现金
+
+        elif transaction.type == 'DIVIDEND' or transaction.type == 'INTEREST':
+            # 倒推分红/利息：减少现金
             amount = Decimal(str(transaction.amount or 0))
             if currency == 'CAD':
                 cad -= amount
             else:
                 usd -= amount
-                
-        elif transaction.type == 'INTEREST':
-            # 利息的逆操作：减少现金
-            amount = Decimal(str(transaction.amount or 0))
-            if currency == 'CAD':
-                cad -= amount
-            else:
-                usd -= amount
-        
+
         return cad, usd
+
+    def _calculate_unrealized_gain_for_account(self, account_id: int, target_date: date) -> Decimal:
+        """计算账户的浮动盈亏（市值 - 成本基础）"""
+        total_unrealized_gain = Decimal('0')
+
+        # 获取持仓
+        holdings = self._get_holdings_at_date(account_id, target_date)
+
+        for symbol, shares in holdings.items():
+            if shares <= 0:
+                continue
+
+            # 获取市值
+            stock_info = self._get_stock_info(symbol)
+            currency = stock_info.get('currency', 'USD')
+            price = self.stock_price_service.get_cached_stock_price(symbol, currency)
+
+            if price:
+                market_value = shares * Decimal(str(price))
+
+                # 转换为CAD
+                if currency == 'USD':
+                    exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
+                    market_value_cad = market_value * Decimal(str(exchange_rate))
+                else:
+                    market_value_cad = market_value
+
+                # 获取成本基础
+                cost_basis = self._calculate_cost_basis(account_id, symbol, target_date, shares)
+
+                # 浮动盈亏
+                unrealized_gain = market_value_cad - cost_basis
+                total_unrealized_gain += unrealized_gain
+
+        return total_unrealized_gain
+
+    def _calculate_realized_gain_for_account(self, account_id: int, target_date: date) -> Decimal:
+        """计算账户的已实现收益（所有已完成交易的盈亏）"""
+        total_realized_gain = Decimal('0')
+
+        # 获取所有卖出交易
+        sell_transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.type == 'SELL',
+            Transaction.trade_date <= target_date
+        ).order_by(Transaction.trade_date.asc()).all()
+
+        for sell_tx in sell_transactions:
+            symbol = sell_tx.stock
+            sell_shares = Decimal(str(sell_tx.quantity or 0))
+            sell_price = Decimal(str(sell_tx.price or 0))
+            sell_fee = Decimal(str(sell_tx.fee or 0))
+
+            # 卖出净收入
+            sell_proceeds = sell_shares * sell_price - sell_fee
+
+            # 计算这些股份的成本基础（使用FIFO）
+            cost_basis = self._calculate_cost_basis_for_sold_shares(
+                account_id, symbol, sell_tx.trade_date, sell_shares
+            )
+
+            # 已实现盈亏 = 卖出收入 - 成本基础
+            realized_gain = sell_proceeds - cost_basis
+
+            # 转换为CAD
+            currency = sell_tx.currency or 'USD'
+            if currency == 'USD':
+                exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
+                realized_gain_cad = realized_gain * Decimal(str(exchange_rate))
+            else:
+                realized_gain_cad = realized_gain
+
+            total_realized_gain += realized_gain_cad
+
+        return total_realized_gain
+
+    def _calculate_cost_basis_for_sold_shares(self, account_id: int, symbol: str, sell_date: date, shares_sold: Decimal) -> Decimal:
+        """使用FIFO计算卖出股份的成本基础"""
+        # 获取卖出日期之前的所有买入交易
+        buy_transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.stock == symbol,
+            Transaction.type == 'BUY',
+            Transaction.trade_date <= sell_date
+        ).order_by(Transaction.trade_date.asc()).all()
+
+        total_cost = Decimal('0')
+        remaining_shares = shares_sold
+
+        for buy_tx in buy_transactions:
+            if remaining_shares <= 0:
+                break
+
+            buy_shares = Decimal(str(buy_tx.quantity or 0))
+            buy_price = Decimal(str(buy_tx.price or 0))
+            buy_fee = Decimal(str(buy_tx.fee or 0))
+
+            # 使用的股份数（FIFO原则）
+            shares_used = min(remaining_shares, buy_shares)
+
+            # 按比例分配成本和手续费
+            cost_per_share = buy_price + (buy_fee / buy_shares if buy_shares > 0 else Decimal('0'))
+            total_cost += shares_used * cost_per_share
+
+            remaining_shares -= shares_used
+
+        return total_cost
+
+    def _calculate_account_metrics_by_currency(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal, Decimal]:
+        """按币种分别计算账户的股票市值、已实现收益、浮动盈亏
+
+        Returns:
+            (stock_value_cad, stock_value_usd, realized_gain_cad, realized_gain_usd, unrealized_gain_cad, unrealized_gain_usd)
+        """
+        stock_value_cad = Decimal('0')
+        stock_value_usd = Decimal('0')
+        realized_gain_cad = Decimal('0')
+        realized_gain_usd = Decimal('0')
+        unrealized_gain_cad = Decimal('0')
+        unrealized_gain_usd = Decimal('0')
+
+        # 获取持仓
+        holdings = self._get_holdings_at_date(account_id, target_date)
+
+        for symbol, shares in holdings.items():
+            if shares <= 0:
+                continue
+
+            # 获取股票信息
+            stock_info = self._get_stock_info(symbol)
+            currency = stock_info.get('currency', 'USD')
+
+            # 使用统一的股票统计计算方法
+            stock_stats = self._calculate_stock_stats(account_id, symbol, target_date)
+
+            # 按币种分类累加
+            if currency == 'CAD':
+                stock_value_cad += stock_stats['market_value']
+                unrealized_gain_cad += stock_stats['unrealized_gain']
+            else:
+                stock_value_usd += stock_stats['market_value']
+                unrealized_gain_usd += stock_stats['unrealized_gain']
+
+        # 计算已实现收益（按币种分别计算）
+        sell_transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.type == 'SELL',
+            Transaction.trade_date <= target_date
+        ).order_by(Transaction.trade_date.asc()).all()
+
+        for sell_tx in sell_transactions:
+            symbol = sell_tx.stock
+            sell_shares = Decimal(str(sell_tx.quantity or 0))
+            sell_price = Decimal(str(sell_tx.price or 0))
+            sell_fee = Decimal(str(sell_tx.fee or 0))
+            currency = sell_tx.currency or 'USD'
+
+            # 卖出净收入
+            sell_proceeds = sell_shares * sell_price - sell_fee
+
+            # 计算成本基础
+            cost_basis = self._calculate_cost_basis_for_sold_shares(
+                account_id, symbol, sell_tx.trade_date, sell_shares
+            )
+
+            # 已实现盈亏
+            realized_gain = sell_proceeds - cost_basis
+            if currency == 'CAD':
+                realized_gain_cad += realized_gain
+            else:
+                realized_gain_usd += realized_gain
+
+        return stock_value_cad, stock_value_usd, realized_gain_cad, realized_gain_usd, unrealized_gain_cad, unrealized_gain_usd
     
     def _apply_transaction_impact(self, cad: Decimal, usd: Decimal, transaction: Transaction) -> tuple[Decimal, Decimal]:
         """应用交易对现金的影响"""
@@ -1248,3 +1494,5 @@ class AssetValuationService:
             display_text += f" - {', '.join(member_names)}"
         
         return display_text
+
+

@@ -273,52 +273,65 @@ class DailyStatsService:
                                      ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
         """
         获取多个账户的合并资产快照
-        集成智能缓存服务，优化性能
+        使用AssetValuationService确保数据一致性
         """
-        combined_data = {
-            'total_assets': Decimal('0'),
-            'stock_market_value': Decimal('0'),
-            'cash_balance_cad': Decimal('0'),
-            'cash_balance_usd': Decimal('0'),
-            'cash_balance_total_cad': Decimal('0'),
-            'unrealized_gain': Decimal('0')
-        }
-        
-        for account_id in account_ids:
-            proportion = self._get_account_proportion(account_id, ownership_map)
-            if proportion <= 0:
-                continue
-            # 首先尝试从缓存获取
-            cached_snapshot = daily_stats_cache_service.get_cached_asset_snapshot(account_id, target_date)
-            
-            if cached_snapshot:
-                # 使用缓存数据
-                combined_data['total_assets'] += cached_snapshot.total_assets * proportion
-                combined_data['stock_market_value'] += cached_snapshot.stock_market_value * proportion
-                combined_data['cash_balance_cad'] += cached_snapshot.cash_balance_cad * proportion
-                combined_data['cash_balance_usd'] += cached_snapshot.cash_balance_usd * proportion
-                combined_data['cash_balance_total_cad'] += cached_snapshot.cash_balance_total_cad * proportion
-            else:
-                # 缓存未命中，使用AssetValuationService计算
+
+        # 使用AssetValuationService统一计算，确保数据一致性
+        try:
+            stock_value_total = Decimal('0')
+            cash_total = Decimal('0')
+            cash_cad = Decimal('0')
+            cash_usd = Decimal('0')
+            unrealized_gain_total = Decimal('0')
+
+            for account_id in account_ids:
+                proportion = self._get_account_proportion(account_id, ownership_map)
+                if proportion <= 0:
+                    continue
+
+                # 使用AssetValuationService获取完整快照
                 snapshot = self.asset_service.get_asset_snapshot(account_id, target_date)
-                
-                combined_data['total_assets'] += snapshot.total_assets * proportion
-                combined_data['stock_market_value'] += snapshot.stock_market_value * proportion
-                combined_data['cash_balance_cad'] += snapshot.cash_balance_cad * proportion
-                combined_data['cash_balance_usd'] += snapshot.cash_balance_usd * proportion
-                combined_data['cash_balance_total_cad'] += snapshot.cash_balance_total_cad * proportion
-                
-                # 将计算结果存入缓存
-                snapshot_data = {
-                    'total_assets': snapshot.total_assets,
-                    'stock_market_value': snapshot.stock_market_value,
-                    'cash_balance_cad': snapshot.cash_balance_cad,
-                    'cash_balance_usd': snapshot.cash_balance_usd,
-                    'cash_balance_total_cad': snapshot.cash_balance_total_cad
-                }
-                daily_stats_cache_service.cache_asset_snapshot(account_id, target_date, snapshot_data)
-        
-        return combined_data
+
+                # 累计各项数据
+                stock_value_total += snapshot.stock_market_value * proportion
+                cash_cad += snapshot.cash_balance_cad * proportion
+                cash_usd += snapshot.cash_balance_usd * proportion
+                cash_total += snapshot.cash_balance_total_cad * proportion
+
+                # 计算浮动盈亏
+                account_unrealized_gain = self.asset_service._calculate_unrealized_gain_for_account(account_id, target_date)
+                unrealized_gain_total += account_unrealized_gain * proportion
+
+            # 计算总资产 = 股票市值 + 现金总额
+            total_assets = stock_value_total + cash_total
+
+            # 转换为Daily Stats Service期望的格式
+            combined_data = {
+                'total_assets': total_assets,
+                'stock_market_value': stock_value_total,
+                'cash_balance_cad': cash_cad,
+                'cash_balance_usd': cash_usd,
+                'cash_balance_total_cad': cash_total,
+                'unrealized_gain': unrealized_gain_total
+            }
+
+            logger.debug(f"AssetValuationService数据 {target_date}: 总资产={combined_data['total_assets']}")
+            return combined_data
+
+        except Exception as e:
+            logger.error(f"AssetValuationService获取数据失败: {e}")
+
+            # 回退方案：返回零值
+            combined_data = {
+                'total_assets': Decimal('0'),
+                'stock_market_value': Decimal('0'),
+                'cash_balance_cad': Decimal('0'),
+                'cash_balance_usd': Decimal('0'),
+                'cash_balance_total_cad': Decimal('0'),
+                'unrealized_gain': Decimal('0')
+            }
+
+            return combined_data
     
     def _get_account_proportion(self, account_id: int,
                                  ownership_map: Optional[Dict[int, Decimal]]) -> Decimal:

@@ -6,7 +6,7 @@
 """
 
 from datetime import datetime, date, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from decimal import Decimal
 import logging
 from calendar import monthrange

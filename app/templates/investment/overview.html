@@ -1031,21 +1031,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Get current exchange rate for USD to CAD conversion
     const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
 
-    // Original USD-only values from metrics
-    const totalAssetsCad = {{ metrics.total_assets.cad_only if metrics else 0 }};
-    const totalAssetsUsd = {{ metrics.total_assets.usd_only if metrics else 0 }};
-    const totalReturnCad = {{ metrics.total_return.cad_only if metrics else 0 }};
-    const totalReturnUsd = {{ metrics.total_return.usd_only if metrics else 0 }};
-    const realizedGainCad = {{ metrics.realized_gain.cad_only if metrics else 0 }};
-    const realizedGainUsd = {{ metrics.realized_gain.usd_only if metrics else 0 }};
-    const unrealizedGainCad = {{ metrics.unrealized_gain.cad_only if metrics else 0 }};
-    const unrealizedGainUsd = {{ metrics.unrealized_gain.usd_only if metrics else 0 }};
-
-    // Recalculate with current exchange rate
-    const totalAssetsCorrect = totalAssetsCad + totalAssetsUsd * currentRate;
-    const totalReturnCorrect = totalReturnCad + totalReturnUsd * currentRate;
-    const realizedGainCorrect = realizedGainCad + realizedGainUsd * currentRate;
-    const unrealizedGainCorrect = unrealizedGainCad + unrealizedGainUsd * currentRate;
+    // Use pre-calculated CAD values from metrics (already includes all conversions)
+    const totalAssetsCorrect = {{ metrics.total_assets.cad if metrics else 0 }};
+    const totalReturnCorrect = {{ metrics.total_return.cad if metrics else 0 }};
+    const realizedGainCorrect = {{ metrics.realized_gain.cad if metrics else 0 }};
+    const unrealizedGainCorrect = {{ metrics.unrealized_gain.cad if metrics else 0 }};
 
     // Recalculate return rate based on corrected values
     const totalReturnRateCorrect = totalAssetsCorrect > 0 ? (totalReturnCorrect / (totalAssetsCorrect - totalReturnCorrect)) * 100 : 0;

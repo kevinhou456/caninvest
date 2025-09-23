@@ -481,10 +481,11 @@ function updateAnnualTable() {
 
         const currencyBreakdown = item.currency_breakdown || {};
         
-        // Calculate return rate: (realized + unrealized + dividends + interest) / (beginning assets + deposits - withdrawals)
+        // Calculate return rate: annual returns / total assets
+        // Note: annual_unrealized_gain is now incremental (yearly change), not cumulative
         const totalReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
-        const netInvestment = item.total_assets - item.annual_unrealized_gain + (item.deposit_amount || 0) - (item.withdrawal_amount || 0);
-        const returnRate = netInvestment > 0 ? (totalReturns / netInvestment) * 100 : 0;
+        // Use total_assets as the base since it represents the investment size for the year
+        const returnRate = item.total_assets > 0 ? (totalReturns / item.total_assets) * 100 : 0;
         const returnRateClass = returnRate >= 0 ? 'text-success' : 'text-danger';
 
         // Calculate combined income
@@ -577,9 +578,9 @@ function updateAnnualTable() {
         // Calculate totals for overall return rate (only for main rows, not detail rows or member rows)
         if (!item.is_detail_row && !item.is_member_row) {
             const itemReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
-            const itemInvestment = item.total_assets - item.annual_unrealized_gain + (item.deposit_amount || 0) - (item.withdrawal_amount || 0);
+            // Use total_assets as the investment base since annual_unrealized_gain is now incremental
             totalReturnsSum += itemReturns;
-            totalInvestmentSum += Math.max(itemInvestment, 0);
+            totalInvestmentSum += Math.max(item.total_assets, 0);
         }
     });
     

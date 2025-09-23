@@ -642,7 +642,7 @@ def get_family_monthly_analysis(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
-    months = request.args.get('months', type=int, default=12)
+    months = request.args.get('months', type=int)  # 不设置默认值，让服务层决定
     
     # 确定账户范围
     account_ids = []
