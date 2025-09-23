@@ -136,6 +136,11 @@ class CSVTransactionService:
                 else:
                     continue  # 跳过不支持的交易类型
                 
+                # 对于分红类交易，使用Net Amount作为amount
+                amount_value = 0
+                if transaction_type == 'DIVIDEND':
+                    amount_value = abs(float(row['Net Amount'])) if row['Net Amount'] else 0
+
                 transactions.append({
                     'symbol': symbol,
                     'name': row.get('Description', '').strip(),
@@ -145,6 +150,7 @@ class CSVTransactionService:
                     'transaction_fee': abs(float(row['Commission'])) if row['Commission'] else 0,
                     'total_amount': abs(float(row['Gross Amount'])) if row['Gross Amount'] else 0,
                     'net_amount': abs(float(row['Net Amount'])) if row['Net Amount'] else 0,
+                    'amount': amount_value,  # 分红、利息金额
                     'trade_date': trade_date,
                     'settlement_date': settlement_date,
                     'currency': row.get('Currency', 'CAD').upper(),
@@ -179,6 +185,11 @@ class CSVTransactionService:
                 else:
                     continue
                 
+                # 对于分红类交易，使用Amount作为amount
+                amount_value = 0
+                if transaction_type == 'DIVIDEND':
+                    amount_value = abs(float(row['Amount'])) if row['Amount'] else 0
+
                 transactions.append({
                     'symbol': symbol,
                     'name': row.get('Description', '').strip(),
@@ -187,6 +198,7 @@ class CSVTransactionService:
                     'price_per_share': float(row['Price']) if row['Price'] else 0,
                     'transaction_fee': abs(float(row['Commission'])) if row['Commission'] else 0,
                     'total_amount': abs(float(row['Amount'])) if row['Amount'] else 0,
+                    'amount': amount_value,  # 分红、利息金额
                     'trade_date': trade_date,
                     'currency': row.get('Currency', 'CAD').upper(),
                     'notes': f'Imported from TD CSV - {row.get("Transaction Type", "")}',
@@ -227,6 +239,7 @@ class CSVTransactionService:
                     'price_per_share': float(row['TradePrice']),
                     'transaction_fee': abs(float(row['IBCommission'])),
                     'total_amount': abs(float(row['Proceeds'])),
+                    'amount': 0,  # IB通常分红作为单独的记录处理
                     'trade_date': trade_date,
                     'currency': row.get('CurrencyPrimary', 'USD').upper(),
                     'exchange': row.get('ListingExchange', ''),
@@ -263,6 +276,11 @@ class CSVTransactionService:
                 else:
                     continue
                 
+                # 对于分红类交易，使用Market value作为amount
+                amount_value = 0
+                if transaction_type == 'DIVIDEND':
+                    amount_value = abs(float(row['Market value'])) if row['Market value'] else 0
+
                 transactions.append({
                     'symbol': symbol,
                     'name': row.get('Name', '').strip(),
@@ -271,6 +289,7 @@ class CSVTransactionService:
                     'price_per_share': float(row['Fill price']) if row['Fill price'] else 0,
                     'transaction_fee': 0,  # Wealthsimple通常免佣金
                     'total_amount': abs(float(row['Market value'])) if row['Market value'] else 0,
+                    'amount': amount_value,  # 分红、利息金额
                     'trade_date': trade_date,
                     'currency': 'CAD',  # Wealthsimple主要是CAD
                     'notes': f'Imported from Wealthsimple CSV - {row.get("Activity type", "")}',
@@ -295,7 +314,8 @@ class CSVTransactionService:
             'quantity': ['quantity', 'shares', 'qty'],
             'price': ['price', 'price_per_share', 'unit_price'],
             'fee': ['fee', 'commission', 'transaction_fee'],
-            'total': ['total', 'amount', 'gross_amount', 'net_amount', 'net amount'],
+            'total': ['total', 'gross_amount', 'net_amount', 'net amount'],
+            'amount': ['amount'],  # 单独的amount字段，用于存取款、分红、利息
             'description': ['description', 'name', 'stock_name'],
             'currency': ['currency', 'curr']
         }
@@ -402,6 +422,13 @@ class CSVTransactionService:
                 # 获取描述信息
                 description = row.get(detected_columns.get('description', ''), row.get('Description', '')).strip()
                 
+                # 获取金额数据 - 优先使用amount字段（用于存取款、分红、利息）
+                amount_value = 0
+                if detected_columns.get('amount'):
+                    amount_str = row.get(detected_columns['amount'], '0').strip()
+                    if amount_str:
+                        amount_value = abs(float(amount_str))
+
                 transactions.append({
                     'symbol': symbol,
                     'name': description,
@@ -410,6 +437,7 @@ class CSVTransactionService:
                     'price_per_share': float(row.get(detected_columns.get('price', ''), 0)),
                     'transaction_fee': abs(float(row.get(detected_columns.get('fee', ''), 0))),
                     'total_amount': abs(float(row.get(detected_columns.get('total', ''), 0))),
+                    'amount': amount_value,  # 存取款、分红、利息的金额
                     'trade_date': trade_date,
                     'currency': row.get(detected_columns.get('currency', ''), 'CAD').upper() if detected_columns.get('currency') else 'CAD',
                     'notes': f'Imported from Generic CSV',
@@ -449,7 +477,7 @@ class CSVTransactionService:
                 if existing:
                     continue  # 跳过重复交易
                 
-                # 创建交易记录  
+                # 创建交易记录
                 transaction = Transaction(
                     account_id=account_id,
                     stock=txn_data['symbol'],  # 使用矫正后的symbol
@@ -457,7 +485,7 @@ class CSVTransactionService:
                     quantity=Decimal(str(txn_data['quantity'])),
                     price=Decimal(str(txn_data['price_per_share'])),
                     fee=Decimal(str(txn_data['transaction_fee'])),
-                    amount=Decimal(str(txn_data['total_amount'])),
+                    amount=Decimal(str(txn_data.get('amount', 0))),  # 使用amount字段而不是total_amount
                     trade_date=txn_data['trade_date'],
                     currency=txn_data.get('currency', 'CAD'),
                     notes=txn_data.get('notes')
@@ -599,22 +627,23 @@ class CSVTransactionService:
         # 写入CSV
         with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = [
-                'Date', 'Symbol', 'Name', 'Type', 'Quantity', 'Price', 'Fee', 'Total', 'Currency', 'Notes'
+                'Date', 'Symbol', 'Name', 'Type', 'Quantity', 'Price', 'Fee', 'Total', 'Amount', 'Currency', 'Notes'
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
+
             writer.writeheader()
             for txn in transactions:
                 writer.writerow({
                     'Date': txn.trade_date.isoformat(),
-                    'Symbol': txn.stock.symbol,
-                    'Name': txn.stock.name,
-                    'Type': txn.transaction_type,
-                    'Quantity': float(txn.quantity),
-                    'Price': float(txn.price_per_share),
-                    'Fee': float(txn.transaction_fee),
-                    'Total': float(txn.total_amount),
-                    'Currency': txn.currency,
+                    'Symbol': txn.stock or '',  # 存取款等交易可能没有股票代码
+                    'Name': txn.stock or '',    # 存取款等交易可能没有股票名称
+                    'Type': txn.type,          # 使用txn.type而不是txn.transaction_type
+                    'Quantity': float(txn.quantity) if txn.quantity else 0,
+                    'Price': float(txn.price) if txn.price else 0,
+                    'Fee': float(txn.fee) if txn.fee else 0,
+                    'Total': float(txn.quantity * txn.price + txn.fee) if txn.quantity and txn.price else 0,  # 计算股票交易总额
+                    'Amount': float(txn.amount) if txn.amount else 0,  # 存取款、分红、利息的金额
+                    'Currency': txn.currency or 'CAD',
                     'Notes': txn.notes or ''
                 })
         

@@ -1906,69 +1906,93 @@ def delete_all_transactions():
 
 @bp.route('/transactions/export')
 def export_transactions():
-    """导出交易记录为CSV文件"""
+    """导出交易记录为CSV文件 - 统一使用CSVTransactionService"""
     try:
-        from app.models.transaction import Transaction
-        import csv
-        import io
+        from app.services.csv_service import CSVTransactionService
         from flask import Response
-        from datetime import datetime
-        
-        # 获取账户ID参数
-        account_id = request.args.get('account_id', type=int)
-        
-        # 构建查询
-        query = Transaction.query
-        if account_id:
-            query = query.filter_by(account_id=account_id)
-        
-        transactions = query.order_by(Transaction.trade_date.desc()).all()
-        
-        # 创建CSV内容
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        # 写入标题行
-        writer.writerow([
-            'Date', 'Type', 'Stock Symbol', 'Stock Name', 'Quantity',
-            'Price Per Share', 'Transaction Fee', 'Currency', 'Account',
-            'Member', 'Exchange Rate', 'Notes', 'CFP_Account_ID'
-        ])
-        
-        # 写入数据行
-        for txn in transactions:
-            writer.writerow([
-                txn.trade_date.strftime('%Y-%m-%d'),
-                txn.type,
-                txn.stock if txn.stock else '',
-                '',  # 股票名称暂时不可用，需要从StocksCache查询
-                float(txn.quantity),
-                float(txn.price),
-                float(txn.fee) if txn.fee else 0,
-                txn.currency,
-                txn.account.name if txn.account else '',
-                '',  # member信息暂时不可用
-                '',  # exchange_rate字段已移除
-                txn.notes or '',
-                txn.account_id  # 添加CFP_Account_ID列
-            ])
-        
-        # 创建响应
-        output.seek(0)
+        import os
 
-        # 生成文件名：account_(account_id)_(时间戳).csv 或 all_accounts_(时间戳).csv
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # 获取参数
+        account_id = request.args.get('account_id', type=int)
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        csv_service = CSVTransactionService()
+
         if account_id:
-            filename = f"account_{account_id}_{timestamp}.csv"
+            # 导出单个账户
+            file_path = csv_service.export_transactions_to_csv(
+                account_id=account_id,
+                start_date=start_date,
+                end_date=end_date
+            )
         else:
-            filename = f"all_accounts_{timestamp}.csv"
-        
+            # 导出所有账户的交易 - 创建临时合并文件
+            from app.models.family import Family
+            from app.models.account import Account
+            family = Family.query.first()
+            if not family:
+                raise ValueError("No family found")
+
+            accounts = Account.query.filter_by(family_id=family.id).all()
+            from app.models.transaction import Transaction
+            from datetime import datetime
+            import tempfile
+            import csv
+
+            # 构建查询
+            query = Transaction.query
+            if start_date:
+                start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
+                query = query.filter(Transaction.trade_date >= start_date_obj)
+            if end_date:
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+                query = query.filter(Transaction.trade_date <= end_date_obj)
+
+            transactions = query.order_by(Transaction.trade_date.desc()).all()
+
+            # 创建临时文件
+            export_dir = current_app.config.get('EXPORT_FOLDER', tempfile.gettempdir())
+            os.makedirs(export_dir, exist_ok=True)
+
+            filename = f"all_accounts_transactions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            file_path = os.path.join(export_dir, filename)
+
+            # 使用统一的CSV格式（与CSVTransactionService一致）
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = [
+                    'Date', 'Symbol', 'Name', 'Type', 'Quantity', 'Price', 'Fee', 'Total', 'Amount', 'Currency', 'Notes'
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+                writer.writeheader()
+                for txn in transactions:
+                    writer.writerow({
+                        'Date': txn.trade_date.isoformat(),
+                        'Symbol': txn.stock or '',
+                        'Name': txn.stock or '',
+                        'Type': txn.type,
+                        'Quantity': float(txn.quantity) if txn.quantity else 0,
+                        'Price': float(txn.price) if txn.price else 0,
+                        'Fee': float(txn.fee) if txn.fee else 0,
+                        'Total': float(txn.quantity * txn.price + txn.fee) if txn.quantity and txn.price else 0,
+                        'Amount': float(txn.amount) if txn.amount else 0,
+                        'Currency': txn.currency or 'CAD',
+                        'Notes': txn.notes or ''
+                    })
+
+        # 读取文件并返回
+        with open(file_path, 'r', encoding='utf-8') as f:
+            csv_content = f.read()
+
+        filename = os.path.basename(file_path)
+
         return Response(
-            output.getvalue(),
+            csv_content,
             mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
+            headers={"Content-disposition": f"attachment; filename={filename}"}
         )
-        
+
     except Exception as e:
         from flask import flash, redirect, url_for
         flash(f'导出失败: {str(e)}', 'error')
