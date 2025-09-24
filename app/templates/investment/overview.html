@@ -316,8 +316,7 @@
                                 <th class="text-end">{{ _('Market Value') }}</th>
                                 <th class="text-end">{{ _('Unrealized P&L') }}</th>
                                 <th class="text-end">{{ _('Realized Gains') }}</th>
-                                <th class="text-end">{{ _('Dividends') }}</th>
-                                <th class="text-end">{{ _('Interest') }}</th>
+                                <th class="text-end">{{ _('Div+Int') }}</th>
                                 <th class="text-end pe-3">{{ _('Return Percent') }}</th>
                             </tr>
                         </thead>
@@ -406,18 +405,14 @@
                                     </span>
                                 </td>
                                 
-                                <!-- Dividends -->
+                                <!-- Dividends + Interest -->
                                 <td class="text-end">
-                                    <span class="fw-medium text-info">
-                                        ${{ "{:,.2f}".format(holding['dividends'] or 0) }}
+                                    <span class="fw-medium text-success">
+                                        ${{ "{:,.2f}".format((holding['dividends'] or 0) + (holding['interest'] or 0)) }}
                                     </span>
-                                </td>
-                                
-                                <!-- Interest -->
-                                <td class="text-end">
-                                    <span class="fw-medium text-warning">
-                                        ${{ "{:,.2f}".format(holding['interest'] or 0) }}
-                                    </span>
+                                    {% if (holding['dividends'] or 0) > 0 and (holding['interest'] or 0) > 0 %}
+                                        <br><small class="text-muted">${{ "{:,.2f}".format(holding['dividends'] or 0) }}+${{ "{:,.2f}".format(holding['interest'] or 0) }}</small>
+                                    {% endif %}
                                 </td>
                                 
                                 <!-- Return Percentage -->
@@ -471,8 +466,7 @@
                                 <th class="text-end">{{ _('Total Invested') }}</th>
                                 <th class="text-end">{{ _('Total Received') }}</th>
                                 <th class="text-end">{{ _('Realized Gain') }}</th>
-                                <th class="text-end">{{ _('Dividends') }}</th>
-                                <th class="text-end">{{ _('Interest') }}</th>
+                                <th class="text-end">{{ _('Div+Int') }}</th>
                                 <th class="text-end pe-3">{{ _('Return Percent') }}</th>
                             </tr>
                         </thead>
@@ -554,18 +548,14 @@
                                     </span>
                                 </td>
                                 
-                                <!-- Dividends -->
+                                <!-- Dividends + Interest -->
                                 <td class="text-end">
-                                    <span class="fw-medium text-info">
-                                        ${{ "{:,.2f}".format(holding['dividends'] or 0) }}
+                                    <span class="fw-medium text-success">
+                                        ${{ "{:,.2f}".format((holding['dividends'] or 0) + (holding['interest'] or 0)) }}
                                     </span>
-                                </td>
-                                
-                                <!-- Interest -->
-                                <td class="text-end">
-                                    <span class="fw-medium text-warning">
-                                        ${{ "{:,.2f}".format(holding['interest'] or 0) }}
-                                    </span>
+                                    {% if (holding['dividends'] or 0) > 0 and (holding['interest'] or 0) > 0 %}
+                                        <br><small class="text-muted">${{ "{:,.2f}".format(holding['dividends'] or 0) }}+${{ "{:,.2f}".format(holding['interest'] or 0) }}</small>
+                                    {% endif %}
                                 </td>
                                 
                                 <!-- Return Percentage -->

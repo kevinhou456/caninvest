@@ -122,22 +122,29 @@ class AssetValuationService:
 
         try:
             # 使用统一的AssetValuationService计算逻辑
+            logger.info("调用_get_unified_portfolio_data方法")
             return self._get_unified_portfolio_data(account_ids, target_date)
         except Exception as e:
             logger.error(f"获取详细投资组合数据失败: {e}", exc_info=True)
             # 回退到简化版本
+            logger.warning("回退到_get_simplified_portfolio_data方法")
             return self._get_simplified_portfolio_data(account_ids, target_date)
 
     def _get_unified_portfolio_data(self, account_ids: List[int], target_date: date) -> Dict:
         """
         使用统一的AssetValuationService计算逻辑获取详细投资组合数据
         确保与get_comprehensive_portfolio_metrics的计算结果一致
+
+        修复多账户清仓逻辑：只有在所有账户中都清仓的股票才进入cleared_holdings
         """
         current_holdings = []
         cleared_holdings = []
 
         # 获取汇率
         exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
+
+        # 第一步：收集所有账户的股票数据，按股票符号分组
+        all_stock_data = {}  # {symbol: {account_id: stock_data, ...}, ...}
 
         for account_id in account_ids:
             account = Account.query.get(account_id)
@@ -164,56 +171,176 @@ class AssetValuationService:
                 currency = Transaction.get_currency_by_stock_symbol(symbol)
                 current_price = self.stock_price_service.get_cached_stock_price(symbol, currency) or 0
 
-                # 计算统计数据（使用统一的计算方法）
-                stock_stats = self._calculate_stock_stats(account_id, symbol, target_date)
+                # 计算统计数据
+                bought_total, sold_total, total_bought_shares, total_sold_shares, realized_gain = self._calculate_stock_statistics(
+                    account_id, symbol, target_date
+                )
 
-                if current_shares > 0:
-                    # 当前持仓 - 使用统一计算的数据
-                    current_value = float(current_shares) * float(current_price)
-                    current_value_cad = current_value * float(exchange_rate) if currency == 'USD' else current_value
+                # 计算分红利息
+                dividend_interest = self._calculate_stock_dividend_interest(
+                    account_id=account_id,
+                    symbol=symbol,
+                    target_date=target_date,
+                    currency=currency,
+                    exchange_rate=exchange_rate
+                )
 
-                    # 计算成本基础
-                    cost_basis = self._calculate_cost_basis(account_id, symbol, target_date, current_shares)
-                    total_cost = float(cost_basis)
-                    total_cost_cad = total_cost * float(exchange_rate) if currency == 'USD' else total_cost
-
-                    holding_data = {
-                        'symbol': symbol,
-                        'current_shares': float(current_shares),
-                        'shares': float(current_shares),
-                        'current_price': float(current_price),
+                # 初始化股票数据结构
+                if symbol not in all_stock_data:
+                    all_stock_data[symbol] = {
                         'currency': currency,
-                        'current_value': current_value,
-                        'current_value_cad': current_value_cad,
-                        'total_cost': total_cost,
-                        'total_cost_cad': total_cost_cad,
-                        'unrealized_gain': float(stock_stats.get('unrealized_gain', 0)),
-                        'unrealized_gain_cad': float(stock_stats.get('unrealized_gain', 0)) * float(exchange_rate) if currency == 'USD' else float(stock_stats.get('unrealized_gain', 0)),
-                        'average_cost': total_cost / float(current_shares) if current_shares > 0 else 0,
-                        'account_id': account_id,
-                        'account_name': account.name,
-                        'company_name': symbol,
-                        'sector': 'Unknown'
+                        'current_price': current_price,
+                        'accounts': {}
                     }
-                    current_holdings.append(holding_data)
 
-                elif current_shares == 0:
-                    # 已清仓股票
-                    cleared_data = {
-                        'symbol': symbol,
-                        'realized_gain': float(stock_stats.get('realized_gain', 0)),
-                        'realized_gain_cad': float(stock_stats.get('realized_gain', 0)) * float(exchange_rate) if currency == 'USD' else float(stock_stats.get('realized_gain', 0)),
-                        'account_id': account_id,
-                        'account_name': account.name,
-                        'currency': currency,
-                        'company_name': symbol,
-                        'sector': 'Unknown'
-                    }
-                    cleared_holdings.append(cleared_data)
+                # 存储每个账户的数据
+                all_stock_data[symbol]['accounts'][account_id] = {
+                    'account': account,
+                    'current_shares': current_shares,
+                    'bought_total': float(bought_total),
+                    'sold_total': float(sold_total),
+                    'total_bought_shares': float(total_bought_shares),
+                    'total_sold_shares': float(total_sold_shares),
+                    'realized_gain': float(realized_gain),
+                    'dividend_interest': dividend_interest
+                }
+
+        # 第二步：根据所有账户的持仓状态决定每只股票的分类
+        for symbol, stock_info in all_stock_data.items():
+            currency = stock_info['currency']
+            current_price = stock_info['current_price']
+            accounts_data = stock_info['accounts']
+
+            # 检查是否有任何账户还持有这只股票
+            has_current_holdings = any(acc_data['current_shares'] > 0 for acc_data in accounts_data.values())
+
+            if has_current_holdings:
+                # 有持仓：为每个有持仓的账户创建持仓记录
+                for account_id, acc_data in accounts_data.items():
+                    if acc_data['current_shares'] > 0:
+                        account = acc_data['account']
+                        current_shares = acc_data['current_shares']
+                        dividend_interest = acc_data['dividend_interest']
+
+                        # 当前持仓 - 计算市值
+                        current_value = float(current_shares) * float(current_price)
+                        current_value_cad = current_value * float(exchange_rate) if currency == 'USD' else current_value
+
+                        # 计算成本基础 (_calculate_cost_basis已经将USD转换为CAD)
+                        cost_basis = self._calculate_cost_basis(account_id, symbol, target_date, current_shares)
+                        total_cost = float(cost_basis)
+                        # cost_basis已经是CAD等价，无需再次转换
+                        total_cost_cad = total_cost
+
+                        # 计算收益 (统一使用CAD进行计算，避免币种不匹配)
+                        unrealized_gain_cad = current_value_cad - total_cost_cad
+                        # USD股票的收益转换回USD显示
+                        unrealized_gain = unrealized_gain_cad / float(exchange_rate) if currency == 'USD' else unrealized_gain_cad
+
+                        holding_data = {
+                            'symbol': symbol,
+                            'account_id': account_id,
+                            'account_name': self._get_account_name_with_members(account),
+                            'currency': currency,
+                            'shares': float(current_shares),
+                            'average_cost': (total_cost / float(exchange_rate) / float(current_shares)) if (currency == 'USD' and current_shares > 0) else (total_cost / float(current_shares) if current_shares > 0 else 0),
+                            'total_cost': total_cost,
+                            'total_cost_cad': total_cost_cad,
+                            'current_price': float(current_price),
+                            'current_value': current_value,
+                            'current_value_cad': current_value_cad,
+                            'unrealized_gain': unrealized_gain,
+                            'unrealized_gain_cad': unrealized_gain_cad,
+                            'unrealized_gain_percent': float((unrealized_gain / total_cost * 100)) if total_cost > 0 else 0,
+                            'realized_gain': acc_data['realized_gain'],
+                            'realized_gain_cad': acc_data['realized_gain'] * float(exchange_rate) if currency == 'USD' else acc_data['realized_gain'],
+                            'dividends': dividend_interest['dividend_received'],
+                            'interest': dividend_interest['interest_received'],
+                            'dividend_received': dividend_interest['dividend_received'],
+                            'interest_received': dividend_interest['interest_received'],
+                            'dividend_received_cad': dividend_interest['dividend_received_cad'],
+                            'interest_received_cad': dividend_interest['interest_received_cad'],
+                            'company_name': symbol,
+                            'sector': 'Unknown'
+                        }
+                        current_holdings.append(holding_data)
+
+            else:
+                # 完全清仓：合并所有账户的数据创建一条清仓记录
+                total_bought_shares = sum(acc_data['total_bought_shares'] for acc_data in accounts_data.values())
+                total_sold_shares = sum(acc_data['total_sold_shares'] for acc_data in accounts_data.values())
+                total_bought_value = sum(acc_data['bought_total'] for acc_data in accounts_data.values())
+                total_sold_value = sum(acc_data['sold_total'] for acc_data in accounts_data.values())
+                total_realized_gain = sum(acc_data['realized_gain'] for acc_data in accounts_data.values())
+
+                # 合并分红利息
+                total_dividends = sum(acc_data['dividend_interest']['dividend_received'] for acc_data in accounts_data.values())
+                total_interest = sum(acc_data['dividend_interest']['interest_received'] for acc_data in accounts_data.values())
+
+                # 选择一个账户作为代表账户（用于显示账户名称）
+                representative_account = next(iter(accounts_data.values()))['account']
+
+                cleared_data = {
+                    'symbol': symbol,
+                    'account_id': representative_account.id,  # 使用代表账户
+                    'account_name': f"合计 ({len(accounts_data)}个账户)" if len(accounts_data) > 1 else self._get_account_name_with_members(representative_account),
+                    'currency': currency,
+                    'total_bought_shares': total_bought_shares,
+                    'total_sold_shares': total_sold_shares,
+                    'total_bought_value': total_bought_value,
+                    'total_sold_value': total_sold_value,
+                    'realized_gain': total_realized_gain,
+                    'realized_gain_percent': float((total_realized_gain / total_bought_value * 100)) if total_bought_value > 0 else 0,
+                    'dividends': total_dividends,
+                    'interest': total_interest,
+                    'dividend_received': total_dividends,
+                    'interest_received': total_interest,
+                    'company_name': symbol,
+                    'sector': 'Unknown'
+                }
+                cleared_holdings.append(cleared_data)
 
         return {
             'current_holdings': current_holdings,
             'cleared_holdings': cleared_holdings
+        }
+
+    def _calculate_stock_dividend_interest(self, account_id: int, symbol: str, target_date: date, currency: str, exchange_rate: float) -> Dict:
+        """
+        计算单个股票的分红和利息 - 统一方法，避免重复代码
+
+        Returns:
+            Dict包含dividend_received, interest_received, dividend_received_cad, interest_received_cad
+        """
+        # 查询分红交易
+        dividend_transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.stock == symbol,
+            Transaction.type == 'DIVIDEND',
+            Transaction.trade_date <= target_date
+        ).all()
+
+        # 查询利息交易
+        interest_transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.stock == symbol,
+            Transaction.type == 'INTEREST',
+            Transaction.trade_date <= target_date
+        ).all()
+
+        # 计算总额
+        dividend_received = sum(float(tx.amount or 0) for tx in dividend_transactions)
+        interest_received = sum(float(tx.amount or 0) for tx in interest_transactions)
+
+        # 转换为CAD等价
+        dividend_received_cad = dividend_received * float(exchange_rate) if currency == 'USD' else dividend_received
+        interest_received_cad = interest_received * float(exchange_rate) if currency == 'USD' else interest_received
+
+        return {
+            'dividend_received': dividend_received,
+            'interest_received': interest_received,
+            'dividend_received_cad': dividend_received_cad,
+            'interest_received_cad': interest_received_cad
         }
 
     def _get_simplified_portfolio_data(self, account_ids: List[int], target_date: date) -> Dict:
@@ -222,7 +349,10 @@ class AssetValuationService:
         """
         current_holdings = []
         cleared_holdings = []
-        
+
+        # 获取汇率
+        exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
+
         for account_id in account_ids:
             account = Account.query.get(account_id)
             if not account:
@@ -282,7 +412,15 @@ class AssetValuationService:
                     })
                 
                 elif total_sold_shares > 0:
-                    # 清仓股票
+                    # 清仓股票 - 计算分红利息
+                    dividend_interest = self._calculate_stock_dividend_interest(
+                        account_id=account_id,
+                        symbol=symbol,
+                        target_date=target_date,
+                        currency=currency,
+                        exchange_rate=exchange_rate
+                    )
+
                     cleared_holdings.append({
                         'symbol': symbol,
                         'account_id': account_id,
@@ -293,8 +431,10 @@ class AssetValuationService:
                         'total_bought_value': float(bought_total),
                         'total_sold_value': float(sold_total),
                         'realized_gain': float(realized_gain),
-                        'dividends': 0,  # 简化版本暂不计算
-                        'interest': 0,   # 简化版本暂不计算
+                        'dividends': dividend_interest['dividend_received'],  # 使用计算得到的分红
+                        'interest': dividend_interest['interest_received'],   # 使用计算得到的利息
+                        'dividend_received': dividend_interest['dividend_received'],  # 保持兼容性
+                        'interest_received': dividend_interest['interest_received'],   # 保持兼容性
                         'company_name': symbol,
                         'sector': 'Unknown'
                     })
