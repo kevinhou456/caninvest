@@ -1066,13 +1066,13 @@ class PortfolioService:
                     })
 
             # 决定是否显示成员分组的详细数据
-            # 如果选择了特定成员，总是显示该成员的数据
+            # 如果选择了特定成员，不显示成员行（因为所有数据已经是该成员的）
             # 如果没有选择特定成员，根据账户情况决定是否显示所有成员
             should_show_member_breakdown = False
             if member_id is not None:
-                # 选择了特定成员，总是显示该成员的详细数据
-                should_show_member_breakdown = True
-                print(f"Debug: Specific member {member_id} selected, showing member breakdown")
+                # 选择了特定成员，不显示成员行，因为所有数据已经是该成员的数据
+                should_show_member_breakdown = False
+                print(f"Debug: Specific member {member_id} selected, skipping member breakdown since data is already member-specific")
             elif member_id is None:
                 if selected_account_id and len(account_ids) == 1:
                     # 检查是否是单一成员完全拥有的账户
