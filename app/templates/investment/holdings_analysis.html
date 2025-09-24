@@ -153,6 +153,21 @@
         </div>
     </div>
 </div>
+
+<div class="row" id="memberChartRow" style="display: none;">
+    <div class="col-xl-6 col-lg-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header py-3 bg-primary text-white">
+                <h6 class="m-0 font-weight-bold">{{ _('Holdings by Member') }}</h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-area" style="position: relative; height: 400px;">
+                    <canvas id="memberChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -167,6 +182,7 @@ let stocksChart = null;
 let categoryChart = null;
 let currencyChart = null;
 let accountChart = null;
+let memberChart = null;
 const STOCKS_LABEL_SUFFIX = ' stocks';
 const BASE_CHART_COLORS = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'];
 const CASH_SLICE_COLOR = '#d6d8db';
@@ -201,7 +217,7 @@ function applyCurrentExchangeRateToDistribution(distribution) {
     }
 
     // Update all distribution arrays
-    ['by_stocks', 'by_categories', 'by_currencies', 'by_accounts'].forEach(arrayKey => {
+    ['by_stocks', 'by_categories', 'by_currencies', 'by_accounts', 'by_member'].forEach(arrayKey => {
         if (correctedDistribution[arrayKey] && Array.isArray(correctedDistribution[arrayKey])) {
             correctedDistribution[arrayKey].forEach(item => {
                 item.value = recalculateValue(item);
@@ -233,6 +249,7 @@ function loadHoldingsDistribution() {
             updateCategoryChart();
             updateCurrencyChart();
             updateAccountChart();
+            updateMemberChart();
         })
         .catch(error => {
             console.error('Error loading holdings distribution:', error);
@@ -578,7 +595,7 @@ function updateCurrencyChart() {
 
 function updateAccountChart() {
     const ctx = document.getElementById('accountChart').getContext('2d');
-    
+
     if (accountChart) {
         accountChart.destroy();
     }
@@ -687,6 +704,111 @@ function updateAccountChart() {
                         }
                     },
                     // 尝试Chart.js 3.x的连接线语法
+                    clip: false,
+                    clamp: false,
+                    formatter: function(value, context) {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        if (!total) return '';
+                        const percentage = ((value / total) * 100).toFixed(1);
+                        return percentage + '%';
+                    }
+                }
+            }
+        }
+    });
+}
+
+function updateMemberChart() {
+    const memberRow = document.getElementById('memberChartRow');
+    const memberCanvas = document.getElementById('memberChart');
+
+    if (!memberRow || !memberCanvas) {
+        return;
+    }
+
+    if (memberChart) {
+        memberChart.destroy();
+        memberChart = null;
+    }
+
+    // Only show for the "All Members" view (no member/account filters applied)
+    if (memberId || accountId) {
+        memberRow.style.display = 'none';
+        return;
+    }
+
+    const ctx = memberCanvas.getContext('2d');
+    const membersData = (distributionData.by_member || []).slice();
+
+    if (membersData.length === 0) {
+        memberRow.style.display = '';
+        showChartNoData(ctx, 'No member data');
+        return;
+    }
+
+    memberRow.style.display = '';
+
+    const sortedMembers = membersData.sort((a, b) => b.value - a.value);
+    const labels = sortedMembers.map(member => {
+        const memberName = member.name || 'Member';
+        return `${memberName} ($${member.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+    });
+    const data = sortedMembers.map(member => member.value);
+    const backgroundColors = sortedMembers.map((member, index) => BASE_CHART_COLORS[index % BASE_CHART_COLORS.length]);
+
+    memberChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: backgroundColors,
+                hoverBorderColor: "rgba(234, 236, 244, 1)",
+                borderWidth: 2
+            }]
+        },
+        plugins: [ChartDataLabels],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    top: 40,
+                    bottom: 40,
+                    left: 60,
+                    right: 60
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = total ? ((value / total) * 100).toFixed(1) : '0.0';
+                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                        }
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'right'
+                },
+                datalabels: {
+                    display: true,
+                    color: '#2c3e50',
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    borderColor: '#dee2e6',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    padding: 4,
+                    font: {
+                        size: 12,
+                        weight: 'bold'
+                    },
+                    anchor: 'end',
+                    align: 'end',
+                    offset: 15,
                     clip: false,
                     clamp: false,
                     formatter: function(value, context) {

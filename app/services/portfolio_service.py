@@ -2974,6 +2974,30 @@ class PortfolioService:
                 if data['value'] > 0
             ]
 
+            # 5. 按成员分布（仅在存在成员信息时计算）
+            member_totals: Dict[int, Dict[str, float]] = {}
+            for account_entry in by_account_list:
+                for member_entry in account_entry.get('members', []):
+                    member_id = member_entry.get('member_id')
+                    if member_id is None:
+                        continue
+                    member_value = member_entry.get('value', 0) or 0
+                    if member_value <= 0:
+                        continue
+                    if member_id not in member_totals:
+                        member_totals[member_id] = {
+                            'member_id': member_id,
+                            'name': member_entry.get('name') or 'Member',
+                            'value': 0.0
+                        }
+                    member_totals[member_id]['value'] += float(member_value)
+
+            by_member_list = sorted(
+                (member for member in member_totals.values() if member['value'] > 0),
+                key=lambda item: item['value'],
+                reverse=True
+            )
+
             cash_total_cad_float = float(cash_total_cad)
             if cash_total_cad_float > 0:
                 by_stocks.append({
@@ -3009,12 +3033,14 @@ class PortfolioService:
                     'total_value_cad': total_value,  # 所有值已经转换为CAD
                     'unique_stocks': unique_stock_count,
                     'categories_count': len(by_category_list),
-                    'accounts_count': len(by_account_list)
+                    'accounts_count': len(by_account_list),
+                    'members_count': len(by_member_list)
                 },
                 'by_stocks': by_stocks,
                 'by_category': by_category_list,
                 'by_currency': by_currency,
-                'by_account': by_account_list
+                'by_account': by_account_list,
+                'by_member': by_member_list
             }
             
         except Exception as e:
