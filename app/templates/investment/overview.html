@@ -305,24 +305,80 @@
             <div class="card-body p-0">
                 {% if holdings %}
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0 holdings-table">
+                    <table class="table table-hover mb-0 holdings-table" id="holdingsTable">
                         <thead class="table-light">
                             <tr>
-                                <th class="ps-3">{{ _('Stock Symbol') }}</th>
-                                <th class="text-end">{{ _('Shares') }}</th>
-                                <th class="text-end">{{ _('Avg Cost') }}</th>
-                                <th class="text-end">{{ _('Current Price') }}</th>
-                                <th class="text-end">{{ _('Daily Change') }}</th>
-                                <th class="text-end">{{ _('Market Value') }}</th>
-                                <th class="text-end">{{ _('Unrealized P&L') }}</th>
-                                <th class="text-end">{{ _('Realized Gains') }}</th>
-                                <th class="text-end">{{ _('Div+Int') }}</th>
-                                <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                                <th class="ps-3">
+                                    <div class="d-flex align-items-center justify-content-between">
+                                        <div class="d-flex align-items-center flex-grow-1">
+                                            <span class="sort-region sortable me-2" data-sort="currency" title="{{ _('Sort by Currency') }}">
+                                                <i class="fas fa-dollar-sign"></i>
+                                                <i class="fas fa-sort sort-icon ms-1" style="font-size: 0.7rem;"></i>
+                                            </span>
+                                            <span class="sort-region sortable me-2 flex-grow-1" data-sort="symbol" title="{{ _('Sort by Stock Symbol') }}">
+                                                {{ _('Stock Symbol') }}
+                                                <i class="fas fa-sort sort-icon ms-1" style="font-size: 0.7rem;"></i>
+                                            </span>
+                                            <span class="sort-region sortable" data-sort="sector" title="{{ _('Sort by Sector') }}">
+                                                <i class="fas fa-tags"></i>
+                                                <i class="fas fa-sort sort-icon ms-1" style="font-size: 0.7rem;"></i>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="text-end sortable" data-sort="shares">
+                                    {{ _('Shares') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="avg_cost">
+                                    {{ _('Avg Cost') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="current_price">
+                                    {{ _('Current Price') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="daily_change">
+                                    {{ _('Daily Change') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="market_value">
+                                    {{ _('Market Value') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="unrealized_gain">
+                                    {{ _('Unrealized P&L') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="realized_gain">
+                                    {{ _('Realized Gains') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="dividends">
+                                    {{ _('Div+Int') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end pe-3 sortable" data-sort="return_percent">
+                                    {{ _('Return Percent') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for holding in holdings %}
-                            <tr class="align-middle">
+                            <tr class="align-middle"
+                                data-symbol="{{ holding['symbol'] }}"
+                                data-currency="{{ holding['currency'] }}"
+                                data-sector="{{ holding.get('sector', 'Unknown') }}"
+                                data-shares="{{ holding['shares'] or 0 }}"
+                                data-avg-cost="{{ holding['average_cost'] or 0 }}"
+                                data-current-price="{{ holding['current_price'] or 0 }}"
+                                data-daily-change="{{ holding.get('daily_change_value', 0) }}"
+                                data-market-value="{{ holding['current_value'] or 0 }}"
+                                data-unrealized-gain="{{ holding['unrealized_gain'] or 0 }}"
+                                data-realized-gain="{{ holding['realized_gain'] or 0 }}"
+                                data-dividends="{{ (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) }}"
+                                data-return-percent="{{ holding['unrealized_gain_percent'] or 0 }}">
                                 <!-- Stock Symbol -->
                                 <td class="ps-3">
                                     <div class="d-flex align-items-center">
@@ -459,20 +515,71 @@
                     <table class="table table-hover mb-0" id="clearedHoldingsTable">
                         <thead class="table-light">
                             <tr>
-                                <th class="ps-3">{{ _('Stock') }}</th>
-                                <th>{{ _('Company') }}</th>
-                                <th class="text-end">{{ _('Bought Shares') }}</th>
-                                <th class="text-end">{{ _('Sold Shares') }}</th>
-                                <th class="text-end">{{ _('Total Invested') }}</th>
-                                <th class="text-end">{{ _('Total Received') }}</th>
-                                <th class="text-end">{{ _('Realized Gain') }}</th>
-                                <th class="text-end">{{ _('Div+Int') }}</th>
-                                <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                                <th class="ps-3">
+                                    <div class="d-flex align-items-center justify-content-between">
+                                        <div class="d-flex align-items-center flex-grow-1">
+                                            <span class="sort-region sortable me-2" data-sort="currency" title="{{ _('Sort by Currency') }}">
+                                                <i class="fas fa-dollar-sign"></i>
+                                                <i class="fas fa-sort sort-icon ms-1" style="font-size: 0.7rem;"></i>
+                                            </span>
+                                            <span class="sort-region sortable me-2 flex-grow-1" data-sort="symbol" title="{{ _('Sort by Stock Symbol') }}">
+                                                {{ _('Stock') }}
+                                                <i class="fas fa-sort sort-icon ms-1" style="font-size: 0.7rem;"></i>
+                                            </span>
+                                            <span class="sort-region sortable" data-sort="sector" title="{{ _('Sort by Sector') }}">
+                                                <i class="fas fa-tags"></i>
+                                                <i class="fas fa-sort sort-icon ms-1" style="font-size: 0.7rem;"></i>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="sortable" data-sort="company">
+                                    {{ _('Company') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="bought_shares">
+                                    {{ _('Bought Shares') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="sold_shares">
+                                    {{ _('Sold Shares') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="total_invested">
+                                    {{ _('Total Invested') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="total_received">
+                                    {{ _('Total Received') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="realized_gain">
+                                    {{ _('Realized Gain') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="dividends">
+                                    {{ _('Div+Int') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end pe-3 sortable" data-sort="return_percent">
+                                    {{ _('Return Percent') }}
+                                    <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for holding in cleared_holdings %}
-                            <tr>
+                            <tr data-symbol="{{ holding['symbol'] }}"
+                                data-currency="{{ holding['currency'] }}"
+                                data-sector="{{ holding.get('sector', 'Unknown') }}"
+                                data-company="{{ holding['company_name'] }}"
+                                data-bought-shares="{{ holding['total_bought_shares'] or 0 }}"
+                                data-sold-shares="{{ holding['total_sold_shares'] or 0 }}"
+                                data-total-invested="{{ holding['total_bought_value'] or 0 }}"
+                                data-total-received="{{ holding['total_sold_value'] or 0 }}"
+                                data-realized-gain="{{ holding['realized_gain'] or 0 }}"
+                                data-dividends="{{ (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) }}"
+                                data-return-percent="{{ holding.get('realized_gain_percent', 0) or 0 }}">
                                 <!-- Stock Symbol -->
                                 <td class="ps-3">
                                     <div class="d-flex align-items-center">
@@ -729,6 +836,76 @@
 {% endblock %}
 
 {% block scripts %}
+<style>
+.sortable {
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.sortable:hover {
+    background-color: rgba(0, 123, 255, 0.1) !important;
+}
+
+.sort-icon {
+    opacity: 0.3;
+    transition: opacity 0.2s ease;
+    font-size: 0.8rem;
+}
+
+.sortable:hover .sort-icon {
+    opacity: 0.7;
+}
+
+.sortable .fa-sort-up,
+.sortable .fa-sort-down {
+    opacity: 1;
+    color: #007bff;
+}
+
+.holdings-table {
+    position: relative;
+}
+
+.holdings-table tbody tr {
+    transition: all 0.3s ease;
+}
+
+.sort-region {
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+    font-size: 0.9rem;
+}
+
+.sort-region {
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+}
+
+.sort-region:hover {
+    background-color: rgba(0, 123, 255, 0.1) !important;
+}
+
+.sort-region.sortable {
+    cursor: pointer;
+}
+
+.sort-region .sort-icon {
+    opacity: 0.4;
+}
+
+.sort-region:hover .sort-icon {
+    opacity: 0.8;
+}
+
+.sort-region .fa-sort-up,
+.sort-region .fa-sort-down {
+    opacity: 1;
+    color: #007bff;
+}
+</style>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // 添加持仓表格搜索功能
@@ -1070,6 +1247,103 @@ document.addEventListener('DOMContentLoaded', function() {
 
     console.log('Overview metrics updated with current exchange rate:', currentRate);
     {% endif %}
+});
+
+// Table sorting functionality
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize sorting for both tables
+    initTableSorting('holdingsTable');
+    initTableSorting('clearedHoldingsTable');
+
+    function initTableSorting(tableId) {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+
+        // Select both th.sortable and .sort-region.sortable elements
+        const sortableElements = table.querySelectorAll('th.sortable, .sort-region.sortable');
+        let currentSort = {column: null, direction: 'asc'};
+
+        sortableElements.forEach(element => {
+            element.style.cursor = 'pointer';
+            element.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const sortType = this.dataset.sort;
+                const sortDirection = (currentSort.column === sortType && currentSort.direction === 'asc') ? 'desc' : 'asc';
+
+                sortTable(table, sortType, sortDirection);
+                updateSortIcons(sortableElements, this, sortDirection);
+
+                currentSort = {column: sortType, direction: sortDirection};
+            });
+        });
+    }
+
+    function sortTable(table, sortType, direction) {
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        rows.sort((a, b) => {
+            let aVal, bVal;
+
+            if (sortType === 'symbol' || sortType === 'company' || sortType === 'currency' || sortType === 'sector') {
+                aVal = (a.dataset[sortType] || '').toLowerCase();
+                bVal = (b.dataset[sortType] || '').toLowerCase();
+                return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                // For numeric values - handle attribute mapping
+                let dataAttr = sortType;
+
+                // Manual mapping for specific cases
+                const attrMap = {
+                    'avg_cost': 'avgCost',
+                    'current_price': 'currentPrice',
+                    'daily_change': 'dailyChange',
+                    'market_value': 'marketValue',
+                    'unrealized_gain': 'unrealizedGain',
+                    'realized_gain': 'realizedGain',
+                    'return_percent': 'returnPercent',
+                    'bought_shares': 'boughtShares',
+                    'sold_shares': 'soldShares',
+                    'total_invested': 'totalInvested',
+                    'total_received': 'totalReceived'
+                };
+
+                if (attrMap[sortType]) {
+                    dataAttr = attrMap[sortType];
+                } else {
+                    // Fallback: convert underscore to camelCase
+                    dataAttr = sortType.replace(/_([a-z])/g, (match, p1) => p1.toUpperCase());
+                }
+
+                aVal = parseFloat(a.dataset[dataAttr]) || 0;
+                bVal = parseFloat(b.dataset[dataAttr]) || 0;
+
+                if (direction === 'asc') {
+                    return aVal - bVal;
+                } else {
+                    return bVal - aVal;
+                }
+            }
+        });
+
+        // Remove all rows and re-add them in sorted order
+        rows.forEach(row => tbody.removeChild(row));
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    function updateSortIcons(headers, clickedHeader, direction) {
+        // Reset all icons
+        headers.forEach(header => {
+            const icon = header.querySelector('.sort-icon');
+            icon.className = 'fas fa-sort ms-1 sort-icon';
+        });
+
+        // Update clicked header icon
+        const icon = clickedHeader.querySelector('.sort-icon');
+        icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} ms-1 sort-icon`;
+    }
 });
 
 </script>
