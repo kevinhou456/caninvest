@@ -169,7 +169,7 @@
                             <tbody>
                                 {% for transaction in transactions %}
                                 <tr data-date="{{ transaction.trade_date.isoformat() }}"
-                                    data-account="{{ transaction.account.name }}"
+                                    data-account="{{ transaction.formatted_account_name }}"
                                     data-type="{{ transaction.type }}"
                                     data-quantity="{{ transaction.quantity or 0 }}"
                                     data-price="{{ transaction.price or 0 }}"
@@ -181,7 +181,7 @@
                                         <span class="fw-medium">{{ transaction.trade_date.strftime('%Y-%m-%d') }}</span>
                                     </td>
                                     <td>
-                                        <small class="text-muted">{{ transaction.account.name }}</small>
+                                        <small class="text-muted">{{ transaction.formatted_account_name }}</small>
                                     </td>
                                     <td>
                                         {% if transaction.type == 'BUY' %}

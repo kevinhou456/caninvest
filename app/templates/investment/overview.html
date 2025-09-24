@@ -253,22 +253,27 @@
             </div>
         </div>
     </div>
-    
-    <!-- Total Income (Dividends + Interest) -->
+
+    <!-- Daily Floating P&L -->
     <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
         <div class="card h-100 metric-card">
             <div class="card-body">
                 <div class="d-flex align-items-center mb-2">
-                    <div class="metric-icon bg-info bg-opacity-10">
-                        <i class="fas fa-coins text-info"></i>
+                    <div class="metric-icon bg-{{ 'success' if metrics and metrics.daily_change.cad >= 0 else 'danger' }} bg-opacity-10">
+                        <i class="fas fa-wave-square {{ 'text-success' if metrics and metrics.daily_change.cad >= 0 else 'text-danger' }}"></i>
                     </div>
-                    <h6 class="card-title text-muted mb-0">{{ _('Div+Int') }}</h6>
+                    <h6 class="card-title text-muted mb-0">{{ _('Daily Floating P&L') }}</h6>
                 </div>
-                <h4 class="text-info mb-1">${{ "{:,.2f}".format((metrics.total_dividends.cad + metrics.total_interest.cad) if metrics else 0) }}</h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format((metrics.total_dividends.cad_only + metrics.total_interest.cad_only) if metrics else 0) }}|USD:${{ "{:,.2f}".format((metrics.total_dividends.usd_only + metrics.total_interest.usd_only) if metrics else 0) }}</small>
+                <h4 class="mb-1">
+                    <span class="{{ 'text-success' if metrics and metrics.daily_change.cad >= 0 else 'text-danger' }}">
+                        {% if metrics and metrics.daily_change.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.daily_change.cad if metrics else 0) }}
+                    </span>
+                </h4>
+                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.daily_change.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.daily_change.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
+
     
     <!-- Cash Balance -->
     <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
@@ -371,7 +376,7 @@
                                 data-currency="{{ holding['currency'] }}"
                                 data-sector="{{ holding.get('sector', 'Unknown') }}"
                                 data-shares="{{ holding['shares'] or 0 }}"
-                                data-avg-cost="{{ holding['average_cost'] or 0 }}"
+                                data-avg-cost="{{ holding.get('average_cost_display', holding.get('average_cost', 0)) or 0 }}"
                                 data-current-price="{{ holding['current_price'] or 0 }}"
                                 data-daily-change="{{ holding.get('daily_change_value', 0) }}"
                                 data-market-value="{{ holding['current_value'] or 0 }}"
@@ -414,7 +419,8 @@
                                 
                                 <!-- Average Cost -->
                                 <td class="text-end">
-                                    <span class="text-muted">${{ "{:.2f}".format(holding['average_cost'] or 0) }}</span>
+                                    {% set avg_cost_display = holding.get('average_cost_display', holding.get('average_cost', 0)) %}
+                                    <span class="text-muted">${{ "{:.2f}".format(avg_cost_display or 0) }}</span>
                                     <br><small class="text-muted">{{ holding['currency'] }}</small>
                                 </td>
                                 
@@ -723,15 +729,20 @@
                 </div>
                 <hr class="my-3">
                 <div class="row g-0">
-                    <div class="col-md-6 text-center border-end">
+                    <div class="col-md-4 text-center border-end">
                         <h5 class="text-success mb-1">${{ "{:,.0f}".format(metrics.total_deposits.cad if metrics else 0) }}</h5>
                         <small class="text-muted">{{ _('Total Deposits') }}</small>
                         <br><small class="text-muted" style="font-size: 0.7rem;">CAD:${{ "{:,.0f}".format(metrics.total_deposits.cad_only if metrics else 0) }} | USD:${{ "{:,.0f}".format(metrics.total_deposits.usd_only if metrics else 0) }}</small>
                     </div>
-                    <div class="col-md-6 text-center">
+                    <div class="col-md-4 text-center border-end">
                         <h5 class="text-danger mb-1">${{ "{:,.0f}".format(metrics.total_withdrawals.cad if metrics else 0) }}</h5>
                         <small class="text-muted">{{ _('Total Withdrawals') }}</small>
                         <br><small class="text-muted" style="font-size: 0.7rem;">CAD:${{ "{:,.0f}".format(metrics.total_withdrawals.cad_only if metrics else 0) }} | USD:${{ "{:,.0f}".format(metrics.total_withdrawals.usd_only if metrics else 0) }}</small>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <h5 class="text-info mb-1">${{ "{:,.2f}".format((metrics.total_dividends.cad + metrics.total_interest.cad) if metrics else 0) }}</h5>
+                        <small class="text-muted">{{ _('Div+Int') }}</small>
+                        <br><small class="text-muted" style="font-size: 0.7rem;">CAD:${{ "{:,.2f}".format((metrics.total_dividends.cad_only + metrics.total_interest.cad_only) if metrics else 0) }} | USD:${{ "{:,.2f}".format((metrics.total_dividends.usd_only + metrics.total_interest.usd_only) if metrics else 0) }}</small>
                     </div>
                 </div>
                 {% if exchange_rates %}

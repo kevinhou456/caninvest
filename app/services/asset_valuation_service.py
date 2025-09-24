@@ -228,11 +228,18 @@ class AssetValuationService:
                         current_value = float(current_shares) * float(current_price)
                         current_value_cad = current_value * float(exchange_rate) if currency == 'USD' else current_value
 
-                        # 计算成本基础 (_calculate_cost_basis已经将USD转换为CAD)
-                        cost_basis = self._calculate_cost_basis(account_id, symbol, target_date, current_shares)
-                        total_cost = float(cost_basis)
-                        # cost_basis已经是CAD等价，无需再次转换
-                        total_cost_cad = total_cost
+                        # 计算成本基础，获取CAD与原始币种的成本
+                        cost_breakdown = self._calculate_cost_basis_breakdown(
+                            account_id, symbol, target_date, current_shares
+                        )
+                        total_cost_cad = float(cost_breakdown['total_cost_cad'])
+                        total_cost_native = float(cost_breakdown['total_cost_native'])
+
+                        # average_cost_cad 供内部计算，average_cost_native 用于展示
+                        average_cost_cad = (total_cost_cad / float(current_shares)
+                                            if current_shares > 0 else 0)
+                        average_cost_native = (total_cost_native / float(current_shares)
+                                               if current_shares > 0 else 0)
 
                         # 计算收益 (统一使用CAD进行计算，避免币种不匹配)
                         unrealized_gain_cad = current_value_cad - total_cost_cad
@@ -259,21 +266,25 @@ class AssetValuationService:
                             daily_change_value = daily_change_per_share * float(current_shares)
                             daily_change_percent = (daily_change_per_share / float(previous_price)) * 100
 
+                        percent_base_cost = total_cost_native if currency == 'USD' else total_cost_cad
+
                         holding_data = {
                             'symbol': symbol,
                             'account_id': account_id,
                             'account_name': self._get_account_name_with_members(account),
                             'currency': currency,
                             'shares': float(current_shares),
-                            'average_cost': (total_cost / float(exchange_rate) / float(current_shares)) if (currency == 'USD' and current_shares > 0) else (total_cost / float(current_shares) if current_shares > 0 else 0),
-                            'total_cost': total_cost,
+                            'average_cost': average_cost_native,
+                            'average_cost_cad': average_cost_cad,
+                            'total_cost': total_cost_cad,
                             'total_cost_cad': total_cost_cad,
+                            'total_cost_native': total_cost_native,
                             'current_price': float(current_price),
                             'current_value': current_value,
                             'current_value_cad': current_value_cad,
                             'unrealized_gain': unrealized_gain,
                             'unrealized_gain_cad': unrealized_gain_cad,
-                            'unrealized_gain_percent': float((unrealized_gain / total_cost * 100)) if total_cost > 0 else 0,
+                            'unrealized_gain_percent': float((unrealized_gain / percent_base_cost * 100)) if percent_base_cost > 0 else 0,
                             'realized_gain': acc_data['realized_gain'],
                             'realized_gain_cad': acc_data['realized_gain'] * float(exchange_rate) if currency == 'USD' else acc_data['realized_gain'],
                             'dividends': dividend_interest['dividend_received'],
@@ -282,6 +293,7 @@ class AssetValuationService:
                             'interest_received': dividend_interest['interest_received'],
                             'dividend_received_cad': dividend_interest['dividend_received_cad'],
                             'interest_received_cad': dividend_interest['interest_received_cad'],
+                            'average_cost_display': average_cost_native,
                             'company_name': company_name,
                             'sector': sector,
                             'daily_change_value': daily_change_value,
@@ -1066,9 +1078,13 @@ class AssetValuationService:
         return realized_gain
     
     def _calculate_cost_basis(self, account_id: int, symbol: str, target_date: date, current_shares: Decimal) -> Decimal:
-        """
-        计算当前持仓的成本基础
-        """
+        """计算当前持仓的成本基础（返回CAD等值）"""
+        breakdown = self._calculate_cost_basis_breakdown(account_id, symbol, target_date, current_shares)
+        return breakdown['total_cost_cad']
+
+    def _calculate_cost_basis_breakdown(self, account_id: int, symbol: str,
+                                        target_date: date, current_shares: Decimal) -> Dict[str, Decimal | str]:
+        """计算成本基础的详细分解，包含CAD和原始币种"""
         transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.stock == symbol,
@@ -1076,47 +1092,65 @@ class AssetValuationService:
             Transaction.type.in_(['BUY', 'SELL'])
         ).order_by(Transaction.trade_date.asc()).all()
         
-        buy_lots = []
+        buy_lots: List[tuple[Decimal, Decimal, Decimal]] = []  # (shares, cost_per_share_cad, cost_per_share_native)
+        native_currency = None
         
         # 重建FIFO队列
         for tx in transactions:
             quantity = Decimal(str(tx.quantity or 0))
             price = Decimal(str(tx.price or 0))
             fee = Decimal(str(tx.fee or 0))
+            currency = (tx.currency or 'USD').upper()
+
+            if native_currency is None:
+                native_currency = currency
             
-            # 统一转换为CAD
-            if tx.currency == 'USD':
-                exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
-                price = price * Decimal(str(exchange_rate))
-                fee = fee * Decimal(str(exchange_rate))
+            # 每股成本（原始币种）
+            cost_per_share_native = price + (fee / quantity if quantity > 0 else Decimal('0'))
+
+            # 转换为CAD
+            to_cad_rate = Decimal(str(self.currency_service.get_current_rate(currency, 'CAD'))) if currency != 'CAD' else Decimal('1')
+            cost_per_share_cad = cost_per_share_native * to_cad_rate
             
             if tx.type == 'BUY':
-                cost_per_share = price + (fee / quantity if quantity > 0 else Decimal('0'))
-                buy_lots.append((quantity, cost_per_share))
+                buy_lots.append((quantity, cost_per_share_cad, cost_per_share_native))
                 
             elif tx.type == 'SELL':
                 remaining_to_sell = quantity
                 while remaining_to_sell > 0 and buy_lots:
-                    lot_shares, lot_cost_per_share = buy_lots[0]
+                    lot_shares, lot_cost_per_share_cad, lot_cost_per_share_native = buy_lots[0]
                     if lot_shares <= remaining_to_sell:
                         remaining_to_sell -= lot_shares
                         buy_lots.pop(0)
                     else:
-                        buy_lots[0] = (lot_shares - remaining_to_sell, lot_cost_per_share)
+                        buy_lots[0] = (
+                            lot_shares - remaining_to_sell,
+                            lot_cost_per_share_cad,
+                            lot_cost_per_share_native
+                        )
                         remaining_to_sell = Decimal('0')
         
         # 计算当前持仓的成本基础
-        total_cost = Decimal('0')
+        total_cost_cad = Decimal('0')
+        total_cost_native = Decimal('0')
         remaining_shares = current_shares
         
-        for lot_shares, lot_cost_per_share in buy_lots:
+        for lot_shares, lot_cost_per_share_cad, lot_cost_per_share_native in buy_lots:
             if remaining_shares <= 0:
                 break
             shares_to_count = min(lot_shares, remaining_shares)
-            total_cost += shares_to_count * lot_cost_per_share
+            total_cost_cad += shares_to_count * lot_cost_per_share_cad
+            total_cost_native += shares_to_count * lot_cost_per_share_native
             remaining_shares -= shares_to_count
         
-        return total_cost
+        if native_currency is None:
+            native_currency = 'CAD'
+
+        return {
+            'total_cost_cad': total_cost_cad,
+            'total_cost_native': total_cost_native,
+            'native_currency': native_currency
+        }
     
     def get_total_assets(self, account_id: int, target_date: Optional[date] = None) -> Decimal:
         """获取总资产金额"""
@@ -1726,5 +1760,3 @@ class AssetValuationService:
             display_text += f" - {', '.join(member_names)}"
         
         return display_text
-
-

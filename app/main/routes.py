@@ -4,7 +4,7 @@
 
 from flask import render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_babel import _
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from app.main import bp
 from app import db
 from app.models.family import Family
@@ -138,9 +138,11 @@ def overview():
                     merged_holding['total_cost'] = safe_float(holding.get('total_cost'))
                     merged_holding['average_cost'] = safe_float(holding.get('average_cost'))
                     merged_holding['average_cost_cad'] = safe_float(holding.get('average_cost_cad', holding.get('average_price_cad')))
+                    merged_holding['average_cost_display'] = safe_float(holding.get('average_cost_display', holding.get('average_cost')))
                     merged_holding['current_value'] = safe_float(holding.get('current_value'))
                     merged_holding['unrealized_gain'] = safe_float(holding.get('unrealized_gain'))
                     merged_holding['total_cost_cad'] = safe_float(holding.get('total_cost_cad'))
+                    merged_holding['total_cost_native'] = safe_float(holding.get('total_cost_native', holding.get('total_cost_cad')))
                     merged_holding['current_value_cad'] = safe_float(holding.get('current_value_cad'))
                     merged_holding['unrealized_gain_cad'] = safe_float(holding.get('unrealized_gain_cad'))
                     merged_holding['total_bought_shares'] = safe_float(holding.get('total_bought_shares'))
@@ -173,6 +175,7 @@ def overview():
                     existing['current_shares'] = safe_float(existing.get('current_shares')) + incoming_shares
                     existing['shares'] = existing['current_shares']  # 确保shares字段与current_shares同步
                     existing['total_cost'] = safe_float(existing.get('total_cost')) + safe_float(holding.get('total_cost'))
+                    existing['total_cost_native'] = safe_float(existing.get('total_cost_native')) + safe_float(holding.get('total_cost_native', holding.get('total_cost')))
                     existing['current_value'] = safe_float(existing.get('current_value')) + safe_float(holding.get('current_value'))
                     existing['unrealized_gain'] = safe_float(existing.get('unrealized_gain')) + safe_float(holding.get('unrealized_gain'))
 
@@ -209,15 +212,17 @@ def overview():
 
                     # 重新计算平均价格
                     if existing['current_shares'] > 0:
-                        existing['average_cost'] = existing['total_cost'] / existing['current_shares']
-                        existing['average_price'] = existing['average_cost']  # 向后兼容
+                        existing['average_cost'] = existing['total_cost_native'] / existing['current_shares']
+                        existing['average_price'] = existing['average_cost']  # 向后兼容（原币种）
                         existing['average_price_cad'] = existing['total_cost_cad'] / existing['current_shares']
                         existing['average_cost_cad'] = existing['average_price_cad']
+                        existing['average_cost_display'] = existing['average_cost']
                     else:
                         existing['average_cost'] = 0
                         existing['average_price'] = 0
                         existing['average_price_cad'] = 0
                         existing['average_cost_cad'] = 0
+                        existing['average_cost_display'] = 0
 
                     # 保持其他字段不变（价格、汇率等）
 
@@ -239,6 +244,38 @@ def overview():
         # 应用股票合并逻辑
         holdings = merge_holdings_by_stock(raw_holdings)
         cleared_holdings = merge_holdings_by_stock(raw_cleared_holdings)
+
+        # 汇总每日浮动盈亏（以CAD展示）
+        daily_change_metrics = {
+            'cad': 0.0,
+            'cad_only': 0.0,
+            'usd_only': 0.0
+        }
+        usd_to_cad_rate = Decimal(str(exchange_rates['usd_to_cad'])) if exchange_rates else Decimal('1')
+        if holdings:
+            daily_change_cad_only = Decimal('0')
+            daily_change_usd_only = Decimal('0')
+
+            for holding in holdings:
+                raw_change = holding.get('daily_change_value')
+                if raw_change in (None, ''):
+                    continue
+
+                change_value = Decimal(str(raw_change))
+                currency = (holding.get('currency') or 'USD').upper()
+
+                if currency == 'USD':
+                    daily_change_usd_only += change_value
+                else:
+                    daily_change_cad_only += change_value
+
+            total_daily_change_cad = daily_change_cad_only + (daily_change_usd_only * usd_to_cad_rate)
+
+            daily_change_metrics = {
+                'cad': float(total_daily_change_cad.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+                'cad_only': float(daily_change_cad_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+                'usd_only': float(daily_change_usd_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+            }
         
         # 从综合指标中提取数据
         total_assets = comprehensive_metrics['total_assets']['cad']
@@ -248,7 +285,7 @@ def overview():
         
         # 创建包含完整财务指标的metrics对象
         class ComprehensiveMetrics:
-            def __init__(self, metrics_data):
+            def __init__(self, metrics_data, daily_change_data=None):
                 self.total_assets = type('obj', (object,), {
                     'cad': metrics_data['total_assets']['cad'],
                     'cad_only': metrics_data['total_assets']['cad_only'], 
@@ -279,6 +316,12 @@ def overview():
                     'cad': metrics_data['unrealized_gain']['cad'], 
                     'cad_only': metrics_data['unrealized_gain']['cad_only'], 
                     'usd_only': metrics_data['unrealized_gain']['usd_only']
+                })
+                daily_data = daily_change_data or {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
+                self.daily_change = type('obj', (object,), {
+                    'cad': daily_data.get('cad', 0.0),
+                    'cad_only': daily_data.get('cad_only', 0.0),
+                    'usd_only': daily_data.get('usd_only', 0.0)
                 })
                 self.total_dividends = type('obj', (object,), {
                     'cad': metrics_data['dividends']['cad'], 
@@ -312,7 +355,7 @@ def overview():
                     'total_return_rate': self.total_return_rate
                 }
         
-        metrics = ComprehensiveMetrics(comprehensive_metrics)
+        metrics = ComprehensiveMetrics(comprehensive_metrics, daily_change_metrics)
         
         # 准备现金数据
         cash_data = {
@@ -2334,7 +2377,16 @@ def stock_detail(stock_symbol):
             transactions = [t for t in all_transactions if t.account_id == account_id]
         else:
             transactions = all_transactions
-        
+
+        # 为每个交易记录添加格式化的账户名称
+        if transactions:
+            from app.services.asset_valuation_service import AssetValuationService
+            asset_service = AssetValuationService()
+
+            for transaction in transactions:
+                # 使用资产服务的方法来获取格式化的账户名称
+                transaction.formatted_account_name = asset_service._get_account_name_with_members(transaction.account)
+
         if not transactions:
             # 如果有过滤条件但没找到记录，显示提示信息但不重定向
             if member_id or account_id:
