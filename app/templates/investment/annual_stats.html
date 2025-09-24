@@ -76,29 +76,29 @@
 
 <!-- Charts Row -->
 <div class="row mb-4">
-    <!-- Total Assets Chart -->
-    <div class="col-lg-4">
+    <!-- Combined Assets Chart (Total + Members) -->
+    <div class="col-lg-6">
         <div class="card shadow mb-4">
             <div class="card-header py-3 bg-primary">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets') }}</h6>
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets & Members Breakdown') }}</h6>
             </div>
             <div class="card-body">
-                <div class="chart-area" style="height: 350px;">
-                    <canvas id="annualAssetsChart"></canvas>
+                <div class="chart-area" style="height: 400px;">
+                    <canvas id="combinedAssetsChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Annual Returns Breakdown Chart -->
-    <div class="col-lg-8">
+    <!-- Enhanced Returns Breakdown Chart (Total + Members) -->
+    <div class="col-lg-6">
         <div class="card shadow mb-4">
             <div class="card-header py-3 bg-success">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Returns Breakdown') }}</h6>
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Returns Breakdown & Members') }}</h6>
             </div>
             <div class="card-body">
-                <div class="chart-area" style="height: 350px;">
-                    <canvas id="annualReturnsChart"></canvas>
+                <div class="chart-area" style="height: 400px;">
+                    <canvas id="enhancedReturnsChart"></canvas>
                 </div>
             </div>
         </div>
@@ -166,14 +166,40 @@
     content: "👤 ";
     color: #0dcaf0;
 }
+
+.member-account-type-row {
+    background-color: rgba(108, 117, 125, 0.08) !important;
+}
+
+.member-account-type-row td {
+    border-top: 1px dashed #adb5bd !important;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+.member-account-type-row:hover {
+    background-color: rgba(108, 117, 125, 0.12) !important;
+}
+
+.member-account-type-indent {
+    margin-left: 40px;
+    color: #6c757d;
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.member-account-type-indent::before {
+    content: "├─ 📊 ";
+    color: #6c757d;
+}
 </style>
 {% endblock %}
 
 {% block scripts %}
 <script>
 let annualData = [];
-let annualAssetsChart = null;
-let annualReturnsChart = null;
+let combinedAssetsChart = null;
+let enhancedReturnsChart = null;
 let showCurrencyBreakdown = false;
 
 function showLoadingOverlay(message) {
@@ -228,8 +254,8 @@ function loadAnnualAnalysis() {
             console.log('Annual analysis data:', data);
             if (data.analysis) {
                 annualData = data.analysis.annual_data || [];
-                updateAnnualAssetsChart();
-                updateAnnualReturnsChart();
+                updateCombinedAssetsChart();
+                updateEnhancedReturnsChart();
                 updateAnnualTable();
                 document.getElementById('loading-spinner').style.display = 'none';
             } else {
@@ -245,32 +271,93 @@ function loadAnnualAnalysis() {
         });
 }
 
-// Update annual assets chart
-function updateAnnualAssetsChart() {
-    const ctx = document.getElementById('annualAssetsChart').getContext('2d');
+// Update combined assets chart (Total + Members)
+function updateCombinedAssetsChart() {
+    const ctx = document.getElementById('combinedAssetsChart').getContext('2d');
 
-    if (annualAssetsChart) {
-        annualAssetsChart.destroy();
+    if (combinedAssetsChart) {
+        combinedAssetsChart.destroy();
     }
 
-    // Sort data by year ascending for charts, exclude detail rows and member rows
-    const chartData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row).sort((a, b) => a.year - b.year);
-    const years = chartData.map(item => item.year);
-    const assets = chartData.map(item => item.total_assets);
-    
-    annualAssetsChart = new Chart(ctx, {
+    // Get main data (exclude detail rows and member rows)
+    const mainData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row).sort((a, b) => a.year - b.year);
+
+    // Get member data
+    const memberData = annualData.filter(item => item.is_member_row);
+
+    // Get all years
+    const allYears = [...new Set([...mainData, ...memberData].map(item => item.year))].sort((a, b) => a - b);
+
+    // Prepare datasets
+    const datasets = [];
+
+    // Add total assets dataset
+    const totalAssetsData = allYears.map(year => {
+        const yearData = mainData.find(item => item.year === year);
+        return yearData ? yearData.total_assets : 0;
+    });
+
+    datasets.push({
+        label: '{{ _("Total Assets") }}',
+        data: totalAssetsData,
+        backgroundColor: 'rgba(78, 115, 223, 0.9)',
+        borderColor: 'rgba(78, 115, 223, 1)',
+        borderWidth: 2
+    });
+
+    // Add member datasets if available
+    if (memberData.length > 0) {
+        // Group member data by member
+        const memberGroups = {};
+        memberData.forEach(item => {
+            if (!memberGroups[item.member_name]) {
+                memberGroups[item.member_name] = [];
+            }
+            memberGroups[item.member_name].push(item);
+        });
+
+        const memberColors = ['#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69'];
+        let colorIndex = 0;
+
+        Object.keys(memberGroups).forEach(memberName => {
+            const memberYearData = memberGroups[memberName];
+            const color = memberColors[colorIndex % memberColors.length];
+
+            // Convert hex to rgba for transparency
+            const hexToRgb = (hex) => {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? {
+                    r: parseInt(result[1], 16),
+                    g: parseInt(result[2], 16),
+                    b: parseInt(result[3], 16)
+                } : null;
+            };
+
+            const rgb = hexToRgb(color);
+            const bgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.7)` : color;
+
+            const assetsData = allYears.map(year => {
+                const yearData = memberYearData.find(item => item.year === year);
+                return yearData ? yearData.total_assets : 0;
+            });
+
+            datasets.push({
+                label: memberName,
+                data: assetsData,
+                backgroundColor: bgColor,
+                borderColor: color,
+                borderWidth: 1
+            });
+
+            colorIndex++;
+        });
+    }
+
+    combinedAssetsChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: years,
-            datasets: [
-                {
-                    label: '{{ _("Total Assets") }}',
-                    data: assets,
-                    backgroundColor: 'rgba(78, 115, 223, 0.8)',
-                    borderColor: 'rgba(78, 115, 223, 1)',
-                    borderWidth: 1
-                }
-            ]
+            labels: allYears,
+            datasets: datasets
         },
         options: {
             responsive: true,
@@ -293,7 +380,7 @@ function updateAnnualAssetsChart() {
                     display: true,
                     title: {
                         display: true,
-                        text: '{{ _("Total Assets ($)") }}'
+                        text: '{{ _("Assets ($)") }}'
                     },
                     ticks: {
                         callback: function(value) {
@@ -311,55 +398,132 @@ function updateAnnualAssetsChart() {
                     }
                 },
                 legend: {
-                    display: false
+                    display: true,
+                    position: 'top'
                 }
             }
         }
     });
 }
 
-// Update annual returns breakdown chart
-function updateAnnualReturnsChart() {
-    const ctx = document.getElementById('annualReturnsChart').getContext('2d');
+// Update enhanced returns breakdown chart (Total + Members breakdown)
+function updateEnhancedReturnsChart() {
+    const ctx = document.getElementById('enhancedReturnsChart').getContext('2d');
 
-    if (annualReturnsChart) {
-        annualReturnsChart.destroy();
+    if (enhancedReturnsChart) {
+        enhancedReturnsChart.destroy();
     }
 
-    // Sort data by year ascending for charts, exclude detail rows and member rows
-    const chartData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row).sort((a, b) => a.year - b.year);
-    const years = chartData.map(item => item.year);
-    const realizedGains = chartData.map(item => item.annual_realized_gain || 0);
-    const unrealizedGains = chartData.map(item => item.annual_unrealized_gain || 0);
-    const dividendsAndInterest = chartData.map(item => (item.annual_dividends || 0) + (item.annual_interest || 0));
-    
-    annualReturnsChart = new Chart(ctx, {
+    // Get main data (exclude detail rows and member rows)
+    const mainData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row).sort((a, b) => a.year - b.year);
+
+    // Get member data
+    const memberData = annualData.filter(item => item.is_member_row);
+
+    // Get all years
+    const allYears = [...new Set([...mainData, ...memberData].map(item => item.year))].sort((a, b) => a - b);
+
+    // Prepare datasets
+    const datasets = [];
+
+    // Add total breakdown datasets
+    const totalRealizedGains = allYears.map(year => {
+        const yearData = mainData.find(item => item.year === year);
+        return yearData ? (yearData.annual_realized_gain || 0) : 0;
+    });
+
+    const totalUnrealizedGains = allYears.map(year => {
+        const yearData = mainData.find(item => item.year === year);
+        return yearData ? (yearData.annual_unrealized_gain || 0) : 0;
+    });
+
+    const totalDividendsAndInterest = allYears.map(year => {
+        const yearData = mainData.find(item => item.year === year);
+        return yearData ? ((yearData.annual_dividends || 0) + (yearData.annual_interest || 0)) : 0;
+    });
+
+    datasets.push(
+        {
+            label: '{{ _("Total Realized Gains") }}',
+            data: totalRealizedGains,
+            backgroundColor: 'rgba(28, 200, 138, 0.9)',
+            borderColor: 'rgba(28, 200, 138, 1)',
+            borderWidth: 2
+        },
+        {
+            label: '{{ _("Total Unrealized Gains") }}',
+            data: totalUnrealizedGains,
+            backgroundColor: 'rgba(54, 162, 235, 0.9)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 2
+        },
+        {
+            label: '{{ _("Total Div+Int") }}',
+            data: totalDividendsAndInterest,
+            backgroundColor: 'rgba(255, 206, 86, 0.9)',
+            borderColor: 'rgba(255, 206, 86, 1)',
+            borderWidth: 2
+        }
+    );
+
+    // Add member total returns datasets if available
+    if (memberData.length > 0) {
+        // Group member data by member
+        const memberGroups = {};
+        memberData.forEach(item => {
+            if (!memberGroups[item.member_name]) {
+                memberGroups[item.member_name] = [];
+            }
+            memberGroups[item.member_name].push(item);
+        });
+
+        const memberColors = ['#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69'];
+        let colorIndex = 0;
+
+        Object.keys(memberGroups).forEach(memberName => {
+            const memberYearData = memberGroups[memberName];
+            const color = memberColors[colorIndex % memberColors.length];
+
+            // Convert hex to rgba for transparency
+            const hexToRgb = (hex) => {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? {
+                    r: parseInt(result[1], 16),
+                    g: parseInt(result[2], 16),
+                    b: parseInt(result[3], 16)
+                } : null;
+            };
+
+            const rgb = hexToRgb(color);
+            const bgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)` : color;
+
+            // Total returns = realized + unrealized + dividends + interest
+            const memberTotalReturns = allYears.map(year => {
+                const yearData = memberYearData.find(item => item.year === year);
+                if (!yearData) return 0;
+                return (yearData.annual_realized_gain || 0) +
+                       (yearData.annual_unrealized_gain || 0) +
+                       (yearData.annual_dividends || 0) +
+                       (yearData.annual_interest || 0);
+            });
+
+            datasets.push({
+                label: `${memberName} {{ _("Total Returns") }}`,
+                data: memberTotalReturns,
+                backgroundColor: bgColor,
+                borderColor: color,
+                borderWidth: 1
+            });
+
+            colorIndex++;
+        });
+    }
+
+    enhancedReturnsChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: years,
-            datasets: [
-                {
-                    label: '{{ _("Realized Gains") }}',
-                    data: realizedGains,
-                    backgroundColor: 'rgba(28, 200, 138, 0.8)',
-                    borderColor: 'rgba(28, 200, 138, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: '{{ _("Unrealized Gains") }}',
-                    data: unrealizedGains,
-                    backgroundColor: 'rgba(54, 162, 235, 0.8)',
-                    borderColor: 'rgba(54, 162, 235, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: '{{ _("Dividends & Interest") }}',
-                    data: dividendsAndInterest,
-                    backgroundColor: 'rgba(255, 206, 86, 0.8)',
-                    borderColor: 'rgba(255, 206, 86, 1)',
-                    borderWidth: 1
-                }
-            ]
+            labels: allYears,
+            datasets: datasets
         },
         options: {
             responsive: true,
@@ -397,22 +561,28 @@ function updateAnnualReturnsChart() {
                     intersect: false,
                     callbacks: {
                         label: function(context) {
-                            if (context.dataset.label === '{{ _("Dividends & Interest") }}') {
+                            const value = context.parsed.y;
+                            const label = context.dataset.label;
+
+                            if (label === '{{ _("Total Div+Int") }}') {
                                 const yearIndex = context.dataIndex;
-                                const dividends = chartData[yearIndex].annual_dividends || 0;
-                                const interest = chartData[yearIndex].annual_interest || 0;
-                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString() + 
-                                       ' ({{ _("Dividends") }}: $' + dividends.toLocaleString() + 
-                                       ', {{ _("Interest") }}: $' + interest.toLocaleString() + ')';
+                                const yearData = mainData.find(item => item.year === allYears[yearIndex]);
+                                if (yearData) {
+                                    const dividends = yearData.annual_dividends || 0;
+                                    const interest = yearData.annual_interest || 0;
+                                    return label + ': $' + value.toLocaleString() +
+                                           ' ({{ _("Div") }}: $' + dividends.toLocaleString() +
+                                           ', {{ _("Int") }}: $' + interest.toLocaleString() + ')';
+                                }
                             }
-                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                            return label + ': $' + value.toLocaleString();
                         },
                         footer: function(tooltipItems) {
                             let total = 0;
                             tooltipItems.forEach(function(tooltipItem) {
                                 total += tooltipItem.parsed.y;
                             });
-                            return '{{ _("Total") }}: $' + total.toLocaleString();
+                            return '{{ _("Combined Total") }}: $' + total.toLocaleString();
                         }
                     }
                 },
@@ -424,6 +594,7 @@ function updateAnnualReturnsChart() {
         }
     });
 }
+
 
 // Update annual table
 function updateAnnualTable() {
@@ -451,8 +622,8 @@ function updateAnnualTable() {
             return b.year - a.year;
         }
         // Within the same year, main row first, then detail/member rows
-        const aIsSubRow = a.is_detail_row || a.is_member_row;
-        const bIsSubRow = b.is_detail_row || b.is_member_row;
+        const aIsSubRow = a.is_detail_row || a.is_member_row || a.is_member_account_type_row;
+        const bIsSubRow = b.is_detail_row || b.is_member_row || b.is_member_account_type_row;
 
         if (aIsSubRow && !bIsSubRow) {
             return 1; // a comes after b
@@ -474,6 +645,9 @@ function updateAnnualTable() {
         } else if (item.is_member_row) {
             row.classList.add('table-info', 'member-row');
             row.style.fontSize = '0.9em';
+        } else if (item.is_member_account_type_row) {
+            row.classList.add('table-secondary', 'member-account-type-row');
+            row.style.fontSize = '0.85em';
         }
 
         const realizedClass = item.annual_realized_gain >= 0 ? 'text-success' : 'text-danger';
@@ -506,6 +680,8 @@ function updateAnnualTable() {
             displayYear = `<span class="account-type-indent">${item.account_type}</span>`;
         } else if (item.is_member_row) {
             displayYear = `<span class="member-name-indent">${item.member_name}</span>`;
+        } else if (item.is_member_account_type_row) {
+            displayYear = `<span class="member-account-type-indent">${item.account_type}</span>`;
         } else {
             displayYear = item.year;
         }
@@ -540,14 +716,14 @@ function updateAnnualTable() {
                 ${formatNumber(returnRate, 2, true)}%
             </td>
             <td class="text-muted">
-                ${item.is_detail_row || item.is_member_row ? '' : (item.annual_usd_cad_rate ? formatNumber(item.annual_usd_cad_rate, 4) : 'N/A')}
+                ${item.is_detail_row || item.is_member_row || item.is_member_account_type_row ? '' : (item.annual_usd_cad_rate ? formatNumber(item.annual_usd_cad_rate, 4) : 'N/A')}
             </td>
         `;
         
         tbody.appendChild(row);
         
         // Update totals (only for main rows, not detail rows or member rows)
-        if (!item.is_detail_row && !item.is_member_row) {
+        if (!item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row) {
             // Use the first main row for latest assets and set current exchange rate
             if (totalAssets === 0) {
                 totalAssets = item.total_assets;
@@ -576,7 +752,7 @@ function updateAnnualTable() {
         }
 
         // Calculate totals for overall return rate (only for main rows, not detail rows or member rows)
-        if (!item.is_detail_row && !item.is_member_row) {
+        if (!item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row) {
             const itemReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
             // Use total_assets as the investment base since annual_unrealized_gain is now incremental
             totalReturnsSum += itemReturns;

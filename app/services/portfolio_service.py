@@ -1108,36 +1108,159 @@ class PortfolioService:
                     continue  # 如果没有联合账户数据，跳过成员计算
 
                 for member in family_members:
-                    # 获取该成员在所有选定账户中的平均持股比例
+                    # 获取该成员在所有选定账户中的持股信息
                     member_account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
                     member_account_map = {}
-                    total_ownership = Decimal('0')
-                    account_count = 0
 
                     for membership in member_account_memberships:
                         if membership.account_id in account_ids:
                             ownership_pct = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
                             member_account_map[membership.account_id] = ownership_pct
-                            total_ownership += ownership_pct
-                            account_count += 1
 
                     if not member_account_map:
                         continue  # 该成员在选定账户中没有份额
 
-                    # 计算平均持股比例（如果是多个账户）
-                    if account_count > 0:
-                        avg_ownership_pct = total_ownership / account_count
-                    else:
-                        continue
+                    # 计算该成员的实际数据，按账户分别计算然后汇总
+                    member_total_assets = Decimal('0')
+                    member_realized_gain = Decimal('0')
+                    member_unrealized_gain = Decimal('0')
+                    member_dividends = Decimal('0')
+                    member_interest = Decimal('0')
+                    member_buy_amount = Decimal('0')
+                    member_sell_amount = Decimal('0')
+                    member_deposit_amount = Decimal('0')
+                    member_withdrawal_amount = Decimal('0')
+                    member_transaction_count = 0
 
-                    # 直接从联合账户数据计算成员数据：成员数据 = 联合账户数据 × 持股比例
-                    member_currency_breakdown = {}
-                    for key, value in current_year_data.get('currency_breakdown', {}).items():
-                        member_currency_breakdown[key] = float(value) * float(avg_ownership_pct)
+                    # 货币分解统计
+                    member_currency_breakdown = {
+                        'total_assets_cad': 0.0,
+                        'total_assets_usd': 0.0,
+                        'realized_gain_cad': 0.0,
+                        'realized_gain_usd': 0.0,
+                        'unrealized_gain_cad': 0.0,
+                        'unrealized_gain_usd': 0.0,
+                        'buy_cad': 0.0,
+                        'buy_usd': 0.0,
+                        'sell_cad': 0.0,
+                        'sell_usd': 0.0,
+                        'deposit_cad': 0.0,
+                        'deposit_usd': 0.0,
+                        'withdrawal_cad': 0.0,
+                        'withdrawal_usd': 0.0,
+                        'dividends_cad': 0.0,
+                        'dividends_usd': 0.0,
+                        'interest_cad': 0.0,
+                        'interest_usd': 0.0,
+                        'cash_cad': 0.0,
+                        'cash_usd': 0.0
+                    }
 
-                    member_cash_balance = {}
-                    for key, value in current_year_data.get('cash_balance', {}).items():
-                        member_cash_balance[key] = float(value) * float(avg_ownership_pct)
+                    member_cash_cad = Decimal('0')
+                    member_cash_usd = Decimal('0')
+
+                    # 按账户分别计算该成员的数据
+                    for account_id, ownership_pct in member_account_map.items():
+                        if ownership_pct <= 0:
+                            continue
+
+                        # 获取该账户在该年度的portfolio数据
+                        account_portfolio = self.get_portfolio_summary([account_id], TimePeriod.CUSTOM, end_date=year_end)
+
+                        # 累计资产数据
+                        for collection in ('current_holdings', 'cleared_holdings'):
+                            for holding in account_portfolio.get(collection, []):
+                                if holding.get('account_id') != account_id:
+                                    continue
+
+                                # 按该成员在该账户的持股比例计算
+                                current_value = Decimal(str(holding.get('current_value', 0) or 0)) * ownership_pct
+                                realized_gain = Decimal(str(holding.get('realized_gain', 0) or 0)) * ownership_pct
+                                unrealized_gain = Decimal(str(holding.get('unrealized_gain', 0) or 0)) * ownership_pct
+
+                                # 只有current_holdings计算总资产和浮动盈亏
+                                if collection == 'current_holdings':
+                                    member_total_assets += current_value
+                                    member_unrealized_gain += unrealized_gain
+
+                                # 实现收益对两种collection都计算
+                                member_realized_gain += realized_gain
+
+                                # 货币分解
+                                currency = (holding.get('currency') or 'USD').upper()
+                                if currency == 'CAD':
+                                    if collection == 'current_holdings':
+                                        member_currency_breakdown['total_assets_cad'] += float(current_value)
+                                        member_currency_breakdown['unrealized_gain_cad'] += float(unrealized_gain)
+                                    member_currency_breakdown['realized_gain_cad'] += float(realized_gain)
+                                elif currency == 'USD':
+                                    if collection == 'current_holdings':
+                                        member_currency_breakdown['total_assets_usd'] += float(current_value)
+                                        member_currency_breakdown['unrealized_gain_usd'] += float(unrealized_gain)
+                                    member_currency_breakdown['realized_gain_usd'] += float(realized_gain)
+
+                        # 处理该账户的交易数据
+                        account_transactions = [t for t in year_transactions if t.account_id == account_id]
+                        for transaction in account_transactions:
+                            amount = Decimal(str(transaction.amount or 0))
+                            tx_currency = (transaction.currency or 'USD').upper()
+                            value = amount * ownership_pct
+
+                            member_transaction_count += 1
+
+                            if transaction.type == 'BUY':
+                                member_buy_amount += value
+                                if tx_currency == 'CAD':
+                                    member_currency_breakdown['buy_cad'] += float(value)
+                                elif tx_currency == 'USD':
+                                    member_currency_breakdown['buy_usd'] += float(value)
+                            elif transaction.type == 'SELL':
+                                member_sell_amount += value
+                                if tx_currency == 'CAD':
+                                    member_currency_breakdown['sell_cad'] += float(value)
+                                elif tx_currency == 'USD':
+                                    member_currency_breakdown['sell_usd'] += float(value)
+                            elif transaction.type == 'DEPOSIT':
+                                member_deposit_amount += value
+                                if tx_currency == 'CAD':
+                                    member_currency_breakdown['deposit_cad'] += float(value)
+                                elif tx_currency == 'USD':
+                                    member_currency_breakdown['deposit_usd'] += float(value)
+                            elif transaction.type == 'WITHDRAWAL':
+                                member_withdrawal_amount += value
+                                if tx_currency == 'CAD':
+                                    member_currency_breakdown['withdrawal_cad'] += float(value)
+                                elif tx_currency == 'USD':
+                                    member_currency_breakdown['withdrawal_usd'] += float(value)
+                            elif transaction.type == 'DIVIDEND':
+                                member_dividends += value
+                                if tx_currency == 'CAD':
+                                    member_currency_breakdown['dividends_cad'] += float(value)
+                                elif tx_currency == 'USD':
+                                    member_currency_breakdown['dividends_usd'] += float(value)
+                            elif transaction.type == 'INTEREST':
+                                member_interest += value
+                                if tx_currency == 'CAD':
+                                    member_currency_breakdown['interest_cad'] += float(value)
+                                elif tx_currency == 'USD':
+                                    member_currency_breakdown['interest_usd'] += float(value)
+
+                        # 计算现金余额
+                        snapshot = asset_service.get_asset_snapshot(account_id, year_end)
+                        member_cash_cad += snapshot.cash_balance_cad * ownership_pct
+                        member_cash_usd += snapshot.cash_balance_usd * ownership_pct
+
+                    # 添加现金到货币分解
+                    member_currency_breakdown['cash_cad'] = float(member_cash_cad)
+                    member_currency_breakdown['cash_usd'] = float(member_cash_usd)
+
+                    # 计算总资产（包含现金）
+                    total_assets_with_cash = member_total_assets + member_cash_cad + member_cash_usd * exchange_rate_decimal
+
+                    member_cash_balance = {
+                        'cad': float(member_cash_cad),
+                        'usd': float(member_cash_usd)
+                    }
 
                     # 为该成员创建详细行
                     annual_data.append({
@@ -1145,29 +1268,211 @@ class PortfolioService:
                         'member_name': member.name,  # 标识这是成员详细行
                         'member_id': member.id,
                         'is_member_row': True,  # 标识这是成员行
-                        'total_assets': current_year_data.get('total_assets', 0) * float(avg_ownership_pct),
-                        'annual_realized_gain': current_year_data.get('annual_realized_gain', 0) * float(avg_ownership_pct),
-                        'annual_unrealized_gain': current_year_data.get('annual_unrealized_gain', 0) * float(avg_ownership_pct),
-                        'annual_dividends': current_year_data.get('annual_dividends', 0) * float(avg_ownership_pct),
-                        'annual_interest': current_year_data.get('annual_interest', 0) * float(avg_ownership_pct),
-                        'annual_income': current_year_data.get('annual_income', 0) * float(avg_ownership_pct),
-                        'transaction_count': int(current_year_data.get('transaction_count', 0) * float(avg_ownership_pct)),
-                        'buy_amount': current_year_data.get('buy_amount', 0) * float(avg_ownership_pct),
-                        'sell_amount': current_year_data.get('sell_amount', 0) * float(avg_ownership_pct),
-                        'deposit_amount': current_year_data.get('deposit_amount', 0) * float(avg_ownership_pct),
-                        'withdrawal_amount': current_year_data.get('withdrawal_amount', 0) * float(avg_ownership_pct),
-                        'annual_usd_cad_rate': current_year_data.get('annual_usd_cad_rate'),
+                        'total_assets': float(total_assets_with_cash),
+                        'annual_realized_gain': float(member_realized_gain),
+                        'annual_unrealized_gain': float(member_unrealized_gain),
+                        'annual_dividends': float(member_dividends),
+                        'annual_interest': float(member_interest),
+                        'annual_income': float(member_dividends + member_interest),
+                        'transaction_count': member_transaction_count,
+                        'buy_amount': float(member_buy_amount),
+                        'sell_amount': float(member_sell_amount),
+                        'deposit_amount': float(member_deposit_amount),
+                        'withdrawal_amount': float(member_withdrawal_amount),
+                        'annual_usd_cad_rate': annual_usd_cad_rate_float,
                         'currency_breakdown': member_currency_breakdown,
                         'cash_balance': member_cash_balance
                     })
 
+                    # 如果是全部成员模式（没有选择特定成员），为每个成员按账户类型进行细分
+                    if member_id is None:
+                        # 获取该成员的账户信息，包括账户类型
+                        member_specific_accounts = db.session.query(Account, AccountType, AccountMember).join(
+                            AccountMember, Account.id == AccountMember.account_id
+                        ).join(
+                            AccountType, Account.account_type_id == AccountType.id
+                        ).filter(
+                            AccountMember.member_id == member.id,
+                            Account.id.in_(account_ids)
+                        ).all()
+
+                        # 按账户类型分组该成员的数据
+                        member_account_type_groups = {}
+
+                        for account, account_type, membership in member_specific_accounts:
+                            account_type_name = account_type.name
+                            ownership_pct = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+
+                            if account_type_name not in member_account_type_groups:
+                                member_account_type_groups[account_type_name] = {
+                                    'total_assets': Decimal('0'),
+                                    'annual_realized_gain': Decimal('0'),
+                                    'annual_unrealized_gain': Decimal('0'),
+                                    'annual_dividends': Decimal('0'),
+                                    'annual_interest': Decimal('0'),
+                                    'buy_amount': Decimal('0'),
+                                    'sell_amount': Decimal('0'),
+                                    'deposit_amount': Decimal('0'),
+                                    'withdrawal_amount': Decimal('0'),
+                                    'transaction_count': 0,
+                                    'currency_breakdown': {
+                                        'total_assets_cad': 0.0,
+                                        'total_assets_usd': 0.0,
+                                        'realized_gain_cad': 0.0,
+                                        'realized_gain_usd': 0.0,
+                                        'unrealized_gain_cad': 0.0,
+                                        'unrealized_gain_usd': 0.0,
+                                        'buy_cad': 0.0,
+                                        'buy_usd': 0.0,
+                                        'sell_cad': 0.0,
+                                        'sell_usd': 0.0,
+                                        'deposit_cad': 0.0,
+                                        'deposit_usd': 0.0,
+                                        'withdrawal_cad': 0.0,
+                                        'withdrawal_usd': 0.0,
+                                        'dividends_cad': 0.0,
+                                        'dividends_usd': 0.0,
+                                        'interest_cad': 0.0,
+                                        'interest_usd': 0.0,
+                                    }
+                                }
+
+                            # 获取该账户的持仓数据
+                            original_portfolio = self.get_portfolio_summary([account.id], TimePeriod.CUSTOM, end_date=year_end)
+
+                            # 累计计算该账户类型的数据
+                            group = member_account_type_groups[account_type_name]
+
+                            for collection in ('current_holdings', 'cleared_holdings'):
+                                for holding in original_portfolio.get(collection, []):
+                                    if holding.get('account_id') != account.id:
+                                        continue
+
+                                    # 按该成员在该账户的持股比例计算
+                                    current_value = Decimal(str(holding.get('current_value', 0) or 0)) * ownership_pct
+                                    realized_gain = Decimal(str(holding.get('realized_gain', 0) or 0)) * ownership_pct
+                                    unrealized_gain = Decimal(str(holding.get('unrealized_gain', 0) or 0)) * ownership_pct
+
+                                    # 只有current_holdings计算总资产和浮动盈亏
+                                    if collection == 'current_holdings':
+                                        group['total_assets'] += current_value
+                                        group['annual_unrealized_gain'] += unrealized_gain
+
+                                    # 实现收益对两种collection都计算
+                                    group['annual_realized_gain'] += realized_gain
+
+                                    # 货币分解
+                                    currency = (holding.get('currency') or 'USD').upper()
+                                    if currency == 'CAD':
+                                        if collection == 'current_holdings':
+                                            group['currency_breakdown']['total_assets_cad'] += float(current_value)
+                                            group['currency_breakdown']['unrealized_gain_cad'] += float(unrealized_gain)
+                                        group['currency_breakdown']['realized_gain_cad'] += float(realized_gain)
+                                    elif currency == 'USD':
+                                        if collection == 'current_holdings':
+                                            group['currency_breakdown']['total_assets_usd'] += float(current_value)
+                                            group['currency_breakdown']['unrealized_gain_usd'] += float(unrealized_gain)
+                                        group['currency_breakdown']['realized_gain_usd'] += float(realized_gain)
+
+                            # 处理该账户的交易数据
+                            account_transactions = [t for t in year_transactions if t.account_id == account.id]
+                            for transaction in account_transactions:
+                                amount = Decimal(str(transaction.amount or 0))
+                                tx_currency = (transaction.currency or 'USD').upper()
+                                value = amount * ownership_pct
+
+                                group['transaction_count'] += 1
+
+                                if transaction.type == 'BUY':
+                                    group['buy_amount'] += value
+                                    if tx_currency == 'CAD':
+                                        group['currency_breakdown']['buy_cad'] += float(value)
+                                    elif tx_currency == 'USD':
+                                        group['currency_breakdown']['buy_usd'] += float(value)
+                                elif transaction.type == 'SELL':
+                                    group['sell_amount'] += value
+                                    if tx_currency == 'CAD':
+                                        group['currency_breakdown']['sell_cad'] += float(value)
+                                    elif tx_currency == 'USD':
+                                        group['currency_breakdown']['sell_usd'] += float(value)
+                                elif transaction.type == 'DIVIDEND':
+                                    group['annual_dividends'] += value
+                                    if tx_currency == 'CAD':
+                                        group['currency_breakdown']['dividends_cad'] += float(value)
+                                    elif tx_currency == 'USD':
+                                        group['currency_breakdown']['dividends_usd'] += float(value)
+                                elif transaction.type == 'INTEREST':
+                                    group['annual_interest'] += value
+                                    if tx_currency == 'CAD':
+                                        group['currency_breakdown']['interest_cad'] += float(value)
+                                    elif tx_currency == 'USD':
+                                        group['currency_breakdown']['interest_usd'] += float(value)
+                                elif transaction.type == 'DEPOSIT':
+                                    group['deposit_amount'] += value
+                                    if tx_currency == 'CAD':
+                                        group['currency_breakdown']['deposit_cad'] += float(value)
+                                    elif tx_currency == 'USD':
+                                        group['currency_breakdown']['deposit_usd'] += float(value)
+                                elif transaction.type == 'WITHDRAWAL':
+                                    group['withdrawal_amount'] += value
+                                    if tx_currency == 'CAD':
+                                        group['currency_breakdown']['withdrawal_cad'] += float(value)
+                                    elif tx_currency == 'USD':
+                                        group['currency_breakdown']['withdrawal_usd'] += float(value)
+
+                        # 为每个账户类型创建详细行
+                        for account_type_name, group_data in member_account_type_groups.items():
+                            # 计算该账户类型的现金余额
+                            type_cash_cad = Decimal('0')
+                            type_cash_usd = Decimal('0')
+
+                            for account, account_type, membership in member_specific_accounts:
+                                if account_type.name == account_type_name:
+                                    ownership_pct = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+                                    snapshot = asset_service.get_asset_snapshot(account.id, year_end)
+                                    type_cash_cad += snapshot.cash_balance_cad * ownership_pct
+                                    type_cash_usd += snapshot.cash_balance_usd * ownership_pct
+
+                            total_assets_with_cash = group_data['total_assets'] + type_cash_cad + type_cash_usd * exchange_rate_decimal
+
+                            annual_data.append({
+                                'year': year,
+                                'member_name': member.name,
+                                'member_id': member.id,
+                                'account_type': account_type_name,
+                                'is_member_account_type_row': True,  # 标识这是成员+账户类型详细行
+                                'total_assets': float(total_assets_with_cash),
+                                'annual_realized_gain': float(group_data['annual_realized_gain']),
+                                'annual_unrealized_gain': float(group_data['annual_unrealized_gain']),
+                                'annual_dividends': float(group_data['annual_dividends']),
+                                'annual_interest': float(group_data['annual_interest']),
+                                'annual_income': float(group_data['annual_dividends'] + group_data['annual_interest']),
+                                'transaction_count': group_data['transaction_count'],
+                                'buy_amount': float(group_data['buy_amount']),
+                                'sell_amount': float(group_data['sell_amount']),
+                                'deposit_amount': float(group_data['deposit_amount']),
+                                'withdrawal_amount': float(group_data['withdrawal_amount']),
+                                'annual_usd_cad_rate': annual_usd_cad_rate_float,
+                                'currency_breakdown': {
+                                    'total_assets_cad': group_data['currency_breakdown']['total_assets_cad'] + float(type_cash_cad),
+                                    'total_assets_usd': group_data['currency_breakdown']['total_assets_usd'] + float(type_cash_usd),
+                                    **group_data['currency_breakdown'],
+                                    'cash_cad': float(type_cash_cad),
+                                    'cash_usd': float(type_cash_usd)
+                                },
+                                'cash_balance': {
+                                    'cad': float(type_cash_cad),
+                                    'usd': float(type_cash_usd)
+                                }
+                            })
+
         # 计算图表数据
         chart_data = self._prepare_annual_chart_data(annual_data)
 
-        # 只计算联合账户数据，不包括成员数据
+        # 只计算联合账户数据，不包括成员数据和成员账户类型数据
         total_realized_sum = sum(item.get('annual_realized_gain', 0) or 0
                                for item in annual_data
-                               if not item.get('is_member_row', False))
+                               if not item.get('is_member_row', False) and not item.get('is_member_account_type_row', False))
 
         # 获取当前持仓的总未实现收益，而不是年度增量的总和
         current_portfolio = self.get_portfolio_summary(account_ids)
@@ -1191,7 +1496,7 @@ class PortfolioService:
 
         total_income_sum = sum((item.get('annual_dividends', 0) or 0) + (item.get('annual_interest', 0) or 0)
                                for item in annual_data
-                               if not item.get('is_member_row', False))
+                               if not item.get('is_member_row', False) and not item.get('is_member_account_type_row', False))
 
         if annual_data:
             latest_entry = max(annual_data, key=lambda x: x.get('year', 0))
@@ -1212,14 +1517,14 @@ class PortfolioService:
             'annual_data': annual_data,
             'chart_data': chart_data,
             'summary': {
-                'years_covered': len(annual_data),
+                'years_covered': len([item for item in annual_data if not item.get('is_member_row', False) and not item.get('is_member_account_type_row', False)]),
                 'total_years_gain': sum(item['annual_realized_gain'] + item['annual_unrealized_gain']
                                       for item in annual_data
-                                      if not item.get('is_member_row', False)),
+                                      if not item.get('is_member_row', False) and not item.get('is_member_account_type_row', False)),
                 'total_dividends': sum(item['annual_dividends'] for item in annual_data
-                                     if not item.get('is_member_row', False)),
+                                     if not item.get('is_member_row', False) and not item.get('is_member_account_type_row', False)),
                 'total_interest': sum(item['annual_interest'] for item in annual_data
-                                    if not item.get('is_member_row', False)),
+                                    if not item.get('is_member_row', False) and not item.get('is_member_account_type_row', False)),
                 'average_annual_return': self._calculate_average_annual_return(annual_data),
                 'total_realized_gain': total_realized_sum,
                 'total_unrealized_gain': current_total_unrealized,
