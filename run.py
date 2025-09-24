@@ -51,7 +51,10 @@ def check_and_initialize_database(app):
                     else:
                         # 使用简单演示数据
                         service.create_demo_family()
-                    
+
+                        # 创建示例交易记录
+                        service.create_sample_transactions()
+
                     print("✅ 演示数据创建完成")
                 
                 print("🎉 数据库初始化完成！系统已准备就绪")

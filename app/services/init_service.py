@@ -216,3 +216,213 @@ class InitializationService:
         print(f"  - Member2账户: Non-registered, TFSA, RRSP")
         print(f"  - Joint账户: Member1(50%), Member2(50%)")
         return demo_family
+
+    def create_sample_transactions(self):
+        """为账户1创建示例交易记录"""
+        from app.models.transaction import Transaction
+        from app.models.account import Account
+        from datetime import datetime, date
+        import decimal
+
+        print("正在创建示例交易记录...")
+
+        # 找到第一个账户（Member1 Non-registered或者第一个Non-registered账户）
+        account = Account.query.filter_by(name="Member1 Non-registered").first()
+        if not account:
+            # 如果找不到指定名称的账户，使用第一个账户
+            account = Account.query.first()
+            if not account:
+                print("  未找到任何账户，跳过创建交易记录")
+                return
+            print(f"  使用账户: {account.name} (ID: {account.id})")
+
+        # 检查是否已经有交易记录
+        existing_transactions = Transaction.query.filter_by(account_id=account.id).first()
+        if existing_transactions:
+            print("  账户已有交易记录，跳过创建")
+            return
+
+        account_id = account.id
+
+        # 示例交易记录：
+        # 1. AAPL (苹果) - 未清仓
+        # 2. NVDA (英伟达) - 未清仓
+        # 3. GOOGL (谷歌) - 已清仓
+        # 4. MSFT (微软) - 已清仓
+
+        sample_transactions = [
+            # === AAPL (苹果) - 未清仓 ===
+            # 买入100股 @ $150
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 1, 15),
+                stock='AAPL',
+                type='BUY',
+                quantity=decimal.Decimal('100'),
+                price=decimal.Decimal('150.50'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='苹果股票首次买入'
+            ),
+            # 买入50股 @ $160
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 3, 20),
+                stock='AAPL',
+                type='BUY',
+                quantity=decimal.Decimal('50'),
+                price=decimal.Decimal('160.25'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='苹果股票补仓'
+            ),
+            # 收到分红
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 5, 10),
+                stock='AAPL',
+                type='DIVIDEND',
+                quantity=decimal.Decimal('150'),  # 150股
+                price=decimal.Decimal('0.25'),  # 每股分红金额
+                amount=decimal.Decimal('37.50'),  # 总分红金额
+                currency='USD',
+                notes='苹果季度分红'
+            ),
+            # 收到分红
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 8, 10),
+                stock='AAPL',
+                type='DIVIDEND',
+                quantity=decimal.Decimal('150'),  # 150股
+                price=decimal.Decimal('0.25'),  # 每股分红金额
+                amount=decimal.Decimal('37.50'),  # 总分红金额
+                currency='USD',
+                notes='苹果季度分红'
+            ),
+
+            # === NVDA (英伟达) - 未清仓 ===
+            # 买入30股 @ $400
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 2, 10),
+                stock='NVDA',
+                type='BUY',
+                quantity=decimal.Decimal('30'),
+                price=decimal.Decimal('400.00'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='英伟达AI概念股投资'
+            ),
+            # 买入20股 @ $500
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 6, 15),
+                stock='NVDA',
+                type='BUY',
+                quantity=decimal.Decimal('20'),
+                price=decimal.Decimal('500.00'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='英伟达追加投资'
+            ),
+
+            # === GOOGL (谷歌) - 已清仓 ===
+            # 买入80股 @ $120
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2023, 11, 5),
+                stock='GOOGL',
+                type='BUY',
+                quantity=decimal.Decimal('80'),
+                price=decimal.Decimal('120.00'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='谷歌股票投资'
+            ),
+            # 买入40股 @ $110
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 1, 25),
+                stock='GOOGL',
+                type='BUY',
+                quantity=decimal.Decimal('40'),
+                price=decimal.Decimal('110.00'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='谷歌股票补仓'
+            ),
+            # 全部卖出120股 @ $135
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 7, 30),
+                stock='GOOGL',
+                type='SELL',
+                quantity=decimal.Decimal('120'),
+                price=decimal.Decimal('135.00'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='谷歌股票全部清仓获利'
+            ),
+
+            # === MSFT (微软) - 已清仓 ===
+            # 买入60股 @ $300
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2023, 12, 10),
+                stock='MSFT',
+                type='BUY',
+                quantity=decimal.Decimal('60'),
+                price=decimal.Decimal('300.00'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='微软股票投资'
+            ),
+            # 收到分红
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 3, 15),
+                stock='MSFT',
+                type='DIVIDEND',
+                quantity=decimal.Decimal('60'),
+                price=decimal.Decimal('0.75'),  # 每股分红金额
+                amount=decimal.Decimal('45.00'),  # 总分红金额
+                currency='USD',
+                notes='微软季度分红'
+            ),
+            # 收到分红
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 6, 15),
+                stock='MSFT',
+                type='DIVIDEND',
+                quantity=decimal.Decimal('60'),
+                price=decimal.Decimal('0.75'),  # 每股分红金额
+                amount=decimal.Decimal('45.00'),  # 总分红金额
+                currency='USD',
+                notes='微软季度分红'
+            ),
+            # 全部卖出60股 @ $290
+            Transaction(
+                account_id=account_id,
+                trade_date=date(2024, 8, 25),
+                stock='MSFT',
+                type='SELL',
+                quantity=decimal.Decimal('60'),
+                price=decimal.Decimal('290.00'),
+                fee=decimal.Decimal('9.95'),
+                currency='USD',
+                notes='微软股票全部清仓止损'
+            ),
+        ]
+
+        # 添加所有交易记录
+        for transaction in sample_transactions:
+            db.session.add(transaction)
+
+        db.session.commit()
+        print("  示例交易记录创建完成！")
+        print(f"  - AAPL (苹果): 150股未清仓，含分红记录")
+        print(f"  - NVDA (英伟达): 50股未清仓")
+        print(f"  - GOOGL (谷歌): 已清仓获利")
+        print(f"  - MSFT (微软): 已清仓止损，含分红记录")

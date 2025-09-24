@@ -124,24 +124,59 @@
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-hover mb-0">
+                        <table class="table table-hover mb-0" id="transactionTable">
                             <thead class="table-light">
                                 <tr>
-                                    <th>{{ _('Date') }}</th>
-                                    <th>{{ _('Account') }}</th>
-                                    <th>{{ _('Type') }}</th>
-                                    <th class="text-end">{{ _('Quantity') }}</th>
-                                    <th class="text-end">{{ _('Price') }}</th>
-                                    <th class="text-end">{{ _('Amount') }}</th>
-                                    <th class="text-end">{{ _('Fee') }}</th>
-                                    <th>{{ _('Currency') }}</th>
-                                    <th>{{ _('Notes') }}</th>
+                                    <th class="sortable" data-sort="date">
+                                        {{ _('Date') }}
+                                        <i class="fas fa-sort-down ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="account">
+                                        {{ _('Account') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="type">
+                                        {{ _('Type') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="quantity">
+                                        {{ _('Quantity') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="price">
+                                        {{ _('Price') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="amount">
+                                        {{ _('Amount') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="fee">
+                                        {{ _('Fee') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="currency">
+                                        {{ _('Currency') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="notes">
+                                        {{ _('Notes') }}
+                                        <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
                                     <th>{{ _('Actions') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for transaction in transactions %}
-                                <tr>
+                                <tr data-date="{{ transaction.trade_date.isoformat() }}"
+                                    data-account="{{ transaction.account.name }}"
+                                    data-type="{{ transaction.type }}"
+                                    data-quantity="{{ transaction.quantity or 0 }}"
+                                    data-price="{{ transaction.price or 0 }}"
+                                    data-amount="{{ transaction.amount or 0 }}"
+                                    data-fee="{{ transaction.fee or 0 }}"
+                                    data-currency="{{ transaction.currency or 'CAD' }}"
+                                    data-notes="{{ transaction.notes or '' }}">
                                     <td>
                                         <span class="fw-medium">{{ transaction.trade_date.strftime('%Y-%m-%d') }}</span>
                                     </td>
@@ -809,6 +844,119 @@ function handleEditNotesSubmit(event) {
         alert('{{ _("Failed to update notes") }}');
     });
 }
+
+// Table sorting functionality for transaction table
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize sorting for transaction table
+    initTransactionTableSorting('transactionTable');
+
+    function initTransactionTableSorting(tableId) {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+
+        const sortableHeaders = table.querySelectorAll('th.sortable');
+        let currentSort = {column: 'date', direction: 'desc'}; // Default to date descending
+
+        sortableHeaders.forEach(header => {
+            header.style.cursor = 'pointer';
+            header.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const sortType = this.dataset.sort;
+                const sortDirection = (currentSort.column === sortType && currentSort.direction === 'asc') ? 'desc' : 'asc';
+
+                sortTransactionTable(table, sortType, sortDirection);
+                updateTransactionSortIcons(sortableHeaders, this, sortDirection);
+
+                currentSort = {column: sortType, direction: sortDirection};
+            });
+        });
+
+        // Apply default sort (date descending)
+        const tbody = table.querySelector('tbody');
+        if (tbody && tbody.children.length > 0) {
+            sortTransactionTable(table, 'date', 'desc');
+        }
+    }
+
+    function sortTransactionTable(table, sortType, direction) {
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        rows.sort((a, b) => {
+            let aVal, bVal;
+
+            if (sortType === 'date') {
+                aVal = new Date(a.dataset.date);
+                bVal = new Date(b.dataset.date);
+                return direction === 'asc' ? aVal - bVal : bVal - aVal;
+            } else if (sortType === 'account' || sortType === 'type' || sortType === 'currency' || sortType === 'notes') {
+                aVal = (a.dataset[sortType] || '').toLowerCase();
+                bVal = (b.dataset[sortType] || '').toLowerCase();
+                return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                // For numeric values (quantity, price, amount, fee)
+                aVal = parseFloat(a.dataset[sortType]) || 0;
+                bVal = parseFloat(b.dataset[sortType]) || 0;
+                return direction === 'asc' ? aVal - bVal : bVal - aVal;
+            }
+        });
+
+        // Remove all rows and re-add them in sorted order
+        rows.forEach(row => tbody.removeChild(row));
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    function updateTransactionSortIcons(headers, clickedHeader, direction) {
+        // Reset all icons
+        headers.forEach(header => {
+            const icon = header.querySelector('.sort-icon');
+            icon.className = 'fas fa-sort ms-1 sort-icon';
+        });
+
+        // Update clicked header icon
+        const icon = clickedHeader.querySelector('.sort-icon');
+        icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} ms-1 sort-icon`;
+    }
+});
+</script>
+
+<style>
+.sortable {
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.sortable:hover {
+    background-color: rgba(0, 123, 255, 0.1) !important;
+}
+
+.sort-icon {
+    opacity: 0.3;
+    transition: opacity 0.2s ease;
+    font-size: 0.8rem;
+}
+
+.sortable:hover .sort-icon {
+    opacity: 0.7;
+}
+
+.sortable .fa-sort-up,
+.sortable .fa-sort-down {
+    opacity: 1;
+    color: #007bff;
+}
+
+#transactionTable {
+    position: relative;
+}
+
+#transactionTable tbody tr {
+    transition: all 0.3s ease;
+}
+</style>
+
 </script>
 
 <!-- Include Transaction Modals -->
