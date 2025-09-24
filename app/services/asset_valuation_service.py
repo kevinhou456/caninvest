@@ -17,6 +17,8 @@ from app.models.cash import Cash
 from app.services.stock_price_service import StockPriceService
 from app.services.currency_service import CurrencyService
 from app.services.stock_history_cache_service import StockHistoryCacheService
+from app.models.stocks_cache import StocksCache
+from app.models.stock_category import StockCategory
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +239,26 @@ class AssetValuationService:
                         # USD股票的收益转换回USD显示
                         unrealized_gain = unrealized_gain_cad / float(exchange_rate) if currency == 'USD' else unrealized_gain_cad
 
+                        # 获取股票信息（公司名和分类）
+                        stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+                        if stock_cache:
+                            company_name = stock_cache.name or symbol
+                            sector = 'Unknown'
+                            if stock_cache.category_id and stock_cache.category:
+                                sector = stock_cache.category.name or stock_cache.category.name_en or 'Unknown'
+                        else:
+                            company_name = symbol
+                            sector = 'Unknown'
+
+                        # 计算Daily Change
+                        daily_change_value = 0
+                        daily_change_percent = 0
+                        previous_price = self._get_previous_close_price(symbol, currency, target_date)
+                        if previous_price and previous_price > 0:
+                            daily_change_per_share = float(current_price) - float(previous_price)
+                            daily_change_value = daily_change_per_share * float(current_shares)
+                            daily_change_percent = (daily_change_per_share / float(previous_price)) * 100
+
                         holding_data = {
                             'symbol': symbol,
                             'account_id': account_id,
@@ -260,8 +282,10 @@ class AssetValuationService:
                             'interest_received': dividend_interest['interest_received'],
                             'dividend_received_cad': dividend_interest['dividend_received_cad'],
                             'interest_received_cad': dividend_interest['interest_received_cad'],
-                            'company_name': symbol,
-                            'sector': 'Unknown'
+                            'company_name': company_name,
+                            'sector': sector,
+                            'daily_change_value': daily_change_value,
+                            'daily_change_percent': daily_change_percent
                         }
                         current_holdings.append(holding_data)
 
@@ -280,6 +304,17 @@ class AssetValuationService:
                 # 选择一个账户作为代表账户（用于显示账户名称）
                 representative_account = next(iter(accounts_data.values()))['account']
 
+                # 获取股票信息（公司名和分类）
+                stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+                if stock_cache:
+                    company_name = stock_cache.name or symbol
+                    sector = 'Unknown'
+                    if stock_cache.category_id and stock_cache.category:
+                        sector = stock_cache.category.name or stock_cache.category.name_en or 'Unknown'
+                else:
+                    company_name = symbol
+                    sector = 'Unknown'
+
                 cleared_data = {
                     'symbol': symbol,
                     'account_id': representative_account.id,  # 使用代表账户
@@ -295,8 +330,8 @@ class AssetValuationService:
                     'interest': total_interest,
                     'dividend_received': total_dividends,
                     'interest_received': total_interest,
-                    'company_name': symbol,
-                    'sector': 'Unknown'
+                    'company_name': company_name,
+                    'sector': sector
                 }
                 cleared_holdings.append(cleared_data)
 
@@ -342,6 +377,55 @@ class AssetValuationService:
             'dividend_received_cad': dividend_received_cad,
             'interest_received_cad': interest_received_cad
         }
+
+    def _get_previous_close_price(self, symbol: str, currency: str, target_date: date) -> Optional[float]:
+        """
+        获取前一个交易日的收盘价
+        """
+        from datetime import timedelta
+
+        if not symbol or not target_date:
+            return None
+
+        # 计算搜索窗口（向前14天）
+        window_start = target_date - timedelta(days=14)
+        effective_end = min(target_date, date.today())
+
+        try:
+            # 获取历史数据
+            history = self.history_cache_service.get_cached_history(
+                symbol,
+                window_start,
+                effective_end,
+                currency=currency
+            )
+
+            if not history:
+                return None
+
+            # 按日期排序，最新的在前
+            history_sorted = sorted(
+                (record for record in history if record.get('date') and record.get('close') is not None),
+                key=lambda r: r['date'],
+                reverse=True
+            )
+
+            # 寻找目标日期之前最近的交易日价格
+            for record in history_sorted:
+                try:
+                    record_date = datetime.fromisoformat(record['date']).date()
+                except ValueError:
+                    continue
+
+                # 如果是今天的数据，跳过找前一个交易日
+                if record_date < target_date:
+                    return float(record['close'])
+
+            return None
+
+        except Exception as e:
+            logger.error(f"获取{symbol}前一日收盘价失败: {e}")
+            return None
 
     def _get_simplified_portfolio_data(self, account_ids: List[int], target_date: date) -> Dict:
         """
