@@ -251,6 +251,10 @@ class StockHistoryCacheService:
         # Good Friday
         holidays.add(StockHistoryCacheService._good_friday(year))
 
+        # Special one-time holidays
+        if year == 2025:
+            holidays.add(date(2025, 1, 9))  # National Day of Mourning for Jimmy Carter
+
         return holidays
 
     @staticmethod

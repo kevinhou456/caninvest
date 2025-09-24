@@ -6,7 +6,7 @@
 """
 
 from datetime import datetime, date, timedelta
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Set
 from decimal import Decimal, ROUND_HALF_UP
 import logging
 
@@ -380,7 +380,7 @@ class AssetValuationService:
 
     def _get_previous_close_price(self, symbol: str, currency: str, target_date: date) -> Optional[float]:
         """
-        获取前一个交易日的收盘价
+        获取前一个交易日的收盘价，排除股市休市日
         """
         from datetime import timedelta
 
@@ -403,6 +403,9 @@ class AssetValuationService:
             if not history:
                 return None
 
+            # 确定市场类型（美国或加拿大）
+            market = self.history_cache_service._get_market(symbol, currency)
+
             # 按日期排序，最新的在前
             history_sorted = sorted(
                 (record for record in history if record.get('date') and record.get('close') is not None),
@@ -410,15 +413,20 @@ class AssetValuationService:
                 reverse=True
             )
 
-            # 寻找目标日期之前最近的交易日价格
+            # 寻找目标日期之前最近的交易日价格，排除休市日
             for record in history_sorted:
                 try:
                     record_date = datetime.fromisoformat(record['date']).date()
                 except ValueError:
                     continue
 
-                # 如果是今天的数据，跳过找前一个交易日
-                if record_date < target_date:
+                # 如果是目标日期或之后，跳过
+                if record_date >= target_date:
+                    continue
+
+                # 检查是否为交易日（排除周末和法定假期）
+                if (record_date.weekday() < 5 and
+                    not self.history_cache_service._is_market_holiday_by_market(market, record_date)):
                     return float(record['close'])
 
             return None
