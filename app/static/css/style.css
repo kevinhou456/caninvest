@@ -456,6 +456,33 @@ body {
     }
 }
 
+/* 自定义颜色 - 更深的青色和橘黄色 */
+.text-info {
+    color: #0c5460 !important; /* 原来的 #17a2b8 改为更深的青色 */
+}
+
+.text-warning {
+    color: #cc8500 !important; /* 原来的 #ffc107 改为更深的橘黄色 */
+}
+
+.bg-info {
+    background-color: #0c5460 !important;
+}
+
+.bg-warning {
+    background-color: #cc8500 !important;
+}
+
+.btn-info {
+    background-color: #0c5460;
+    border-color: #0c5460;
+}
+
+.btn-warning {
+    background-color: #cc8500;
+    border-color: #cc8500;
+}
+
 /* 自定义滚动条 */
 ::-webkit-scrollbar {
     width: 8px;
