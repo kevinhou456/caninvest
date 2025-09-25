@@ -120,22 +120,14 @@ migrations/versions/*.py
 test_db.db
 family_investment.db
 /static/uploads
-debug_csv_flow.py
-test_csv_import_enhancements.py
-test_csv_import_simple.py
-test_currency_validation.py
-test_transaction_update.py
-app/templates/investment/stock_detail 2.html
-app/templates/investment/overview 2.html
-app/templates/investment/holdings_board 2.html
-app/templates/imports/index 2.html
-app/services/data_change_listener 2.py
-app/services/asset_valuation_service 2.py
-app/models/__init__ 2.py
-app/api/stocks 2.py
-app/api/imports 2.py
-app/api/__init__ 2.py
 /static
-test_csv_export.py
-debug_overview_holdings.py
-test_daily_change.py
+
+# Test and debug files
+test_*.py
+debug_*.py
+
+# Duplicate files with numeric suffixes
+*2.py
+*2.html
+*3.py
+*3.html
