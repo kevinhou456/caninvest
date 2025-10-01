@@ -287,11 +287,14 @@ class ReportService:
     
     def _calculate_change(self, current: AssetSnapshot, previous: AssetSnapshot) -> Dict:
         """计算两个快照之间的变化"""
+        total_assets_change = float(current.total_assets - previous.total_assets)
+        total_assets_change_pct = self._calculate_percentage_change(
+            current.total_assets, previous.total_assets
+        )
+
         return {
-            'total_assets_change': float(current.total_assets - previous.total_assets),
-            'total_assets_change_pct': self._calculate_percentage_change(
-                current.total_assets, previous.total_assets
-            ),
+            'total_assets_change': total_assets_change,
+            'total_assets_change_pct': total_assets_change_pct,
             'stock_market_value_change': float(current.stock_market_value - previous.stock_market_value),
             'stock_market_value_change_pct': self._calculate_percentage_change(
                 current.stock_market_value, previous.stock_market_value
@@ -299,7 +302,10 @@ class ReportService:
             'cash_balance_change': float(current.cash_balance_total_cad - previous.cash_balance_total_cad),
             'cash_balance_change_pct': self._calculate_percentage_change(
                 current.cash_balance_total_cad, previous.cash_balance_total_cad
-            )
+            ),
+            # Add convenience fields for backward compatibility
+            'amount': total_assets_change,
+            'percentage': total_assets_change_pct
         }
     
     def _calculate_percentage_change(self, current: Decimal, previous: Decimal) -> float:

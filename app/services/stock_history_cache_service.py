@@ -1,197 +1,515 @@
 """
-股票历史价格缓存服务
-高度可扩展且易于维护的设计
+简化的股票历史价格缓存服务
+基于数据库状态的简单缓存逻辑，不搞复杂的全局状态管理
 """
-
-import logging
-import requests
-import time
-from datetime import datetime, timedelta, date
-from typing import Dict, List, Optional, Tuple
+from typing import List, Dict, Tuple, Optional, Set
+from datetime import date, datetime, timedelta
 from functools import lru_cache
-from decimal import Decimal
-from flask import current_app
-from app import db
+from bisect import bisect_left
+from sqlalchemy import func
 from app.models.stock_price_history import StockPriceHistory
+from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
+from app.models.stocks_cache import StocksCache
+from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
 from app.services.stock_price_service import StockPriceService
+import logging
 
 logger = logging.getLogger(__name__)
 
 
 class StockHistoryCacheService:
     """
-    股票历史价格缓存服务
-    
-    设计原则:
-    1. 单一职责：专门处理历史价格缓存
-    2. 开放封闭：易于扩展新的数据源
-    3. 依赖倒置：依赖抽象而非具体实现
-    4. 无重复代码：统一的数据处理和缓存逻辑
+    简化的股票历史价格缓存服务
+
+    设计原则：
+    1. 数据库就是唯一的真实状态源
+    2. 每次查询都基于数据库实际状态决定是否需要API调用
+    3. 不维护复杂的内存状态和全局注册表
+    4. 逻辑简单直接：查库 -> 找缺口 -> 调API -> 存库
     """
-    
-    _GLOBAL_FETCH_REGISTRY: Dict[tuple, Dict] = {}
-    _GLOBAL_FAILURE_REGISTRY: Dict[tuple, Dict] = {}
-    _GLOBAL_NO_DATA_REGISTRY: Dict[tuple, List[Tuple[date, date]]] = {}
 
     def __init__(self):
         self.stock_service = StockPriceService()
-        self.cache_days_threshold = 7  # 缓存过期天数
-        self.fetch_cooldown_hours = 6  # 同一股票重复抓取的冷却时间
-        self.fetch_failure_cooldown_hours = 12  # 失败后等待时间
-        self._recent_fetch_registry = self._GLOBAL_FETCH_REGISTRY
-        self._recent_failure_registry = self._GLOBAL_FAILURE_REGISTRY
-        self._no_data_registry = self._GLOBAL_NO_DATA_REGISTRY
-        self.prefetch_buffer_days = 30  # 向两侧预取的缓冲天数
-        self.min_prefetch_span_days = 365  # 每次至少抓取一年的数据
-        
-    def get_cached_history(self, symbol: str, start_date: date, end_date: date, 
+
+    def get_cached_history(self, symbol: str, start_date: date, end_date: date,
                           currency: str = 'USD', force_refresh: bool = False) -> List[Dict]:
         """
         获取缓存的历史价格数据（主入口方法）
-        
-        参数:
-            symbol: 股票代码
-            start_date: 开始日期
-            end_date: 结束日期
-            currency: 货币代码
-            force_refresh: 是否强制刷新
-            
-        返回:
-            历史价格数据列表
+        保持与原接口兼容
+        """
+        return self.get_history(symbol, start_date, end_date, currency, force_refresh)
+
+    def get_history(self, symbol: str, start_date: date, end_date: date,
+                   currency: str = 'USD', force_refresh: bool = False) -> List[Dict]:
+        """
+        获取股票历史价格，先查数据库，缺失的才从API获取
         """
         symbol = symbol.upper()
         currency = currency.upper()
-        
-        try:
-            today = date.today()
-            adjusted_start = min(start_date, today)
-            adjusted_end = min(end_date, today)
 
-            if adjusted_start > adjusted_end:
-                return []
+        # 调整到今天为止
+        today = date.today()
+        end_date = min(end_date, today)
 
-            # 1. 评估缓存状态
-            cache_gaps = self._analyze_cache_gaps(symbol, adjusted_start, adjusted_end, currency)
-
-            # 2. 如果需要刷新或有缺失，获取新数据
-            if force_refresh or cache_gaps['needs_update']:
-                self._update_cache_data(symbol, cache_gaps, currency, force_refresh=force_refresh)
-
-            # 3. 从缓存返回数据
-            cached_data = self._get_cached_data(symbol, adjusted_start, adjusted_end, currency)
-            return cached_data
-            
-        except Exception as e:
-            logger.error(f"获取缓存历史数据失败 {symbol}: {str(e)}")
+        if start_date > end_date:
             return []
-    
-    def _analyze_cache_gaps(self, symbol: str, start_date: date, end_date: date, 
-                           currency: str) -> Dict:
-        """
-        分析缓存缺口，确定需要更新的数据范围
-        
-        返回:
-            包含缓存分析结果的字典
-        """
-        # 获取当前缓存的日期范围
-        latest_cached_date = StockPriceHistory.get_latest_date(symbol, currency)
-        
-        # 获取缓存中的所有日期
-        cached_records = StockPriceHistory.query.filter(
+
+        # 1. 从数据库获取现有数据
+        existing_data = self._get_from_database(symbol, start_date, end_date, currency)
+
+        has_missing = self._has_missing_data(symbol, start_date, end_date, currency, existing_data)
+
+        # 2. 如果无缺失且未强制刷新，直接返回缓存
+        if not force_refresh and not has_missing:
+            return existing_data
+
+        # 3. 否则刷新缺失数据
+        gaps = self._find_missing_gaps(symbol, start_date, end_date, currency, existing_data, force_refresh)
+
+        if gaps:
+            logger.info(f"发现 {symbol} 有 {len(gaps)} 个数据缺口，需要刷新")
+            for gap_start, gap_end in gaps:
+                refresh_message = (
+                    f"[cache][fetch] {symbol}({currency}) {gap_start}->{gap_end} 请求最新历史价格"
+                )
+                logger.info(refresh_message)
+                print(refresh_message)
+                self._fetch_and_save(symbol, gap_start, gap_end, currency)
+
+            # 重新从数据库获取完整数据
+            existing_data = self._get_from_database(symbol, start_date, end_date, currency)
+
+        return existing_data
+
+    def _get_from_database(self, symbol: str, start_date: date, end_date: date, currency: str) -> List[Dict]:
+        """从数据库获取历史价格数据"""
+        records = StockPriceHistory.query.filter(
             StockPriceHistory.symbol == symbol,
             StockPriceHistory.currency == currency,
             StockPriceHistory.trade_date >= start_date,
             StockPriceHistory.trade_date <= end_date
-        ).all()
-        
-        cached_dates = {record.trade_date for record in cached_records}
-        
-        # 分析结果
-        analysis = {
-            'needs_update': False,
-            'missing_ranges': [],
-            'latest_cached_date': latest_cached_date,
-            'total_cached_days': len(cached_dates),
-            'cache_coverage': 0.0,
-            'requested_range': (start_date, end_date)
-        }
-        
-        # 计算应该有的交易日数量（仅考虑工作日）
-        total_trading_days = self._count_trading_days(symbol, currency, start_date, end_date)
-        if total_trading_days > 0:
-            analysis['cache_coverage'] = len(cached_dates) / total_trading_days
+        ).order_by(StockPriceHistory.trade_date.asc()).all()
 
-        # 精确识别缺失的日期区间
-        missing_ranges = self._detect_missing_ranges(symbol, currency, start_date, end_date, cached_dates)
-        missing_ranges = self._subtract_no_data_ranges(symbol, currency, missing_ranges)
+        def _to_float(value):
+            return float(value) if value is not None else None
 
-        # 如果没有任何缓存数据，整段都视为缺失
-        if not latest_cached_date and not missing_ranges and not self._is_range_fully_no_data(symbol, currency, start_date, end_date):
-            missing_ranges = [(start_date, end_date)]
+        normalized_records = []
+        for record in records:
+            trade_date = record.trade_date.isoformat() if record.trade_date else None
+            normalized_records.append({
+                'id': record.id,
+                'symbol': record.symbol,
+                'currency': record.currency,
+                'trade_date': trade_date,
+                'date': trade_date,
+                'open_price': _to_float(record.open_price),
+                'open': _to_float(record.open_price),
+                'high_price': _to_float(record.high_price),
+                'high': _to_float(record.high_price),
+                'low_price': _to_float(record.low_price),
+                'low': _to_float(record.low_price),
+                'close_price': _to_float(record.close_price),
+                'close': _to_float(record.close_price),
+                'adjusted_close': _to_float(record.adjusted_close),
+                'adj_close': _to_float(record.adjusted_close),
+                'volume': record.volume,
+                'data_source': record.data_source,
+                'created_at': record.created_at.isoformat() if record.created_at else None,
+                'updated_at': record.updated_at.isoformat() if record.updated_at else None,
+            })
 
-        # 对缺失区间进行去噪：忽略距离最新缓存日期在3天以内的未来区间
+        return normalized_records
+
+    def _has_missing_data(self, symbol: str, start_date: date, end_date: date,
+                         currency: str, existing_data: List[Dict]) -> bool:
+        """简单判断是否有缺失数据"""
+        if not existing_data:
+            return True
+
+        # 获取IPO日期调整起始日期
+        ipo_date = self._get_ipo_date(symbol, currency)
+        if ipo_date and start_date < ipo_date:
+            start_date = ipo_date
+
+        if start_date > end_date:
+            return False
+
+        # 估算预期的交易日数量（粗略估计，一周5个交易日）
+        total_days = (end_date - start_date).days + 1
+        expected_trading_days = total_days * 5 // 7
+
+        # 如果实际数据少于预期的70%，认为有缺失
+        return len(existing_data) < expected_trading_days * 0.7
+
+    def _find_missing_gaps(self, symbol: str, start_date: date, end_date: date,
+                          currency: str, existing_data: List[Dict], force_refresh: bool = False) -> List[Tuple[date, date]]:
+        """找出数据库中缺失的日期范围"""
+
+        # 获取IPO日期，避免pre-IPO查询
+        ipo_date = self._get_ipo_date(symbol, currency)
+        if ipo_date and start_date < ipo_date:
+            start_date = ipo_date
+            logger.info(f"{symbol} IPO日期为 {ipo_date}，调整查询起始日期")
+
+        if start_date > end_date:
+            return []
+
+        # 如果强制刷新，返回整个范围
+        if force_refresh:
+            return [(start_date, end_date)]
+
+        # 获取现有数据的日期集合
+        existing_dates = set()
+        for record in existing_data:
+            if isinstance(record['trade_date'], str):
+                trade_date = datetime.strptime(record['trade_date'], '%Y-%m-%d').date()
+            else:
+                trade_date = record['trade_date']
+            existing_dates.add(trade_date)
+
+        # 获取市场信息用于节假日检查
+        market = self._get_market(symbol, currency)
+
+        # 找出缺失的交易日范围，跳过已知节假日
+        gaps = []
+        current_date = start_date
+        gap_start = None
+
+        while current_date <= end_date:
+            # 跳过周末
+            if current_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
+                current_date += timedelta(days=1)
+                continue
+
+            # 跳过已知节假日
+            if MarketHoliday.is_holiday(current_date, market):
+                current_date += timedelta(days=1)
+                continue
+
+            if current_date not in existing_dates:
+                if gap_start is None:
+                    gap_start = current_date
+            else:
+                if gap_start is not None:
+                    gaps.append((gap_start, current_date - timedelta(days=1)))
+                    gap_start = None
+
+            current_date += timedelta(days=1)
+
+        # 处理最后一个缺口
+        if gap_start is not None:
+            gaps.append((gap_start, end_date))
+
+        # 智能扩展短期缺口以检测节假日
+        gaps = self._expand_short_gaps_for_holiday_detection(gaps)
+
+        if gaps:
+            self._log_missing_dates(symbol, currency, market, gaps, existing_dates)
+
+        return gaps
+
+    def _log_missing_dates(self, symbol: str, currency: str, market: str,
+                           gaps: List[Tuple[date, date]], existing_dates: Set[date]) -> None:
+        """输出缺失的具体交易日，便于调试"""
         today = date.today()
-        pruned_ranges = []
-        for m_start, m_end in missing_ranges:
-            # 调整区间，确保不包含未来日期
-            adjusted_end = min(m_end, today)
-            if adjusted_end < m_start:
-                continue
+        for gap_start, gap_end in gaps:
+            missing_dates = []
+            current = gap_start
+            while current <= gap_end and current <= today:
+                if current.weekday() >= 5:
+                    current += timedelta(days=1)
+                    continue
+                if MarketHoliday.is_holiday(current, market):
+                    current += timedelta(days=1)
+                    continue
+                if current not in existing_dates:
+                    missing_dates.append(current)
+                current += timedelta(days=1)
 
-            # 若仅缺失最近的几个交易日，则忽略（通常是当天尚未收盘）
-            if latest_cached_date and m_start > latest_cached_date and (adjusted_end - latest_cached_date).days <= 3:
-                continue
+            if missing_dates:
+                preview = ', '.join(d.isoformat() for d in missing_dates[:10])
+                if len(missing_dates) > 10:
+                    preview += ', ...'
+                message = (
+                    f"[cache][gap] {symbol}({currency}) {gap_start}->{gap_end} "
+                    f"missing {len(missing_dates)} trading days: {preview}"
+                )
+            else:
+                message = (
+                    f"[cache][gap] {symbol}({currency}) {gap_start}->{gap_end} "
+                    "缺失的都是周末或已知节假日"
+                )
+            logger.warning(message)
+            print(message)
 
-            pruned_ranges.append((m_start, adjusted_end))
+    def get_cache_statistics(self, symbol: Optional[str] = None, currency: Optional[str] = None) -> Dict:
+        """返回 stock_price_history 缓存的基本统计信息"""
+        query = StockPriceHistory.query
 
-        analysis['missing_ranges'] = pruned_ranges
+        if symbol:
+            query = query.filter(StockPriceHistory.symbol == symbol.upper())
+        if currency:
+            query = query.filter(StockPriceHistory.currency == currency.upper())
 
-        # 判断是否需要更新
-        if pruned_ranges:
-            analysis['needs_update'] = True
-        else:
-            analysis['needs_update'] = False
+        total_records = query.count()
+        distinct_symbols = query.with_entities(StockPriceHistory.symbol).distinct().count()
 
-        return analysis
+        earliest_record = query.order_by(StockPriceHistory.trade_date.asc()).first()
+        latest_record = query.order_by(StockPriceHistory.trade_date.desc()).first()
+        latest_update = query.order_by(StockPriceHistory.updated_at.desc()).first()
 
-    def _count_trading_days(self, symbol: str, currency: str, start_date: date, end_date: date) -> int:
-        """计算指定日期范围内的工作日数量（周一至周五）"""
-        market = self._get_market(symbol, currency)
-        count = 0
-        current = start_date
-        while current <= end_date:
-            if current.weekday() < 5 and not self._is_market_holiday_by_market(market, current):
-                count += 1
-            current += timedelta(days=1)
-        return count
+        return {
+            'symbol_filter': symbol.upper() if symbol else None,
+            'currency_filter': currency.upper() if currency else None,
+            'total_records': total_records,
+            'distinct_symbols': distinct_symbols,
+            'date_range': {
+                'earliest': earliest_record.trade_date.isoformat() if earliest_record else None,
+                'latest': latest_record.trade_date.isoformat() if latest_record else None
+            },
+            'last_updated_at': latest_update.updated_at.isoformat() if latest_update and latest_update.updated_at else None
+        }
 
-    def _detect_missing_ranges(self, symbol: str, currency: str, start_date: date, end_date: date, cached_dates: set) -> List[Tuple[date, date]]:
-        """识别指定范围内缺失的交易日区间"""
-        market = self._get_market(symbol, currency)
-        missing_ranges = []
-        current_start = None
-        last_missing_day = None
+    def _get_ipo_date(self, symbol: str, currency: str) -> Optional[date]:
+        """获取股票IPO日期"""
+        stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+        if stock and stock.first_trade_date:
+            return stock.first_trade_date
 
-        current = start_date
-        while current <= end_date:
-            if current.weekday() < 5 and not self._is_market_holiday_by_market(market, current):
-                if current not in cached_dates:
-                    if current_start is None:
-                        current_start = current
-                    last_missing_day = current
+        # 如果没有IPO日期，尝试从网络查询
+        if stock:
+            ipo_date = self._query_ipo_online(symbol)
+            if ipo_date:
+                stock.first_trade_date = ipo_date
+                from app import db
+                db.session.commit()
+                logger.info(f"网络查询设置 {symbol} IPO日期: {ipo_date}")
+                return ipo_date
+
+        return None
+
+    def _query_ipo_online(self, symbol: str) -> Optional[date]:
+        """从网络查询IPO日期"""
+        try:
+            import requests
+            import re
+
+            clean_symbol = symbol.replace('.TO', '').replace('.V', '')
+            url = f"https://finance.yahoo.com/quote/{clean_symbol}"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                content = response.text
+
+                # 多种IPO日期查找模式
+                patterns = [
+                    r'"ipoDate"\s*:\s*"([^"]+)"',
+                    r'"firstTradeDateEpochUtc"\s*:\s*(\d+)',
+                    r'founded\s+in\s+(\d{4})',
+                    r'incorporated\s+in\s+(\d{4})',
+                    r'IPO\s*[:\s]*(\d{4})',
+                ]
+
+                for pattern in patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        try:
+                            # 处理时间戳格式
+                            if match.isdigit() and len(match) >= 10:
+                                timestamp = int(match)
+                                return datetime.fromtimestamp(timestamp).date()
+
+                            # 处理年份格式
+                            elif match.isdigit() and len(match) == 4:
+                                year = int(match)
+                                if 1900 <= year <= date.today().year:
+                                    return date(year, 1, 1)
+
+                        except (ValueError, OverflowError):
+                            continue
+
+            return None
+        except Exception as e:
+            logger.debug(f"网络查询 {symbol} IPO日期失败: {str(e)}")
+            return None
+
+    def _expand_short_gaps_for_holiday_detection(self, gaps: List[Tuple[date, date]]) -> List[Tuple[date, date]]:
+        """扩展短期缺口（<=7天）以进行节假日检测"""
+        expanded_gaps = []
+
+        for gap_start, gap_end in gaps:
+            gap_days = (gap_end - gap_start).days + 1
+
+            # 如果缺口不超过7天，扩展前后各一个月以检测节假日
+            if gap_days <= 7:
+                expanded_start = gap_start - timedelta(days=30)
+                expanded_end = gap_end + timedelta(days=30)
+
+                # 确保扩展范围不超过今天
+                today = date.today()
+                expanded_end = min(expanded_end, today)
+
+                logger.info(f"🔍 扩展短期缺口用于节假日检测: {gap_start}->{gap_end} 扩展为 {expanded_start}->{expanded_end}")
+                expanded_gaps.append((expanded_start, expanded_end))
+            else:
+                # 较长的缺口不扩展
+                expanded_gaps.append((gap_start, gap_end))
+
+        return expanded_gaps
+
+    def _fetch_and_save(self, symbol: str, start_date: date, end_date: date, currency: str):
+        """从Yahoo Finance获取数据并保存到数据库"""
+        try:
+            logger.info(f"[Yahoo Fetch] {symbol}({currency}) {start_date} -> {end_date}")
+
+            raw_data, response_info = self.stock_service.get_stock_history(symbol, start_date, end_date)
+            market = self._get_market(symbol, currency)
+
+            request_error = response_info.get('error') if isinstance(response_info, dict) else None
+
+            if raw_data and 'timestamp' in raw_data and len(raw_data['timestamp']) > 0:
+                processed_data = self._process_raw_data(symbol, raw_data, currency)
+                if processed_data:
+                    success = StockPriceHistory.bulk_upsert(processed_data)
+                    if success:
+                        logger.info(f"✅ 成功保存 {symbol} {len(processed_data)} 条价格记录")
+
+                        # 分析获取的数据，识别可能的节假日
+                        self._analyze_data_for_holidays(symbol, market, start_date, end_date, processed_data)
+                    else:
+                        logger.error(f"❌ 保存 {symbol} 价格数据失败")
                 else:
-                    if current_start is not None and last_missing_day is not None:
-                        missing_ranges.append((current_start, last_missing_day))
-                        current_start = None
-                        last_missing_day = None
-            current += timedelta(days=1)
+                    logger.warning(f"⚠️ {symbol} 原始数据处理后为空")
+            else:
+                logger.warning(f"⚠️ {symbol} 在 {start_date}->{end_date} 期间无数据")
+                if request_error:
+                    logger.warning(
+                        f"跳过节假日检测：{symbol} {start_date}->{end_date} 请求失败 ({request_error})"
+                    )
 
-        if current_start is not None and last_missing_day is not None:
-            missing_ranges.append((current_start, last_missing_day))
+        except Exception as e:
+            logger.error(f"❌ 获取 {symbol} 价格数据失败: {str(e)}")
 
-        return missing_ranges
+    def _analyze_data_for_holidays(self, symbol: str, market: str, start_date: date, end_date: date, processed_data: List[Dict]):
+        """分析获取的数据，识别可能的节假日
 
+        正确逻辑：只有当前后一个月都有数据，中间某天无数据时，才认为是节假日
+        """
+        try:
+            # 获取所有数据的日期集合
+            data_dates = set()
+            for record in processed_data:
+                data_dates.add(record['trade_date'])
+
+            if not data_dates:
+                return
+
+            # 按日期排序
+            sorted_dates = sorted(data_dates)
+            earliest_date = sorted_dates[0]
+            latest_date = sorted_dates[-1]
+
+            missing_dates = self._get_missing_trading_days(data_dates, start_date, end_date)
+
+            for missing_date in missing_dates:
+                StockHolidayAttempt.record_attempt(symbol, market, missing_date, has_data=False)
+                logger.info(f"🔍 {symbol} 在 {missing_date} 无数据，但前后有数据，可能是节假日")
+
+                if StockHolidayAttempt.should_promote_to_holiday(missing_date, market, threshold=5):
+                    MarketHoliday.add_holiday_detection(missing_date, market, symbol)
+                    logger.info(f"🎉 检测到节假日: {missing_date} ({market}市场)")
+
+            # 标记已有数据的日期
+            for existing_date in data_dates:
+                existing_attempt = StockHolidayAttempt.query.filter_by(
+                    symbol=symbol,
+                    market=market,
+                    attempt_date=existing_date
+                ).first()
+                if existing_attempt and not existing_attempt.has_data:
+                    StockHolidayAttempt.record_attempt(symbol, market, existing_date, has_data=True)
+
+        except Exception as e:
+            logger.error(f"分析节假日数据失败: {str(e)}")
+
+    def _get_missing_trading_days(self, data_dates: Set[date], start_date: date, end_date: date) -> List[date]:
+        """根据已有数据集合计算潜在缺失的交易日"""
+        if not data_dates:
+            return []
+
+        total_days = max(1, (end_date - start_date).days)
+        lookback_days = min(30, max(5, total_days // 4 if total_days >= 20 else total_days // 2))
+        lookback_window = timedelta(days=lookback_days)
+
+        analysis_start = start_date + lookback_window
+        analysis_end = end_date - lookback_window
+
+        if analysis_start > analysis_end:
+            analysis_start = start_date
+            analysis_end = end_date
+
+        missing_dates: List[date] = []
+        data_dates_set = set(data_dates)
+        sorted_dates = sorted(data_dates_set)
+        today = date.today()
+        current_date = analysis_start
+
+        while current_date <= analysis_end and current_date <= today:
+            if current_date.weekday() < 5 and current_date not in data_dates_set:
+                idx = bisect_left(sorted_dates, current_date)
+                prev_date = sorted_dates[idx - 1] if idx - 1 >= 0 else None
+                next_date = sorted_dates[idx] if idx < len(sorted_dates) else None
+
+                if prev_date and next_date:
+                    if (current_date - prev_date).days <= lookback_days and (next_date - current_date).days <= lookback_days:
+                        missing_dates.append(current_date)
+
+            current_date += timedelta(days=1)
+
+        return missing_dates
+
+    def _process_raw_data(self, symbol: str, raw_data: Dict, currency: str) -> List[Dict]:
+        """处理Yahoo Finance返回的原始数据"""
+        processed_data = []
+
+        timestamps = raw_data.get('timestamp', [])
+        opens = raw_data.get('open', [])
+        highs = raw_data.get('high', [])
+        lows = raw_data.get('low', [])
+        closes = raw_data.get('close', [])
+        volumes = raw_data.get('volume', [])
+
+        for i in range(len(timestamps)):
+            try:
+                trade_date = datetime.fromtimestamp(timestamps[i]).date()
+
+                # 跳过周末
+                if trade_date.weekday() >= 5:
+                    continue
+
+                processed_data.append({
+                    'symbol': symbol.upper(),
+                    'currency': currency.upper(),
+                    'trade_date': trade_date,
+                    'open_price': opens[i] if i < len(opens) and opens[i] is not None else 0,
+                    'high_price': highs[i] if i < len(highs) and highs[i] is not None else 0,
+                    'low_price': lows[i] if i < len(lows) and lows[i] is not None else 0,
+                    'close_price': closes[i] if i < len(closes) and closes[i] is not None else 0,
+                    'volume': volumes[i] if i < len(volumes) and volumes[i] is not None else 0,
+                    'updated_at': datetime.utcnow()
+                })
+            except Exception as e:
+                logger.warning(f"处理 {symbol} 第{i}条数据失败: {str(e)}")
+                continue
+
+        return processed_data
+
+    # 兼容性方法：市场识别和节假日处理
     def _get_market(self, symbol: str, currency: str) -> str:
+        """识别股票所属市场"""
         symbol = (symbol or '').upper()
         currency = (currency or '').upper()
 
@@ -203,16 +521,26 @@ class StockHistoryCacheService:
         return 'US'
 
     def _is_market_holiday_by_market(self, market: str, target_date: date) -> bool:
-        market = (market or 'US').upper()
-        if market == 'CA':
+        """判断指定市场在某天是否休市"""
+        if not target_date:
+            return False
+
+        normalized_market = (market or 'US').upper()
+
+        # 先检查数据库中是否记录为节假日
+        if MarketHoliday.is_holiday(target_date, normalized_market):
+            return True
+
+        # 回退到内置节假日表
+        if normalized_market == 'CA':
             return target_date in self._get_canadian_holidays(target_date.year)
         return target_date in self._get_us_holidays(target_date.year)
 
     @staticmethod
     @lru_cache(maxsize=16)
-    def _get_us_holidays(year: int) -> set:
-        from datetime import date
-        holidays = set()
+    def _get_us_holidays(year: int) -> Set[date]:
+        """获取指定年份的美国主要市场休市日"""
+        holidays: Set[date] = set()
 
         def observed(day: date) -> date:
             if day.weekday() == 5:  # Saturday
@@ -237,35 +565,35 @@ class StockHistoryCacheService:
                 d -= timedelta(days=1)
             return d
 
-        # Fixed / observed days
-        holidays.add(observed(date(year, 1, 1)))   # New Year's Day
-        holidays.add(nth_weekday(1, 0, 3))         # Martin Luther King Jr. Day (3rd Monday Jan)
-        holidays.add(nth_weekday(2, 0, 3))         # Presidents' Day (3rd Monday Feb)
-        holidays.add(last_weekday(5, 0))           # Memorial Day (last Monday May)
-        holidays.add(observed(date(year, 6, 19)))  # Juneteenth National Independence Day
-        holidays.add(observed(date(year, 7, 4)))   # Independence Day
-        holidays.add(nth_weekday(9, 0, 1))         # Labor Day
-        holidays.add(nth_weekday(11, 3, 4))        # Thanksgiving (4th Thursday Nov)
-        holidays.add(observed(date(year, 12, 25))) # Christmas Day
+        # 固定休市日
+        holidays.add(observed(date(year, 1, 1)))  # New Year's Day
+        holidays.add(nth_weekday(1, 0, 3))  # Martin Luther King Jr. Day (3rd Monday Jan)
+        holidays.add(nth_weekday(2, 0, 3))  # Presidents' Day (3rd Monday Feb)
+        holidays.add(last_weekday(5, 0))  # Memorial Day (last Monday May)
+        holidays.add(observed(date(year, 7, 4)))  # Independence Day
+        holidays.add(nth_weekday(9, 0, 1))  # Labor Day (1st Monday Sep)
+        holidays.add(nth_weekday(11, 3, 4))  # Thanksgiving (4th Thursday Nov)
+        holidays.add(observed(date(year, 12, 25)))  # Christmas Day
 
-        # Good Friday
-        holidays.add(StockHistoryCacheService._good_friday(year))
-
-        # Special one-time holidays
-        if year == 2025:
-            holidays.add(date(2025, 1, 9))  # National Day of Mourning for Jimmy Carter
+        # 变动性休市日
+        try:
+            from dateutil.easter import easter
+            good_friday = easter(year) - timedelta(days=2)
+            holidays.add(good_friday)
+        except Exception:
+            pass
 
         return holidays
 
     @staticmethod
     @lru_cache(maxsize=16)
-    def _get_canadian_holidays(year: int) -> set:
-        from datetime import date
-        holidays = set()
+    def _get_canadian_holidays(year: int) -> Set[date]:
+        """获取指定年份的加拿大主要市场休市日"""
+        holidays: Set[date] = set()
 
         def observed(day: date) -> date:
             if day.weekday() == 5:
-                return day + timedelta(days=2)
+                return day - timedelta(days=1)
             if day.weekday() == 6:
                 return day + timedelta(days=1)
             return day
@@ -277,452 +605,55 @@ class StockHistoryCacheService:
             d += timedelta(weeks=n - 1)
             return d
 
-        def last_weekday_before(month: int, day: int, weekday: int) -> date:
-            d = date(year, month, day)
+        def last_weekday(month: int, weekday: int) -> date:
+            if month == 12:
+                d = date(year, month, 31)
+            else:
+                d = date(year, month + 1, 1) - timedelta(days=1)
             while d.weekday() != weekday:
                 d -= timedelta(days=1)
             return d
 
-        holidays.add(observed(date(year, 1, 1)))           # New Year's Day
-        holidays.add(nth_weekday(2, 0, 3))                 # Family Day (3rd Monday Feb)
-        holidays.add(StockHistoryCacheService._good_friday(year))
-        holidays.add(last_weekday_before(5, 25, 0))         # Victoria Day (Monday preceding May 25)
-        holidays.add(observed(date(year, 7, 1)))           # Canada Day
-        holidays.add(nth_weekday(8, 0, 1))                 # Civic Holiday (1st Monday Aug)
-        holidays.add(nth_weekday(9, 0, 1))                 # Labour Day
-        holidays.add(nth_weekday(10, 0, 2))                # Thanksgiving (2nd Monday Oct)
-        holidays.add(observed(date(year, 12, 25)))         # Christmas
+        # 固定休市日
+        holidays.add(observed(date(year, 1, 1)))  # New Year's Day
+        holidays.add(nth_weekday(2, 0, 3))  # Family Day (3rd Monday Feb)
+        holidays.add(observed(date(year, 7, 1)))  # Canada Day
+        holidays.add(nth_weekday(8, 0, 1))  # Civic Holiday (1st Monday Aug)
+        holidays.add(nth_weekday(10, 0, 2))  # Thanksgiving (2nd Monday Oct)
+        holidays.add(observed(date(year, 12, 25)))  # Christmas Day
+        holidays.add(observed(date(year, 12, 26)))  # Boxing Day
+        holidays.add(last_weekday(5, 0))  # Victoria Day (last Monday May)
+        holidays.add(nth_weekday(9, 0, 1))  # Labour Day (1st Monday Sep)
 
-        boxing_day = date(year, 12, 26)
-        observed_boxing_day = observed(boxing_day)
-        holidays.add(observed_boxing_day)                  # Boxing Day (observed)
-
-        # 如果Boxing Day补假落在周一，交易所通常也会在周二休市
-        if observed_boxing_day.weekday() == 0:  # Monday
-            holidays.add(observed_boxing_day + timedelta(days=1))
+        # Good Friday
+        try:
+            from dateutil.easter import easter
+            holidays.add(easter(year) - timedelta(days=2))
+        except Exception:
+            pass
 
         return holidays
 
-    @staticmethod
-    def _good_friday(year: int) -> date:
-        """计算西方教会的耶稣受难日（Good Friday）"""
-        # Anonymous Gregorian algorithm for Easter
-        a = year % 19
-        b = year // 100
-        c = year % 100
-        d = b // 4
-        e = b % 4
-        f = (b + 8) // 25
-        g = (b - f + 1) // 3
-        h = (19 * a + b - d - g + 15) % 30
-        i = c // 4
-        k = c % 4
-        l = (32 + 2 * e + 2 * i - h - k) % 7
-        m = (a + 11 * h + 22 * l) // 451
-        month = (h + l - 7 * m + 114) // 31
-        day = ((h + l - 7 * m + 114) % 31) + 1
-
-        easter = date(year, month, day)
-        return easter - timedelta(days=2)
-    
-    def _merge_ranges(self, ranges: List[Tuple[date, date]]) -> List[Tuple[date, date]]:
-        """合并重叠或相邻的日期区间，减少外部请求次数"""
-        if not ranges:
-            return []
-
-        sorted_ranges = sorted(ranges, key=lambda r: r[0])
-        merged = [sorted_ranges[0]]
-
-        for current_start, current_end in sorted_ranges[1:]:
-            last_start, last_end = merged[-1]
-            if current_start <= last_end + timedelta(days=1):
-                merged[-1] = (last_start, max(last_end, current_end))
-            else:
-                merged.append((current_start, current_end))
-
-        return merged
-
-    def _mark_no_data_range(self, symbol: str, currency: str, start_date: date, end_date: date):
-        if not symbol or not currency or start_date is None or end_date is None:
-            return
-        if start_date > end_date:
-            return
-        key = (symbol.upper(), currency.upper())
-        ranges = self._no_data_registry.get(key, [])
-        ranges.append((start_date, end_date))
-        self._no_data_registry[key] = self._merge_ranges(ranges)
-
-    def _get_no_data_ranges(self, symbol: str, currency: str) -> List[Tuple[date, date]]:
-        key = (symbol.upper(), currency.upper())
-        return list(self._no_data_registry.get(key, []))
-
-    def _subtract_no_data_ranges(self, symbol: str, currency: str,
-                                 ranges: List[Tuple[date, date]]) -> List[Tuple[date, date]]:
-        if not ranges:
-            return []
-        no_data_ranges = self._get_no_data_ranges(symbol, currency)
-        if not no_data_ranges:
-            return ranges
-
-        adjusted: List[Tuple[date, date]] = []
-        for range_start, range_end in ranges:
-            segments = [(range_start, range_end)]
-            for nd_start, nd_end in no_data_ranges:
-                new_segments: List[Tuple[date, date]] = []
-                for seg_start, seg_end in segments:
-                    if nd_end < seg_start or nd_start > seg_end:
-                        new_segments.append((seg_start, seg_end))
-                        continue
-
-                    if nd_start > seg_start:
-                        left_end = nd_start - timedelta(days=1)
-                        if seg_start <= left_end:
-                            new_segments.append((seg_start, left_end))
-
-                    if nd_end < seg_end:
-                        right_start = nd_end + timedelta(days=1)
-                        if right_start <= seg_end:
-                            new_segments.append((right_start, seg_end))
-
-                segments = [segment for segment in new_segments if segment[0] <= segment[1]]
-                if not segments:
-                    break
-
-            adjusted.extend(segments)
-
-        return adjusted
-
-    def _is_range_fully_no_data(self, symbol: str, currency: str,
-                               start_date: date, end_date: date) -> bool:
-        coverage = self._subtract_no_data_ranges(symbol, currency, [(start_date, end_date)])
-        return not coverage
-
-    def _register_response_metadata(self, symbol: str, currency: str,
-                                     response_info: Optional[Dict],
-                                     fetch_start: date, fetch_end: date):
-        if not response_info:
-            return
-
-        for nd_range in response_info.get('no_data_ranges', []) or []:
-            nd_start, nd_end = nd_range
-            if nd_start is None or nd_end is None:
-                continue
-            start = max(fetch_start, nd_start)
-            end = min(fetch_end, nd_end)
-            if start <= end:
-                self._mark_no_data_range(symbol, currency, start, end)
-
-        first_trade_date = response_info.get('first_trade_date')
-        if isinstance(first_trade_date, date):
-            if fetch_start < first_trade_date:
-                self._mark_no_data_range(symbol, currency,
-                                         fetch_start,
-                                         first_trade_date - timedelta(days=1))
-
-    def _should_skip_fetch(self, symbol: str, currency: str, start_date: date,
-                           end_date: date, force_refresh: bool) -> bool:
-        """判断是否应跳过重复的外部抓取"""
-        if force_refresh:
-            return False
-
-        key = (symbol, currency)
-        record = self._recent_fetch_registry.get(key)
-        if not record or not record.get('timestamp'):
-            return False
-
-        if datetime.utcnow() - record['timestamp'] > timedelta(hours=self.fetch_cooldown_hours):
-            return False
-
-        if record.get('start') is None or record.get('end') is None:
-            return False
-
-        # 若上次抓取的范围已覆盖此次范围，则跳过
-        if record['start'] <= start_date and record['end'] >= end_date:
-            return True
-
-        failure_record = self._recent_failure_registry.get(key)
-        if failure_record and failure_record.get('timestamp'):
-            if datetime.utcnow() - failure_record['timestamp'] <= timedelta(hours=self.fetch_failure_cooldown_hours):
-                if failure_record['start'] <= start_date and failure_record['end'] >= end_date:
-                    return True
-
-        return False
-
-    def _record_fetch(self, symbol: str, currency: str, start_date: date, end_date: date, success: bool):
-        key = (symbol, currency)
-        target_registry = self._recent_fetch_registry if success else self._recent_failure_registry
-        record = target_registry.get(key, {'start': None, 'end': None, 'timestamp': None})
-
-        record['start'] = start_date if record['start'] is None else min(record['start'], start_date)
-        record['end'] = end_date if record['end'] is None else max(record['end'], end_date)
-        record['timestamp'] = datetime.utcnow()
-
-        target_registry[key] = record
-
-        if success and key in self._recent_failure_registry:
-            del self._recent_failure_registry[key]
-
-    def _expand_fetch_range(self, start_date: date, end_date: date) -> Tuple[date, date]:
-        """扩大需要抓取的区间，确保每次至少抓取一年并带缓冲"""
-        today = date.today()
-        buffer = timedelta(days=self.prefetch_buffer_days)
-
-        effective_end = min(end_date, today)
-        effective_start = min(start_date, today)
-
-        fetch_end = min(today, effective_end + buffer)
-        fetch_start = fetch_end - timedelta(days=self.min_prefetch_span_days - 1)
-
-        buffered_start = effective_start - buffer
-        fetch_start = min(fetch_start, buffered_start)
-
-        if fetch_end > today:
-            fetch_end = today
-        if fetch_start > fetch_end:
-            fetch_start = fetch_end
-
-        return fetch_start, fetch_end
-
-    def _update_cache_data(self, symbol: str, cache_gaps: Dict, currency: str,
-                           force_refresh: bool = False):
-        """
-        更新缓存数据
-        
-        参数:
-            symbol: 股票代码
-            cache_gaps: 缓存分析结果
-            currency: 货币代码
-        """
-        missing_ranges = cache_gaps.get('missing_ranges', [])
-
-        # 如果强制刷新但没有明确缺口，则覆盖整个请求范围
-        if force_refresh and not missing_ranges:
-            requested_range = cache_gaps.get('requested_range')
-            if requested_range:
-                missing_ranges = [requested_range]
-
-        merged_ranges = self._merge_ranges(missing_ranges)
-
-        for start_date, end_date in merged_ranges:
-            try:
-                fetch_start, fetch_end = self._expand_fetch_range(start_date, end_date)
-
-                if self._should_skip_fetch(symbol, currency, fetch_start, fetch_end, force_refresh):
-                    continue
-
-                print(f"[Yahoo Fetch] {symbol}({currency}) {fetch_start} -> {fetch_end} (原始缺口 {start_date}->{end_date})")
-                # 从Yahoo Finance获取数据
-                raw_data, response_info = self.stock_service.get_stock_history(symbol, fetch_start, fetch_end)
-                self._register_response_metadata(symbol, currency, response_info, fetch_start, fetch_end)
-
-                success = False
-
-                if raw_data:
-                    # 转换并保存数据
-                    processed_data = self._process_raw_data(symbol, raw_data, currency)
-                    success = StockPriceHistory.bulk_upsert(processed_data)
-
-                    if success:
-                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=True)
-                    else:
-                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=False)
-                else:
-                    if response_info and response_info.get('no_data_ranges'):
-                        success = True
-                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=True)
-                    else:
-                        self._record_fetch(symbol, currency, fetch_start, fetch_end, success=False)
-
-            except Exception:
-                continue
-    
-    def _process_raw_data(self, symbol: str, raw_data: Dict, currency: str) -> List[Dict]:
-        """
-        处理原始数据为标准格式
-        
-        参数:
-            symbol: 股票代码
-            raw_data: 原始数据
-            currency: 货币代码
-            
-        返回:
-            标准化的价格数据列表
-        """
-        processed_data = []
-        
-        for date_str, price_info in raw_data.items():
-            try:
-                trade_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                
-                # 构建标准化数据记录
-                record = {
-                    'symbol': symbol,
-                    'trade_date': trade_date,
-                    'close_price': Decimal(str(price_info.get('close', 0))),
-                    'currency': currency,
-                    'data_source': 'yahoo'
-                }
-                
-                # 添加可选字段（如果可用）
-                optional_fields = ['open', 'high', 'low', 'volume']
-                for field in optional_fields:
-                    if field in price_info and price_info[field] is not None:
-                        if field == 'volume':
-                            record['volume'] = int(price_info[field])
-                        else:
-                            record[f'{field}_price'] = Decimal(str(price_info[field]))
-                
-                processed_data.append(record)
-                
-            except (ValueError, TypeError) as e:
-                logger.debug(f"处理日期 {date_str} 的数据失败: {str(e)}")
-                continue
-        
-        return processed_data
-    
-    def _get_cached_data(self, symbol: str, start_date: date, end_date: date, 
-                        currency: str) -> List[Dict]:
-        """
-        从缓存获取数据
-        
-        参数:
-            symbol: 股票代码
-            start_date: 开始日期
-            end_date: 结束日期
-            currency: 货币代码
-            
-        返回:
-            历史价格数据列表
-        """
-        try:
-            cached_records = StockPriceHistory.get_price_range(
-                symbol, start_date, end_date, currency
-            )
-            
-            # 转换为字典格式
-            result = []
-            for record in cached_records:
-                result.append({
-                    'date': record.trade_date.strftime('%Y-%m-%d'),
-                    'close': float(record.close_price),
-                    'open': float(record.open_price) if record.open_price else None,
-                    'high': float(record.high_price) if record.high_price else None,
-                    'low': float(record.low_price) if record.low_price else None,
-                    'volume': record.volume
-                })
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"从缓存获取数据失败 {symbol}: {str(e)}")
-            return []
-    
-    def get_cache_statistics(self, symbol: str = None, currency: str = 'USD') -> Dict:
-        """
-        获取缓存统计信息
-        
-        参数:
-            symbol: 股票代码（可选，为空则统计所有）
-            currency: 货币代码
-            
-        返回:
-            缓存统计信息
-        """
-        try:
-            query = StockPriceHistory.query
-            
-            if symbol:
-                query = query.filter(StockPriceHistory.symbol == symbol.upper())
-            if currency:
-                query = query.filter(StockPriceHistory.currency == currency.upper())
-            
-            total_records = query.count()
-            
-            # 获取日期范围
-            if total_records > 0:
-                earliest = query.order_by(StockPriceHistory.trade_date.asc()).first()
-                latest = query.order_by(StockPriceHistory.trade_date.desc()).first()
-                
-                date_range = {
-                    'earliest_date': earliest.trade_date.isoformat(),
-                    'latest_date': latest.trade_date.isoformat(),
-                    'days_span': (latest.trade_date - earliest.trade_date).days
-                }
-            else:
-                date_range = {
-                    'earliest_date': None,
-                    'latest_date': None,
-                    'days_span': 0
-                }
-            
-            # 按股票统计
-            symbol_stats = {}
-            if not symbol:
-                symbol_counts = db.session.query(
-                    StockPriceHistory.symbol,
-                    db.func.count(StockPriceHistory.id).label('count')
-                ).group_by(StockPriceHistory.symbol).all()
-                
-                symbol_stats = {sym: count for sym, count in symbol_counts}
-            
-            return {
-                'total_records': total_records,
-                'date_range': date_range,
-                'symbol_statistics': symbol_stats,
-                'query_parameters': {
-                    'symbol': symbol,
-                    'currency': currency
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"获取缓存统计失败: {str(e)}")
-            return {}
-
-    def is_known_no_data(self, symbol: str, start_date: date, end_date: date, currency: str = 'USD') -> bool:
-        """判断指定区间是否已被标记为无数据范围"""
-        if not symbol or start_date is None or end_date is None:
-            return False
-        if start_date > end_date:
-            return False
-        return self._is_range_fully_no_data(symbol.upper(), currency.upper(), start_date, end_date)
-
-    def cleanup_old_cache(self, days_to_keep: int = 365) -> Dict:
-        """
-        清理旧的缓存数据
-        
-        参数:
-            days_to_keep: 保留的天数
-            
-        返回:
-            清理结果
-        """
+    # 为了保持兼容性，保留一些可能被调用的方法
+    def cleanup_old_cache_data(self, days_to_keep: int = 365):
+        """清理旧的缓存数据（保持兼容性）"""
         try:
             cutoff_date = date.today() - timedelta(days=days_to_keep)
-            
-            # 查找要删除的记录
-            old_records = StockPriceHistory.query.filter(
-                StockPriceHistory.trade_date < cutoff_date
-            ).all()
-            
-            deleted_count = len(old_records)
-            
-            # 删除记录
-            if old_records:
-                for record in old_records:
-                    db.session.delete(record)
-                
-                db.session.commit()
-                logger.debug(f"清理了 {deleted_count} 条旧缓存记录")
-            
+            deleted_count = StockPriceHistory.query.filter(
+                StockPriceHistory.updated_at < cutoff_date
+            ).delete()
+
+            from app import db
+            db.session.commit()
+            logger.info(f"清理了 {deleted_count} 条旧缓存记录")
+
             return {
                 'success': True,
                 'deleted_count': deleted_count,
                 'cutoff_date': cutoff_date.isoformat()
             }
-            
+
         except Exception as e:
-            db.session.rollback()
             logger.error(f"清理缓存失败: {str(e)}")
             return {
                 'success': False,

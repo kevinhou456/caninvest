@@ -22,6 +22,13 @@ from app import db
 logger = logging.getLogger(__name__)
 
 
+def _log_yfinance_call(api_name: str, identifier: str, **kwargs):
+    details = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
+    message = f"[yfinance] {api_name} id={identifier} {details}".strip()
+    logger.debug(message)
+    print(message)
+
+
 class ExchangeRate(db.Model):
     """汇率历史记录表"""
     __tablename__ = 'exchange_rates'
@@ -158,6 +165,7 @@ class CurrencyService:
             logger.info(f"yfinance version: {yfinance.__version__}")
 
             # 使用Yahoo Finance获取汇率（不使用自定义session，让yfinance自己处理）
+            _log_yfinance_call('Ticker.init', currency_pair)
             ticker = yf.Ticker(currency_pair)
             logger.debug(f"Created ticker object for {currency_pair}")
 
@@ -165,7 +173,7 @@ class CurrencyService:
             periods = ["1d", "5d", "1mo"]
             for period in periods:
                 try:
-                    logger.debug(f"Trying period: {period}")
+                    _log_yfinance_call('Ticker.history', currency_pair, period=period)
                     data = ticker.history(period=period)
                     logger.debug(f"Data shape: {data.shape if not data.empty else 'empty'}")
 
@@ -194,7 +202,9 @@ class CurrencyService:
                 reverse_pair = f"{to_currency}{from_currency}=X"
                 logger.info(f"Trying reverse pair: {reverse_pair}")
 
+                _log_yfinance_call('Ticker.init', reverse_pair)
                 ticker = yf.Ticker(reverse_pair)
+                _log_yfinance_call('Ticker.history', reverse_pair, period="1d")
                 data = ticker.history(period="1d")
 
                 if not data.empty:

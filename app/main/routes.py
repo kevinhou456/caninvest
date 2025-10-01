@@ -5,6 +5,8 @@
 from flask import render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_babel import _
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, date, timedelta
+from bisect import bisect_left
 from app.main import bp
 from app import db
 from app.models.family import Family
@@ -14,6 +16,7 @@ from app.models.transaction import Transaction
 # from app.models.stock import Stock, StockCategory  # Stock models deleted
 from app.models.stocks_cache import StocksCache
 from app.models.import_task import ImportTask, OCRTask
+from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
 # from app.services.analytics_service import analytics_service, TimePeriod  # 旧架构已废弃
 from app.services.currency_service import currency_service
 from app.services.holdings_service import holdings_service
@@ -2919,6 +2922,137 @@ def stock_detail(stock_symbol):
                              members=[],
                              account_members=[],
                              show_account_numbers=False,
-                             price_data_fetch_failed=True,
-                             needs_symbol_correction=stock_info_dict and (not stock_info_dict.get('name') or not stock_info_dict.get('exchange')),
-                             error_message=str(e))
+                            price_data_fetch_failed=True,
+                            needs_symbol_correction=stock_info_dict and (not stock_info_dict.get('name') or not stock_info_dict.get('exchange')),
+                            error_message=str(e))
+
+
+@bp.route('/test/yfinance')
+def test_yfinance():
+    """简单测试页面：展示NVDA近一个月历史价格"""
+    import yfinance as yf
+
+    rows = []
+    error = None
+
+    try:
+        ticker = yf.Ticker('NVDA')
+        history = ticker.history(period='1mo')
+
+        if history.empty:
+            raise ValueError('未获取到NVDA的历史数据。')
+
+        history = history.reset_index()
+        for _, record in history.iterrows():
+            date_value = record['Date']
+            if hasattr(date_value, 'date'):
+                date_value = date_value.date()
+
+            rows.append({
+                'date': date_value.isoformat() if hasattr(date_value, 'isoformat') else str(date_value),
+                'open': float(record.get('Open', 0.0) or 0.0),
+                'high': float(record.get('High', 0.0) or 0.0),
+                'low': float(record.get('Low', 0.0) or 0.0),
+                'close': float(record.get('Close', 0.0) or 0.0),
+                'volume': int(record.get('Volume', 0) or 0)
+            })
+    except Exception as exc:
+        logger.exception('获取NVDA历史数据失败: %s', exc)
+        error = f"获取NVDA历史数据失败：{exc}"
+
+    return render_template('test/yfinance.html', rows=rows, error=error)
+
+
+@bp.route('/history-fetcher', methods=['GET', 'POST'])
+def fetch_history_tool():
+    """手动获取股票历史价格并写入缓存的工具页面"""
+    from app.services.stock_history_cache_service import StockHistoryCacheService
+
+    today = date.today()
+    default_start = today - timedelta(days=60)
+
+    symbol = ''
+    start_date_str = default_start.isoformat()
+    end_date_str = today.isoformat()
+    currency = 'CAD'
+    force_refresh = False
+
+    rows = []
+    missing_days = []
+    fetch_info = {}
+    error = None
+    success = False
+
+    if request.method == 'POST':
+        symbol = (request.form.get('symbol') or '').strip().upper()
+        start_date_str = request.form.get('start_date') or start_date_str
+        end_date_str = request.form.get('end_date') or end_date_str
+        currency = (request.form.get('currency') or 'CAD').strip().upper()
+        force_refresh = request.form.get('force_refresh') == 'on'
+
+        if not symbol:
+            error = '请输入股票代码'
+        else:
+            try:
+                start_dt = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_dt = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                if start_dt > end_dt:
+                    raise ValueError('开始日期不能晚于结束日期')
+            except ValueError as exc:
+                error = f'日期格式错误：{exc}'
+            else:
+                service = StockHistoryCacheService()
+                try:
+                    history_records = service.get_history(symbol, start_dt, end_dt, currency, force_refresh=force_refresh)
+                    rows = history_records
+                    success = True
+
+                    fetch_info = {
+                        'symbol': symbol,
+                        'currency': currency,
+                        'start': start_dt.isoformat(),
+                        'end': end_dt.isoformat(),
+                        'count': len(history_records)
+                    }
+
+                    existing_dates = set()
+                    for record in history_records:
+                        record_date = record.get('date') or record.get('trade_date')
+                        if record_date:
+                            try:
+                                existing_dates.add(datetime.strptime(record_date, '%Y-%m-%d').date())
+                            except ValueError:
+                                continue
+
+                    sorted_dates = sorted(existing_dates)
+                    market = service._get_market(symbol, currency)
+
+                    missing_candidates = service._get_missing_trading_days(existing_dates, start_dt, end_dt)
+
+                    for missing in missing_candidates:
+                        StockHolidayAttempt.record_attempt(symbol, market, missing, has_data=False)
+                        if StockHolidayAttempt.should_promote_to_holiday(missing, market):
+                            MarketHoliday.add_holiday_detection(missing, market, symbol)
+
+                    missing_days = [d.isoformat() for d in missing_candidates]
+                    fetch_info['missing_count'] = len(missing_days)
+                except Exception as exc:
+                    current_app.logger.exception('获取历史数据失败: %s', exc)
+                    error = f'获取历史数据失败：{exc}'
+                    rows = []
+                    missing_days = []
+                    success = False
+
+    return render_template(
+        'test/history_fetch_tool.html',
+        symbol=symbol,
+        start_date=start_date_str,
+        end_date=end_date_str,
+        currency=currency,
+        force_refresh=force_refresh,
+        rows=rows,
+        missing_days=missing_days,
+        fetch_info=fetch_info,
+        error=error,
+        success=success
+    )

@@ -374,18 +374,21 @@ class DailyStatsService:
         """计算日变化，复用ReportService的逻辑"""
         current_assets = current.get('total_assets', Decimal('0'))
         prev_assets = previous.get('total_assets', Decimal('0'))
-        
+
         change = current_assets - prev_assets
         change_pct = Decimal('0')
-        
+
         if prev_assets > 0:
             change_pct = (change / prev_assets) * 100
-        
+
         return {
             'total_assets_change': change,
             'total_assets_change_pct': change_pct,
             'stock_market_value_change': current.get('stock_market_value', Decimal('0')) - previous.get('stock_market_value', Decimal('0')),
-            'cash_balance_change': current.get('cash_balance', Decimal('0')) - previous.get('cash_balance', Decimal('0'))
+            'cash_balance_change': current.get('cash_balance', Decimal('0')) - previous.get('cash_balance', Decimal('0')),
+            # Add convenience fields for backward compatibility
+            'amount': change,
+            'percentage': change_pct
         }
     
     def _calculate_daily_change_for_point(self, current_point: DailyStatsPoint, 

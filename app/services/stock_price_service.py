@@ -4,15 +4,26 @@
 
 import logging
 import re
-import requests
-import json
+import time
+import yfinance as yf
+import pandas as pd
 from datetime import datetime, timedelta, timezone, date
 from typing import Dict, List, Optional, Tuple
 from decimal import Decimal
 from flask import current_app
+from zoneinfo import ZoneInfo
+
 from app import db
 from app.models.stocks_cache import StocksCache
-from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
+
+
+def _log_yfinance_call(api_name: str, symbol: str, **kwargs):
+    details = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
+    message = f"[yfinance] {api_name} symbol={symbol} {details}".strip()
+    logger.debug(message)
+    print(message)
 
 logger = logging.getLogger(__name__)
 
@@ -21,63 +32,54 @@ class StockPriceService:
     """股票价格服务 - 使用Yahoo Finance"""
     
     def __init__(self):
-        self.timeout = 10
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        pass
     
     def get_stock_price(self, symbol: str, expected_currency: str = None) -> Optional[Dict]:
-        """从Yahoo Finance获取股票当前价格，并验证货币匹配
-        
+        """使用yfinance获取股票当前价格，并验证货币匹配
+
         Args:
             symbol: 股票代码
             expected_currency: 期望的货币代码 (USD/CAD)，如果提供则验证货币匹配
-        
+
         Returns:
             Dict: 股票价格数据，如果货币不匹配则返回None
         """
         try:
-            # Yahoo Finance API URL
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-            
-            response = requests.get(url, headers=self.headers, timeout=self.timeout)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if 'chart' not in data or not data['chart']['result']:
-                return None
-                
-            result = data['chart']['result'][0]
-            
+            # 添加延迟避免被ban
+            time.sleep(1)
+            # 使用yfinance获取股票信息
+            _log_yfinance_call('Ticker.info', symbol, expected_currency=expected_currency)
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+
             # 获取当前价格
-            meta = result.get('meta', {})
-            current_price = meta.get('regularMarketPrice')
-            
+            current_price = info.get('regularMarketPrice') or info.get('currentPrice')
+
             if current_price is None:
                 return None
-            
-            # 获取Yahoo Finance返回的货币信息
-            yahoo_currency = meta.get('currency', 'USD').upper()
-            
+
+            # 获取货币信息
+            yahoo_currency = info.get('currency', 'USD').upper()
+
             # 如果指定了期望的货币，进行验证
             if expected_currency:
                 expected_currency = expected_currency.upper()
                 if yahoo_currency != expected_currency:
                     logger.warning(f"货币不匹配: {symbol} 期望{expected_currency}，但Yahoo Finance返回{yahoo_currency}")
                     return None
-            
+
             return {
                 'symbol': symbol,
                 'price': float(current_price),
                 'currency': yahoo_currency,
-                'exchange': meta.get('exchangeName', ''),
-                'name': meta.get('longName', ''),
+                'exchange': info.get('exchange', ''),
+                'name': info.get('longName', ''),
                 'updated_at': datetime.utcnow()
             }
-            
+
         except Exception as e:
             logger.error(f"获取{symbol}价格失败: {str(e)}")
+            print(f"[yfinance][error] Ticker.info symbol={symbol} error={e}")
             return None
     
     def update_stock_price(self, symbol: str, currency: str, force_refresh: bool = False) -> bool:
@@ -261,13 +263,13 @@ class StockPriceService:
     
     def get_stock_history(self, symbol: str, start_date, end_date) -> Tuple[Dict, Dict]:
         """
-        获取股票历史价格数据
+        使用 yfinance 获取股票历史价格数据
         参数:
             symbol: 股票代码
             start_date: 开始日期
             end_date: 结束日期
         返回:
-            Tuple[Dict, Dict]: (历史价格字典, 附加信息字典)
+            Tuple[Dict, Dict]: (历史价格字典, 响应信息字典)
         """
         info: Dict = {
             'requested_start': start_date,
@@ -275,110 +277,97 @@ class StockPriceService:
         }
 
         try:
-            # 转换日期为Unix时间戳
-            import time
-            start_timestamp = int(time.mktime(start_date.timetuple()))
-            end_timestamp = int(time.mktime(end_date.timetuple()))
+            # 添加延迟避免被ban
+            time.sleep(1)
+            # 使用 yfinance 获取历史数据
+            _log_yfinance_call('Ticker.history', symbol, start=start_date, end=end_date)
+            ticker = yf.Ticker(symbol)
 
-            # Yahoo Finance API URL for historical data
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-            params = {
-                'period1': start_timestamp,
-                'period2': end_timestamp,
-                'interval': '1d',
-                'includePrePost': 'false'
+            # 获取历史数据，加1天确保包含结束日期
+            hist = ticker.history(
+                start=start_date,
+                end=end_date + timedelta(days=1),
+                interval='1d',
+                actions=False,
+                auto_adjust=False,
+                back_adjust=False
+            )
+
+            if hist.empty:
+                message = f"yfinance 未返回 {symbol} 的历史数据 ({start_date} -> {end_date})"
+                logger.warning(message)
+                print(f"[yfinance][empty] Ticker.history symbol={symbol} start={start_date} end={end_date}")
+                info['error'] = 'empty_data'
+                return {}, info
+
+            # 转换为原有格式
+            result_data = {}
+            timestamps = []
+            opens = []
+            highs = []
+            lows = []
+            closes = []
+            volumes = []
+
+            for idx, row in hist.iterrows():
+                try:
+                    # 获取日期
+                    if hasattr(idx, 'date'):
+                        trade_date = idx.date()
+                    else:
+                        trade_date = idx.to_pydatetime().date()
+
+                    # 转换为时间戳
+                    timestamp = int(datetime.combine(trade_date, datetime.min.time()).timestamp())
+
+                    timestamps.append(timestamp)
+                    opens.append(float(row['Open']) if not pd.isna(row['Open']) else None)
+                    highs.append(float(row['High']) if not pd.isna(row['High']) else None)
+                    lows.append(float(row['Low']) if not pd.isna(row['Low']) else None)
+                    closes.append(float(row['Close']) if not pd.isna(row['Close']) else None)
+                    volumes.append(int(row['Volume']) if not pd.isna(row['Volume']) else 0)
+
+                except Exception as e:
+                    logger.debug(f"处理 {symbol} 日期 {idx} 的数据时出错: {str(e)}")
+                    continue
+
+            # 构建返回数据，保持与原有接口一致
+            result_data = {
+                'timestamp': timestamps,
+                'open': opens,
+                'high': highs,
+                'low': lows,
+                'close': closes,
+                'volume': volumes
             }
 
-            response = requests.get(url, headers=self.headers, params=params, timeout=self.timeout)
-            print(f"[Yahoo API] 请求 {symbol} {start_date}->{end_date} params={params}")
-            info['status_code'] = response.status_code
+            if timestamps:
+                # 添加数据范围信息
+                data_start = datetime.fromtimestamp(min(timestamps)).date()
+                data_end = datetime.fromtimestamp(max(timestamps)).date()
+                info['data_start_date'] = data_start
+                info['data_end_date'] = data_end
+                info['status_code'] = 200
+                record_count = len(timestamps)
+                success_message = (
+                    f"[yfinance][success] Ticker.history symbol={symbol} start={start_date} "
+                    f"end={end_date} rows={record_count} range={data_start}->{data_end}"
+                )
+                logger.info(success_message)
+                print(success_message)
+            else:
+                warning_message = (
+                    f"⚠️ yfinance 返回空数据 {symbol} ({start_date} -> {end_date})"
+                )
+                logger.warning(warning_message)
+                print(f"[yfinance][empty] Ticker.history symbol={symbol} start={start_date} end={end_date}")
+                info['error'] = 'empty_data'
 
-            try:
-                data = response.json()
-            except ValueError:
-                data = None
+            return result_data, info
 
-            if response.status_code >= 400:
-                return self._handle_error_response(symbol, start_date, end_date, data, info)
-
-            if not data or 'chart' not in data:
-                logger.warning(f"无法解析{symbol}的历史价格数据 ({start_date} -> {end_date})")
-                return {}, info
-
-            chart = data['chart']
-            result = (chart.get('result') or [])
-            error_info = chart.get('error')
-
-            if not result:
-                self._populate_no_data_from_error(start_date, end_date, info, error_info)
-                logger.warning(f"无法获取{symbol}的历史价格数据 ({start_date} -> {end_date})")
-                return {}, info
-
-            result_entry = result[0]
-            meta = result_entry.get('meta', {})
-            timezone_name = meta.get('timezone') or meta.get('exchangeTimezoneName')
-            target_tz = timezone.utc
-            if timezone_name:
-                try:
-                    target_tz = ZoneInfo(timezone_name)
-                except Exception:
-                    logger.debug(f"未识别的时区 {timezone_name}，使用UTC")
-
-            first_trade_ts = meta.get('firstTradeDate') or meta.get('firstTradeDateMs')
-            if first_trade_ts:
-                if first_trade_ts > 1e12:  # 毫秒时间戳
-                    first_trade_ts = first_trade_ts / 1000
-                try:
-                    first_trade_date = datetime.fromtimestamp(first_trade_ts, tz=timezone.utc).date()
-                    info['first_trade_date'] = first_trade_date
-                    if start_date < first_trade_date:
-                        info.setdefault('no_data_ranges', []).append((start_date, min(end_date, first_trade_date - timedelta(days=1))))
-                except Exception:
-                    logger.debug(f"无法解析{symbol}的firstTradeDate: {first_trade_ts}")
-
-            indicators = result_entry.get('indicators', {})
-            quotes = indicators.get('quote') if indicators else None
-            if not quotes:
-                logger.warning(f"{symbol}历史数据中无价格信息 ({start_date} -> {end_date})")
-                return {}, info
-
-            if 'timestamp' not in result_entry:
-                logger.warning(f"{symbol}历史数据中无时间戳信息 ({start_date} -> {end_date})")
-                return {}, info
-
-            timestamps = result_entry['timestamp']
-            prices = quotes[0].get('close') if quotes else []
-
-            history: Dict[str, Dict] = {}
-            history_dates: List[date] = []
-            for i, timestamp in enumerate(timestamps):
-                if i < len(prices) and prices[i] is not None:
-                    try:
-                        utc_dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-                        localized_dt = utc_dt.astimezone(target_tz)
-                        date_str = localized_dt.strftime('%Y-%m-%d')
-                    except Exception:
-                        date_str = datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d')
-                    history[date_str] = {
-                        'close': float(prices[i])
-                    }
-                    try:
-                        history_dates.append(datetime.strptime(date_str, '%Y-%m-%d').date())
-                    except Exception:
-                        pass
-
-            if history_dates:
-                info['data_start_date'] = min(history_dates)
-                info['data_end_date'] = max(history_dates)
-
-            return history, info
-
-        except requests.RequestException as e:
-            logger.error(f"获取{symbol}历史价格失败 ({start_date} -> {end_date}): {str(e)}")
-            info['error'] = str(e)
-            return {}, info
         except Exception as e:
-            logger.error(f"解析{symbol}历史价格数据失败: {str(e)}")
+            logger.error(f"❌ yfinance 获取 {symbol} 历史价格失败 ({start_date} -> {end_date}): {str(e)}")
+            print(f"[yfinance][error] Ticker.history symbol={symbol} start={start_date} end={end_date} error={e}")
             info['error'] = str(e)
             return {}, info
 
