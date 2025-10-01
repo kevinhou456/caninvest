@@ -261,7 +261,7 @@ class StockPriceService:
             logger.error(f"获取{symbol}缓存价格失败: {str(e)}")
             return Decimal('0')
     
-    def get_stock_history(self, symbol: str, start_date, end_date) -> Tuple[Dict, Dict]:
+    def get_stock_history(self, symbol: str, start_date, end_date, currency: str = None) -> Tuple[Dict, Dict]:
         """
         使用 yfinance 获取股票历史价格数据
         参数:
@@ -298,6 +298,10 @@ class StockPriceService:
                 logger.warning(message)
                 print(f"[yfinance][empty] Ticker.history symbol={symbol} start={start_date} end={end_date}")
                 info['error'] = 'empty_data'
+                
+                # 记录假期尝试 - 当yfinance返回空数据时，记录整个时间段为无数据
+                self._record_holiday_attempts_for_empty_data(symbol, start_date, end_date, currency)
+                
                 return {}, info
 
             # 转换为原有格式
@@ -370,6 +374,50 @@ class StockPriceService:
             print(f"[yfinance][error] Ticker.history symbol={symbol} start={start_date} end={end_date} error={e}")
             info['error'] = str(e)
             return {}, info
+
+    def _record_holiday_attempts_for_empty_data(self, symbol: str, start_date, end_date, currency: str = None):
+        """当yfinance返回空数据时，记录假期尝试"""
+        try:
+            from app.models.market_holiday import StockHolidayAttempt
+            
+            # 获取市场信息
+            market = self._get_market(symbol, currency)
+            
+            # 遍历请求的日期范围，记录每个交易日为无数据
+            current_date = start_date
+            while current_date <= end_date:
+                # 跳过周末
+                if current_date.weekday() < 5:  # 0-4 是周一到周五
+                    StockHolidayAttempt.record_attempt(symbol, market, current_date, has_data=False)
+                    logger.info(f"🔍 {symbol} 在 {current_date} 无数据，记录假期尝试 ({market}市场)")
+                    
+                    # 检查是否应该推广为节假日
+                    if StockHolidayAttempt.should_promote_to_holiday(current_date, market, threshold=5):
+                        from app.models.market_holiday import MarketHoliday
+                        MarketHoliday.add_holiday_detection(current_date, market, symbol)
+                        logger.info(f"🎉 检测到节假日: {current_date} ({market}市场)")
+                
+                current_date += timedelta(days=1)
+                
+        except Exception as e:
+            logger.error(f"记录假期尝试失败: {str(e)}")
+
+    def _get_market(self, symbol: str, currency: str = None) -> str:
+        """识别股票所属市场"""
+        symbol = (symbol or '').upper()
+        currency = (currency or '').upper()
+        
+        # 加拿大市场标识
+        tsx_suffixes = ('.TO', '.TSX', '.TSXV', '.V', '.CN', '-T')
+        if any(symbol.endswith(suffix) for suffix in tsx_suffixes):
+            return 'CA'
+        
+        # 如果货币是CAD，也认为是加拿大市场
+        if currency == 'CAD':
+            return 'CA'
+        
+        # 默认美国市场
+        return 'US'
 
     def _handle_error_response(self, symbol: str, start_date, end_date, data: Optional[Dict], info: Dict) -> Tuple[Dict, Dict]:
         if data and isinstance(data, dict):

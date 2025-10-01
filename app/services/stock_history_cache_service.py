@@ -154,9 +154,12 @@ class StockHistoryCacheService:
         if start_date > end_date:
             return []
 
-        # 如果强制刷新，返回整个范围
+        # 如果强制刷新，返回整个范围，但也要经过扩展逻辑
         if force_refresh:
-            return [(start_date, end_date)]
+            gaps = [(start_date, end_date)]
+            # 应用扩展逻辑
+            gaps = self._expand_short_gaps_for_holiday_detection(gaps)
+            return gaps
 
         # 获取现有数据的日期集合
         existing_dates = set()
@@ -337,25 +340,29 @@ class StockHistoryCacheService:
             return None
 
     def _expand_short_gaps_for_holiday_detection(self, gaps: List[Tuple[date, date]]) -> List[Tuple[date, date]]:
-        """扩展短期缺口（<=7天）以进行节假日检测"""
+        """扩展短期缺口以进行节假日检测和缓存优化"""
         expanded_gaps = []
+        today = date.today()
 
         for gap_start, gap_end in gaps:
             gap_days = (gap_end - gap_start).days + 1
 
-            # 如果缺口不超过7天，扩展前后各一个月以检测节假日
-            if gap_days <= 7:
-                expanded_start = gap_start - timedelta(days=30)
-                expanded_end = gap_end + timedelta(days=30)
-
+            # 缓存优化：如果缺口小于一个月（30天），自动扩大获取区间
+            if gap_days <= 30:
+                # 前后各增加35天，但不超过当前日期
+                expanded_start = gap_start - timedelta(days=35)
+                expanded_end = gap_end + timedelta(days=35)
+                
                 # 确保扩展范围不超过今天
-                today = date.today()
                 expanded_end = min(expanded_end, today)
-
-                logger.info(f"🔍 扩展短期缺口用于节假日检测: {gap_start}->{gap_end} 扩展为 {expanded_start}->{expanded_end}")
+                
+                # 确保起始日期不早于IPO日期（如果有的话）
+                # 这里不检查IPO日期，因为调用方已经处理了IPO日期调整
+                
+                logger.info(f"🚀 缓存优化：扩展短期缺口 {gap_start}->{gap_end} ({gap_days}天) 为 {expanded_start}->{expanded_end} 以减少API调用")
                 expanded_gaps.append((expanded_start, expanded_end))
             else:
-                # 较长的缺口不扩展
+                # 较长的缺口不扩展，直接使用原区间
                 expanded_gaps.append((gap_start, gap_end))
 
         return expanded_gaps
@@ -365,7 +372,7 @@ class StockHistoryCacheService:
         try:
             logger.info(f"[Yahoo Fetch] {symbol}({currency}) {start_date} -> {end_date}")
 
-            raw_data, response_info = self.stock_service.get_stock_history(symbol, start_date, end_date)
+            raw_data, response_info = self.stock_service.get_stock_history(symbol, start_date, end_date, currency)
             market = self._get_market(symbol, currency)
 
             request_error = response_info.get('error') if isinstance(response_info, dict) else None

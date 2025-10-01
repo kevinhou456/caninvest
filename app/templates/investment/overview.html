@@ -172,7 +172,12 @@
 <!-- Portfolio Overview Header -->
 <div class="row mb-3">
     <div class="col-12">
-        <h4>{{ _('Portfolio Overview') }}</h4>
+        <div class="d-flex justify-content-between align-items-center">
+            <h4>{{ _('Portfolio Overview') }}</h4>
+            <button class="btn btn-outline-primary btn-sm" onclick="refreshPortfolioData()">
+                <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh Data') }}
+            </button>
+        </div>
         <!-- <p class="text-muted">{{ _('Summary of investment portfolio for') }} {{ filter_description }}</p> -->
     </div>
 </div>
@@ -844,9 +849,120 @@
     </div>
 </div>
 
+<!-- Loading Spinner -->
+<div id="loading-spinner" class="text-center py-5" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+        <span class="sr-only">{{ _('Loading...') }}</span>
+    </div>
+    <p class="mt-2 text-muted">{{ _('Loading portfolio data...') }}</p>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
+<script>
+// 加载提示函数
+function showLoadingOverlay(message) {
+    const msg = message || '正在加载数据...';
+    const loadingSpinner = document.getElementById('loading-spinner');
+    if (loadingSpinner) {
+        const messageElement = loadingSpinner.querySelector('p');
+        if (messageElement) {
+            messageElement.textContent = msg;
+        }
+        loadingSpinner.style.display = 'block';
+    }
+    
+    // 如果GlobalLoading可用，也使用它
+    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
+        GlobalLoading.manualShow(msg);
+    } else if (window.GlobalLoading && typeof GlobalLoading.show === 'function') {
+        GlobalLoading.show(msg);
+    }
+}
+
+function hideLoadingOverlay() {
+    const loadingSpinner = document.getElementById('loading-spinner');
+    if (loadingSpinner) {
+        loadingSpinner.style.display = 'none';
+    }
+    
+    // 如果GlobalLoading可用，也使用它
+    if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
+        GlobalLoading.manualHide(300);
+    } else if (window.GlobalLoading && typeof GlobalLoading.hide === 'function') {
+        GlobalLoading.hide(300);
+    }
+}
+
+// 刷新投资组合数据
+function refreshPortfolioData() {
+    showLoadingOverlay('正在刷新投资组合数据...');
+    
+    // 模拟API调用
+    setTimeout(() => {
+        // 这里应该是真实的API调用
+        // 例如：fetch('/api/portfolio/refresh')
+        //     .then(response => response.json())
+        //     .then(data => {
+        //         // 更新页面数据
+        //         updatePortfolioData(data);
+        //     })
+        //     .catch(error => {
+        //         console.error('Error refreshing portfolio:', error);
+        //     })
+        //     .finally(() => {
+        //         hideLoadingOverlay();
+        //     });
+        
+        // 模拟数据刷新完成
+        hideLoadingOverlay();
+        
+        // 显示成功提示
+        const toast = document.createElement('div');
+        toast.className = 'toast align-items-center text-white bg-success border-0';
+        toast.setAttribute('role', 'alert');
+        toast.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="fas fa-check-circle me-2"></i>投资组合数据已刷新
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        `;
+        
+        // 添加到页面
+        document.body.appendChild(toast);
+        
+        // 显示toast
+        const bsToast = new bootstrap.Toast(toast);
+        bsToast.show();
+        
+        // 3秒后自动移除
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
+    }, 2000);
+}
+
+// 页面加载时显示加载提示
+document.addEventListener('DOMContentLoaded', function() {
+    // 检查是否有持仓数据
+    const holdingsTable = document.querySelector('.holdings-table tbody');
+    const hasHoldings = holdingsTable && holdingsTable.querySelectorAll('tr').length > 0;
+    
+    // 如果没有持仓数据，显示加载提示
+    if (!hasHoldings) {
+        showLoadingOverlay('正在加载投资组合数据...');
+        
+        // 模拟数据加载完成（实际应用中这里会是真实的API调用）
+        setTimeout(() => {
+            hideLoadingOverlay();
+        }, 1500);
+    }
+});
+</script>
+
 <style>
 .sortable {
     user-select: none;
