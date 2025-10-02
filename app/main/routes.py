@@ -314,9 +314,10 @@ def overview():
                         'cad_only': metrics_data['total_return']['cad_only'], 
                         'usd_only': metrics_data['total_return']['usd_only']
                     })
-                    total_assets_cad = metrics_data['total_assets']['cad'] or 0
-                    self.total_return_rate = (metrics_data['total_return']['cad'] / total_assets_cad * 100
-                                              if total_assets_cad else 0)
+                    # 使用正确的分母计算总回报率 - 应该用总投资成本，不是总资产
+                    total_deposits = metrics_data.get('total_deposits', {}).get('cad', 0) or 0
+                    self.total_return_rate = (metrics_data['total_return']['cad'] / total_deposits * 100
+                                              if total_deposits > 0 else 0)
                     self.realized_gain = type('obj', (object,), {
                         'cad': metrics_data['realized_gain']['cad'], 
                         'cad_only': metrics_data['realized_gain']['cad_only'], 
