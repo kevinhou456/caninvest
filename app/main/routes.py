@@ -143,6 +143,16 @@ def overview():
                 'cad_only': 0,
                 'usd_only': 0
             },
+            'total_deposits': {
+                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
+                'cad_only': 0,
+                'usd_only': 0
+            },
+            'total_withdrawals': {
+                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
+                'cad_only': 0,
+                'usd_only': 0
+            },
             'cash_balance': {
                 'total_cad': total_cash
             }
@@ -388,6 +398,16 @@ def overview():
                         'cad': metrics_data['interest']['cad'], 
                         'cad_only': metrics_data['interest']['cad_only'], 
                         'usd_only': metrics_data['interest']['usd_only']
+                    })
+                    self.total_deposits = type('obj', (object,), {
+                        'cad': metrics_data['total_deposits']['cad'], 
+                        'cad_only': metrics_data['total_deposits']['cad_only'], 
+                        'usd_only': metrics_data['total_deposits']['usd_only']
+                    })
+                    self.total_withdrawals = type('obj', (object,), {
+                        'cad': metrics_data['total_withdrawals']['cad'], 
+                        'cad_only': metrics_data['total_withdrawals']['cad_only'], 
+                        'usd_only': metrics_data['total_withdrawals']['usd_only']
                     })
             
             metrics = ComprehensiveMetrics(comprehensive_metrics, daily_change_metrics)
