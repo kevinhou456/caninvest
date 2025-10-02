@@ -314,10 +314,17 @@ def overview():
                         'cad_only': metrics_data['total_return']['cad_only'], 
                         'usd_only': metrics_data['total_return']['usd_only']
                     })
-                    # 使用正确的分母计算总回报率 - 应该用总投资成本，不是总资产
-                    total_deposits = metrics_data.get('total_deposits', {}).get('cad', 0) or 0
-                    self.total_return_rate = (metrics_data['total_return']['cad'] / total_deposits * 100
-                                              if total_deposits > 0 else 0)
+                    # 使用Portfolio Service的数据计算总回报率
+                    # 从portfolio_summary获取正确的投资成本数据
+                    portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
+                    portfolio_summary_data = portfolio_summary.get('summary', {})
+                    total_cost = portfolio_summary_data.get('total_cost', 0)
+                    total_realized = portfolio_summary_data.get('total_realized_gain', 0)
+                    total_unrealized = portfolio_summary_data.get('total_unrealized_gain', 0)
+                    total_return = total_realized + total_unrealized
+                    
+                    self.total_return_rate = (total_return / total_cost * 100
+                                              if total_cost > 0 else 0)
                     self.realized_gain = type('obj', (object,), {
                         'cad': metrics_data['realized_gain']['cad'], 
                         'cad_only': metrics_data['realized_gain']['cad_only'], 
@@ -3079,6 +3086,7 @@ def get_async_portfolio_prices():
         account_ids = data.get('account_ids', [])
         member_id = data.get('member_id')
         family_id = data.get('family_id')
+        force_refresh = data.get('force_refresh', False)  # 添加强制刷新参数
         
         if not account_ids:
             return jsonify({
@@ -3119,7 +3127,7 @@ def get_async_portfolio_prices():
         stock_service = StockPriceService()
         
         # 批量更新价格
-        update_results = stock_service.update_prices_for_symbols(stock_symbols, force_refresh=True)
+        update_results = stock_service.update_prices_for_symbols(stock_symbols, force_refresh=force_refresh)
         
         # 确保数据库事务已提交
         from app import db

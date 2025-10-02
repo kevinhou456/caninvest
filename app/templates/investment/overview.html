@@ -902,8 +902,12 @@ function hideLoadingOverlay() {
 }
 
 // 异步加载股票价格数据
-function loadStockPricesAsync() {
-    showLoadingOverlay('正在获取股票价格...');
+function loadStockPricesAsync(forceRefresh = false) {
+    if (forceRefresh) {
+        showLoadingOverlay('正在强制更新股票价格...');
+    } else {
+        showLoadingOverlay('正在获取股票价格...');
+    }
     
     // 获取当前页面的账户ID
     const accountIds = {{ account_ids if account_ids else '[]' }};
@@ -919,7 +923,8 @@ function loadStockPricesAsync() {
         body: JSON.stringify({
             account_ids: accountIds,
             member_id: memberId,
-            family_id: familyId
+            family_id: familyId,
+            force_refresh: forceRefresh  // 添加强制刷新参数
         })
     })
     .then(response => response.json())
@@ -930,7 +935,11 @@ function loadStockPricesAsync() {
             hideLoadingOverlay();
             
             // 显示成功提示
-            showSuccessToast('股票价格已更新');
+            if (forceRefresh) {
+                showSuccessToast('股票价格已强制更新');
+            } else {
+                showSuccessToast('股票价格已更新');
+            }
         } else {
             hideLoadingOverlay();
             showErrorToast('获取股票价格失败: ' + (data.error || '未知错误'));
@@ -1349,7 +1358,7 @@ function showErrorToast(message) {
 
 // 刷新投资组合数据
 function refreshPortfolioData() {
-    loadStockPricesAsync();
+    loadStockPricesAsync(true);  // 强制更新股票价格
 }
 
 // 页面加载时显示加载提示
@@ -1358,17 +1367,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const holdingsTable = document.querySelector('#holdingsTable tbody');
     const hasHoldings = holdingsTable && holdingsTable.querySelectorAll('tr').length > 0;
     
-    // 如果没有持仓数据，显示加载提示并异步加载股票价格
+    // 如果没有持仓数据，显示加载提示并异步加载股票价格（使用缓存）
     if (!hasHoldings) {
         showLoadingOverlay('正在加载投资组合数据...');
         
-        // 异步加载股票价格
-        loadStockPricesAsync();
-    } else {
-        // 如果有持仓数据，但仍然异步更新股票价格以获取最新价格
-        showLoadingOverlay('正在获取最新股票价格...');
-        loadStockPricesAsync();
+        // 异步加载股票价格（使用缓存，不强制更新）
+        loadStockPricesAsync(false);
     }
+    // 如果有持仓数据，不自动更新价格，让用户手动点击"refresh data"按钮
 });
 </script>
 
