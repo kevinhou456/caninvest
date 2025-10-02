@@ -133,6 +133,16 @@ def overview():
                 'cad_only': total_unrealized,
                 'usd_only': 0
             },
+            'dividends': {
+                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
+                'cad_only': 0,
+                'usd_only': 0
+            },
+            'interest': {
+                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
+                'cad_only': 0,
+                'usd_only': 0
+            },
             'cash_balance': {
                 'total_cad': total_cash
             }
