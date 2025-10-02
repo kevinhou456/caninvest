@@ -372,6 +372,10 @@ class PortfolioService:
         total_cost = sum(Decimal(str(h['total_cost'])) for h in current_holdings)
         total_unrealized_gain = sum(Decimal(str(h['unrealized_gain'])) for h in current_holdings)
         
+        # 计算已实现收益 - 包括当前持仓和清仓持仓
+        total_realized_gain = sum(Decimal(str(h['realized_gain'])) for h in current_holdings)
+        total_realized_gain += sum(Decimal(str(h['realized_gain'])) for h in cleared_holdings)
+        
         return {
             'period_info': {
                 'period_type': period.value,
@@ -383,8 +387,9 @@ class PortfolioService:
             'summary': {
                 'total_current_value': float(total_current_value),
                 'total_cost': float(total_cost),
+                'total_realized_gain': float(total_realized_gain),
                 'total_unrealized_gain': float(total_unrealized_gain),
-                'total_return_percent': float((total_unrealized_gain / total_cost * 100)) if total_cost > 0 else 0
+                'total_return_percent': float(((total_realized_gain + total_unrealized_gain) / total_cost * 100)) if total_cost > 0 else 0
             }
         }
         
