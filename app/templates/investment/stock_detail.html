@@ -56,8 +56,7 @@
                                 <span>value: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.market_value) if stock_stats.market_value > 0 else 'N/A' }}</strong></span>
                                 <span>unrealized: <strong class="{{ 'text-success' if stock_stats.unrealized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.unrealized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.unrealized_pnl) }}</strong></span>
                                 <span>realized: <strong class="{{ 'text-success' if stock_stats.realized_pnl >= 0 else 'text-danger' }}">{{ "+" if stock_stats.realized_pnl >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.realized_pnl) }}</strong></span>
-                                <span>div: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_dividends) }}</strong></span>
-                                <span>int: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_interest) }}</strong></span>
+                                <span>income: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_dividends + stock_stats.total_interest) }}</strong></span>
                             </div>
                             {% elif current_holding %}
                             <div class="d-flex gap-4" style="font-size: 1rem;">
@@ -71,8 +70,7 @@
                             <div class="d-flex flex-wrap gap-4" style="font-size: 1rem;">
                                 <span>Total Invested: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_invested or 0) }}</strong></span>
                                 <span>Realized Gain: <strong class="{{ 'text-success' if (stock_stats.realized_pnl or 0) >= 0 else 'text-danger' }}">{{ "+" if (stock_stats.realized_pnl or 0) >= 0 else "" }}{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.realized_pnl or 0) }}</strong></span>
-                                <span>Dividend: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_dividends or 0) }}</strong></span>
-                                <span>Interest: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format(stock_stats.total_interest or 0) }}</strong></span>
+                                <span>Income: <strong class="text-dark">{{ stock_stats.currency }}${{ "{:,.2f}".format((stock_stats.total_dividends or 0) + (stock_stats.total_interest or 0)) }}</strong></span>
                                 <span>Return Rate: <strong class="{{ 'text-success' if (stock_stats.zero_holding_return_rate or 0) >= 0 else 'text-danger' }}">{{ "+" if (stock_stats.zero_holding_return_rate or 0) >= 0 else "" }}{{ "{:.2f}".format(stock_stats.zero_holding_return_rate or 0) }}%</strong></span>
                             </div>
                             {% endif %}
