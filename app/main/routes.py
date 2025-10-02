@@ -327,10 +327,12 @@ def overview():
                         'cad_only': metrics_data['total_assets']['cad_only'], 
                         'usd_only': metrics_data['total_assets']['usd_only']
                     })
+                    # 计算股票市值：总资产 - 现金余额
+                    stock_value_cad = metrics_data['total_assets']['cad'] - metrics_data['cash_balance']['total_cad']
                     self.stock_market_value = type('obj', (object,), {
-                        'cad': metrics_data['total_assets']['stock_value'],
-                        'cad_only': metrics_data['total_assets']['stock_value_cad'], 
-                        'usd_only': metrics_data['total_assets']['stock_value_usd']
+                        'cad': stock_value_cad,
+                        'cad_only': stock_value_cad, 
+                        'usd_only': 0
                     })
                     self.cash_balance_total = metrics_data['cash_balance']['total_cad']
                     
