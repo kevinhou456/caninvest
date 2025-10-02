@@ -105,11 +105,11 @@ def overview():
         cash_balance = asset_service.get_cash_balance(account_ids[0] if account_ids else None, date.today())
         
         # 总是使用Portfolio Service的数据构建综合指标，确保数据一致性
-        total_stock_value = portfolio_summary.get('summary', {}).get('total_current_value', 0)
-        total_cash = cash_balance.get('total_cad', 0)
+        total_stock_value = float(portfolio_summary.get('summary', {}).get('total_current_value', 0))
+        total_cash = float(cash_balance.get('total_cad', 0))
         total_assets = total_stock_value + total_cash
-        total_realized = portfolio_summary.get('summary', {}).get('total_realized_gain', 0)
-        total_unrealized = portfolio_summary.get('summary', {}).get('total_unrealized_gain', 0)
+        total_realized = float(portfolio_summary.get('summary', {}).get('total_realized_gain', 0))
+        total_unrealized = float(portfolio_summary.get('summary', {}).get('total_unrealized_gain', 0))
         total_return = total_realized + total_unrealized
         
         comprehensive_metrics = {
