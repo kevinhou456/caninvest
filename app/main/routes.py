@@ -50,6 +50,7 @@ def overview():
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
     time_period = request.args.get('period', 'all_time')
+    skip_prices = request.args.get('skip_prices', 'true').lower() == 'true'
     
     try:
         # 初始化统一服务
@@ -88,16 +89,24 @@ def overview():
         # 使用新的统一资产估值服务架构
         account_ids = [acc.id for acc in accounts]
         
-        # 获取综合投资组合指标 - 包含完整的财务计算
-        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
-            account_ids,
-            ownership_map=ownership_map
-        )
-        
-        # 获取详细的投资组合数据
-        portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
-        raw_holdings = portfolio_data.get('current_holdings', [])
-        raw_cleared_holdings = portfolio_data.get('cleared_holdings', [])
+        # 根据skip_prices参数决定是否获取股票价格
+        if skip_prices:
+            # 跳过股票价格获取，但显示基础投资组合数据（使用缓存的价格）
+            comprehensive_metrics = None
+            portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
+            raw_holdings = portfolio_data.get('current_holdings', [])
+            raw_cleared_holdings = portfolio_data.get('cleared_holdings', [])
+        else:
+            # 获取综合投资组合指标 - 包含完整的财务计算
+            comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
+                account_ids,
+                ownership_map=ownership_map
+            )
+            
+            # 获取详细的投资组合数据
+            portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
+            raw_holdings = portfolio_data.get('current_holdings', [])
+            raw_cleared_holdings = portfolio_data.get('cleared_holdings', [])
         
         # 创建账户名到账户对象的映射字典，用于获取成员信息
         account_name_to_obj = {acc.name: acc for acc in accounts}
@@ -281,84 +290,89 @@ def overview():
             }
         
         # 从综合指标中提取数据
-        total_assets = comprehensive_metrics['total_assets']['cad']
-        total_stock_value = comprehensive_metrics['total_assets']['stock_value']
-        total_cash_cad = comprehensive_metrics['cash_balance']['cad']
-        total_cash_usd = comprehensive_metrics['cash_balance']['usd']
+        if comprehensive_metrics:
+            total_assets = comprehensive_metrics['total_assets']['cad']
+            total_stock_value = comprehensive_metrics['total_assets']['stock_value']
+            total_cash_cad = comprehensive_metrics['cash_balance']['cad']
+            total_cash_usd = comprehensive_metrics['cash_balance']['usd']
+        else:
+            # 当跳过价格获取时，使用默认值
+            total_assets = 0
+            total_stock_value = 0
+            total_cash_cad = 0
+            total_cash_usd = 0
         
         # 创建包含完整财务指标的metrics对象
-        class ComprehensiveMetrics:
-            def __init__(self, metrics_data, daily_change_data=None):
-                self.total_assets = type('obj', (object,), {
-                    'cad': metrics_data['total_assets']['cad'],
-                    'cad_only': metrics_data['total_assets']['cad_only'], 
-                    'usd_only': metrics_data['total_assets']['usd_only']
-                })
-                self.stock_market_value = type('obj', (object,), {
-                    'cad': metrics_data['total_assets']['stock_value'],
-                    'cad_only': metrics_data['total_assets']['stock_value_cad'], 
-                    'usd_only': metrics_data['total_assets']['stock_value_usd']
-                })
-                self.cash_balance_total = metrics_data['cash_balance']['total_cad']
-                
-                # 完整的财务指标 - 使用新架构的准确计算
-                self.total_return = type('obj', (object,), {
-                    'cad': metrics_data['total_return']['cad'], 
-                    'cad_only': metrics_data['total_return']['cad_only'], 
-                    'usd_only': metrics_data['total_return']['usd_only']
-                })
-                total_assets_cad = metrics_data['total_assets']['cad'] or 0
-                self.total_return_rate = (metrics_data['total_return']['cad'] / total_assets_cad * 100
-                                          if total_assets_cad else 0)
-                self.realized_gain = type('obj', (object,), {
-                    'cad': metrics_data['realized_gain']['cad'], 
-                    'cad_only': metrics_data['realized_gain']['cad_only'], 
-                    'usd_only': metrics_data['realized_gain']['usd_only']
-                })
-                self.unrealized_gain = type('obj', (object,), {
-                    'cad': metrics_data['unrealized_gain']['cad'], 
-                    'cad_only': metrics_data['unrealized_gain']['cad_only'], 
-                    'usd_only': metrics_data['unrealized_gain']['usd_only']
-                })
-                daily_data = daily_change_data or {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
-                self.daily_change = type('obj', (object,), {
-                    'cad': daily_data.get('cad', 0.0),
-                    'cad_only': daily_data.get('cad_only', 0.0),
-                    'usd_only': daily_data.get('usd_only', 0.0)
-                })
-                self.total_dividends = type('obj', (object,), {
-                    'cad': metrics_data['dividends']['cad'], 
-                    'cad_only': metrics_data['dividends']['cad_only'], 
-                    'usd_only': metrics_data['dividends']['usd_only']
-                })
-                self.total_interest = type('obj', (object,), {
-                    'cad': metrics_data['interest']['cad'], 
-                    'cad_only': metrics_data['interest']['cad_only'], 
-                    'usd_only': metrics_data['interest']['usd_only']
-                })
-                self.total_deposits = type('obj', (object,), {
-                    'cad': metrics_data['total_deposits']['cad'], 
-                    'cad_only': metrics_data['total_deposits']['cad_only'], 
-                    'usd_only': metrics_data['total_deposits']['usd_only']
-                })
-                self.total_withdrawals = type('obj', (object,), {
-                    'cad': metrics_data['total_withdrawals']['cad'], 
-                    'cad_only': metrics_data['total_withdrawals']['cad_only'], 
-                    'usd_only': metrics_data['total_withdrawals']['usd_only']
-                })
-                
-            def to_dict(self):
-                return {
-                    'total_assets': {'cad': self.total_assets.cad, 'cad_only': self.total_assets.cad_only, 'usd_only': self.total_assets.usd_only},
-                    'stock_market_value': {'cad': self.stock_market_value.cad, 'cad_only': self.stock_market_value.cad_only, 'usd_only': self.stock_market_value.usd_only},
-                    'cash_balance_total': self.cash_balance_total,
-                    'total_return': {'cad': self.total_return.cad, 'cad_only': self.total_return.cad_only, 'usd_only': self.total_return.usd_only},
-                    'realized_gain': {'cad': self.realized_gain.cad, 'cad_only': self.realized_gain.cad_only, 'usd_only': self.realized_gain.usd_only},
-                    'unrealized_gain': {'cad': self.unrealized_gain.cad, 'cad_only': self.unrealized_gain.cad_only, 'usd_only': self.unrealized_gain.usd_only},
-                    'total_return_rate': self.total_return_rate
-                }
-        
-        metrics = ComprehensiveMetrics(comprehensive_metrics, daily_change_metrics)
+        if comprehensive_metrics:
+            class ComprehensiveMetrics:
+                def __init__(self, metrics_data, daily_change_data=None):
+                    self.total_assets = type('obj', (object,), {
+                        'cad': metrics_data['total_assets']['cad'],
+                        'cad_only': metrics_data['total_assets']['cad_only'], 
+                        'usd_only': metrics_data['total_assets']['usd_only']
+                    })
+                    self.stock_market_value = type('obj', (object,), {
+                        'cad': metrics_data['total_assets']['stock_value'],
+                        'cad_only': metrics_data['total_assets']['stock_value_cad'], 
+                        'usd_only': metrics_data['total_assets']['stock_value_usd']
+                    })
+                    self.cash_balance_total = metrics_data['cash_balance']['total_cad']
+                    
+                    # 完整的财务指标 - 使用新架构的准确计算
+                    self.total_return = type('obj', (object,), {
+                        'cad': metrics_data['total_return']['cad'], 
+                        'cad_only': metrics_data['total_return']['cad_only'], 
+                        'usd_only': metrics_data['total_return']['usd_only']
+                    })
+                    total_assets_cad = metrics_data['total_assets']['cad'] or 0
+                    self.total_return_rate = (metrics_data['total_return']['cad'] / total_assets_cad * 100
+                                              if total_assets_cad else 0)
+                    self.realized_gain = type('obj', (object,), {
+                        'cad': metrics_data['realized_gain']['cad'], 
+                        'cad_only': metrics_data['realized_gain']['cad_only'], 
+                        'usd_only': metrics_data['realized_gain']['usd_only']
+                    })
+                    self.unrealized_gain = type('obj', (object,), {
+                        'cad': metrics_data['unrealized_gain']['cad'], 
+                        'cad_only': metrics_data['unrealized_gain']['cad_only'], 
+                        'usd_only': metrics_data['unrealized_gain']['usd_only']
+                    })
+                    daily_data = daily_change_data or {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
+                    self.daily_change = type('obj', (object,), {
+                        'cad': daily_data.get('cad', 0.0),
+                        'cad_only': daily_data.get('cad_only', 0.0),
+                        'usd_only': daily_data.get('usd_only', 0.0)
+                    })
+                    self.total_dividends = type('obj', (object,), {
+                        'cad': metrics_data['dividends']['cad'], 
+                        'cad_only': metrics_data['dividends']['cad_only'], 
+                        'usd_only': metrics_data['dividends']['usd_only']
+                    })
+                    self.total_interest = type('obj', (object,), {
+                        'cad': metrics_data['interest']['cad'], 
+                        'cad_only': metrics_data['interest']['cad_only'], 
+                        'usd_only': metrics_data['interest']['usd_only']
+                    })
+            
+            metrics = ComprehensiveMetrics(comprehensive_metrics, daily_change_metrics)
+        else:
+            # 当跳过价格获取时，创建空的metrics对象
+            class EmptyMetrics:
+                def __init__(self):
+                    self.total_assets = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.stock_market_value = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.cash_balance_total = 0
+                    self.total_return = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_return_rate = 0
+                    self.realized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.unrealized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.daily_change = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_dividends = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_interest = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_deposits = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_withdrawals = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+            
+            metrics = EmptyMetrics()
         
         # 准备现金数据
         cash_data = {
@@ -411,6 +425,7 @@ def overview():
                              current_period=time_period,
                              member_id=member_id,
                              account_id=account_id,
+                             account_ids=account_ids,
                              current_view='overview')
         
     except Exception as e:
@@ -442,6 +457,7 @@ def overview():
                              current_period='all_time',
                              member_id=None,
                              account_id=None,
+                             account_ids=[],
                              current_view='overview')
 
 
@@ -3056,3 +3072,89 @@ def fetch_history_tool():
         error=error,
         success=success
     )
+
+
+@bp.route('/api/portfolio/async-prices', methods=['POST'])
+def get_async_portfolio_prices():
+    """异步获取投资组合股票价格API"""
+    try:
+        from app.services.asset_valuation_service import AssetValuationService
+        from app.services.holdings_service import HoldingsService
+        
+        # 获取请求参数
+        data = request.get_json()
+        account_ids = data.get('account_ids', [])
+        member_id = data.get('member_id')
+        family_id = data.get('family_id')
+        
+        if not account_ids:
+            return jsonify({
+                'success': False,
+                'error': 'No account IDs provided'
+            }), 400
+        
+        # 获取基础持仓数据（不包含价格）
+        holdings_service = HoldingsService()
+        holdings_snapshot = holdings_service.get_holdings_snapshot(
+            target=account_ids,
+            target_type='account',
+            as_of_date=None,
+            family_id=family_id
+        )
+        
+        # 获取需要更新价格的股票列表（去重）
+        stock_symbols = set()  # 使用set自动去重
+        for symbol, account_holdings in holdings_snapshot.holdings.items():
+            for account_id, holding in account_holdings.items():
+                if holding.current_shares > 0:
+                    # 从holding对象获取货币信息
+                    currency = getattr(holding, 'currency', 'USD')
+                    stock_symbols.add((symbol, currency))  # 使用add方法，自动去重
+        
+        # 转换为列表
+        stock_symbols = list(stock_symbols)
+        
+        if not stock_symbols:
+            return jsonify({
+                'success': True,
+                'holdings': [],
+                'message': 'No holdings found'
+            })
+        
+        # 异步更新股票价格
+        from app.services.stock_price_service import StockPriceService
+        stock_service = StockPriceService()
+        
+        # 批量更新价格
+        update_results = stock_service.update_prices_for_symbols(stock_symbols, force_refresh=True)
+        
+        # 确保数据库事务已提交
+        from app import db
+        db.session.commit()
+        
+        # 等待一小段时间确保所有价格更新都完成
+        import time
+        time.sleep(0.1)
+        
+        # 重新计算持仓价值
+        asset_service = AssetValuationService()
+        portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
+        
+        # 计算综合指标
+        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(account_ids)
+        
+        return jsonify({
+            'success': True,
+            'holdings': portfolio_data.get('current_holdings', []),
+            'cleared_holdings': portfolio_data.get('cleared_holdings', []),
+            'metrics': comprehensive_metrics,
+            'exchange_rates': portfolio_data.get('exchange_rates', {}),
+            'update_results': update_results
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"异步获取股票价格失败: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': f'Failed to update stock prices: {str(e)}'
+        }), 500

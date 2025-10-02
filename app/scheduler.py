@@ -37,13 +37,15 @@ class TaskScheduler:
         # 添加定时任务
         self._add_jobs()
         
-        # 启动调度器
-        if app.config.get('SCHEDULER_API_ENABLED', True):
+        # 启动调度器 - 临时禁用以避免启动时卡住
+        if app.config.get('SCHEDULER_API_ENABLED', False):  # 改为False
             try:
                 self.scheduler.start()
                 logger.info("Task scheduler started successfully")
             except Exception as e:
                 logger.error(f"Failed to start scheduler: {e}")
+        else:
+            logger.info("Task scheduler disabled")
     
     def _add_jobs(self):
         """添加定时任务"""

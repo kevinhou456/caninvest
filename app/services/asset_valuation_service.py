@@ -714,6 +714,9 @@ class AssetValuationService:
 
         # 计算总回报率
         total_return_rate = float(total_return / total_deposits * 100) if total_deposits > 0 else 0.0
+        
+        # 计算当日变化
+        daily_change = self._calculate_daily_change(account_ids, target_date)
 
         return {
             'total_assets': {
@@ -774,9 +777,86 @@ class AssetValuationService:
                 'usd': float(cash_usd),
                 'total_cad': float(total_cash_value)
             },
+            'daily_change': {
+                'cad': float(daily_change['cad']),
+                'cad_only': float(daily_change['cad_only']),
+                'usd_only': float(daily_change['usd_only'])
+            },
             'exchange_rate': float(exchange_rate_decimal),
             'total_return_rate': total_return_rate
         }
+
+    def _calculate_daily_change(self, account_ids: List[int], target_date: date) -> Dict:
+        """计算当日变化 - 基于个股的daily_change_value汇总"""
+        try:
+            total_daily_change_cad = Decimal('0')
+            total_daily_change_cad_only = Decimal('0')
+            total_daily_change_usd_only = Decimal('0')
+            
+            # 获取汇率
+            exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
+            exchange_rate_decimal = Decimal(str(exchange_rate))
+            
+            # 遍历所有账户，汇总个股的当日变化
+            for account_id in account_ids:
+                # 获取该账户的所有持仓
+                holdings = self._get_holdings_at_date(account_id, target_date)
+                
+                for symbol, shares in holdings.items():
+                    if shares <= 0:
+                        continue
+                    
+                    # 获取股票信息
+                    currency = Transaction.get_currency_by_stock_symbol(symbol)
+                    current_price = self.stock_price_service.get_cached_stock_price(symbol, currency) or 0
+                    
+                    if current_price > 0:
+                        # 获取前一日收盘价
+                        previous_price = self._get_previous_close_price(symbol, currency, target_date)
+                        if previous_price and previous_price > 0:
+                            # 计算当日变化
+                            daily_change_value = shares * (current_price - previous_price)
+                            
+                            # 按币种分类
+                            if currency == 'CAD':
+                                total_daily_change_cad_only += daily_change_value
+                            else:  # USD
+                                total_daily_change_usd_only += daily_change_value
+                            
+                            # 转换为CAD
+                            if currency == 'USD':
+                                total_daily_change_cad += daily_change_value * exchange_rate_decimal
+                            else:
+                                total_daily_change_cad += daily_change_value
+            
+            return {
+                'cad': float(total_daily_change_cad),
+                'cad_only': float(total_daily_change_cad_only),
+                'usd_only': float(total_daily_change_usd_only)
+            }
+            
+        except Exception as e:
+            logger.error(f"计算当日变化失败: {e}")
+            return {
+                'cad': 0.0,
+                'cad_only': 0.0,
+                'usd_only': 0.0
+            }
+
+    def _get_previous_close_price(self, symbol: str, currency: str, target_date: date) -> Optional[Decimal]:
+        """获取前一日收盘价"""
+        try:
+            # 获取前一个交易日
+            previous_date = target_date - timedelta(days=1)
+            while previous_date.weekday() >= 5:  # 跳过周末
+                previous_date -= timedelta(days=1)
+            
+            # 获取历史价格
+            return self._get_historical_stock_price(symbol, previous_date, currency)
+            
+        except Exception as e:
+            logger.error(f"获取{symbol}前一日收盘价失败: {e}")
+            return None
 
     def _get_account_proportion(self, account_id: int,
                                 ownership_map: Optional[Dict[int, Decimal]]) -> Decimal:

@@ -45,8 +45,6 @@ class StockPriceService:
             Dict: 股票价格数据，如果货币不匹配则返回None
         """
         try:
-            # 添加延迟避免被ban
-            time.sleep(1)
             # 使用yfinance获取股票信息
             _log_yfinance_call('Ticker.info', symbol, expected_currency=expected_currency)
             ticker = yf.Ticker(symbol)
@@ -195,14 +193,17 @@ class StockPriceService:
             symbol_currency_pairs: 包含(symbol, currency)元组的列表
             force_refresh: 是否强制刷新价格，忽略缓存时间限制
         """
+        # 去重处理，避免重复更新同一只股票
+        unique_pairs = list(set(symbol_currency_pairs))
+        
         results = {
-            'total': len(symbol_currency_pairs),
+            'total': len(unique_pairs),
             'updated': 0,
             'failed': 0,
             'errors': []
         }
 
-        for symbol, currency in symbol_currency_pairs:
+        for symbol, currency in unique_pairs:
             try:
                 if self.update_stock_price(symbol, currency, force_refresh):
                     results['updated'] += 1
@@ -277,8 +278,6 @@ class StockPriceService:
         }
 
         try:
-            # 添加延迟避免被ban
-            time.sleep(1)
             # 使用 yfinance 获取历史数据
             _log_yfinance_call('Ticker.history', symbol, start=start_date, end=end_date)
             ticker = yf.Ticker(symbol)

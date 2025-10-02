@@ -195,7 +195,7 @@
                     <h6 class="card-title text-muted mb-0">{{ _('Total Assets') }}</h6>
                 </div>
                 <h4 id="total-assets-display" class="text-primary mb-1">${{ "{:,.2f}".format(metrics.total_assets.cad if metrics else 0) }}</h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_assets.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_assets.usd_only if metrics else 0) }}</small>
+                <small class="text-muted" id="total-assets-breakdown">CAD:${{ "{:,.2f}".format(metrics.total_assets.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_assets.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
@@ -218,7 +218,7 @@
                         ({% if metrics %}{{ "+" if metrics.total_return_rate >= 0 else "" }}{{ "{:.2f}".format(metrics.total_return_rate) }}{% else %}0.00{% endif %}%)
                     </small>
                 </h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.total_return.cad_only if metrics else 0) }} | USD:${{ "{:,.2f}".format(metrics.total_return.usd_only if metrics else 0) }}</small>
+                <small class="text-muted" id="total-return-breakdown">CAD:${{ "{:,.2f}".format(metrics.total_return.cad_only if metrics else 0) }} | USD:${{ "{:,.2f}".format(metrics.total_return.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
@@ -236,7 +236,7 @@
                 <h4 id="realized-gain-display" class="{{ 'text-success' if metrics and metrics.realized_gain.cad >= 0 else 'text-danger' }} mb-1">
                     {% if metrics and metrics.realized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.realized_gain.cad if metrics else 0) }}
                 </h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.realized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.realized_gain.usd_only if metrics else 0) }}</small>
+                <small class="text-muted" id="realized-gain-breakdown">CAD:${{ "{:,.2f}".format(metrics.realized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.realized_gain.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
@@ -254,12 +254,12 @@
                 <h4 id="unrealized-gain-display" class="{{ 'text-success' if metrics and metrics.unrealized_gain.cad >= 0 else 'text-danger' }} mb-1">
                     {% if metrics and metrics.unrealized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.unrealized_gain.cad if metrics else 0) }}
                 </h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.unrealized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.unrealized_gain.usd_only if metrics else 0) }}</small>
+                <small class="text-muted" id="unrealized-gain-breakdown">CAD:${{ "{:,.2f}".format(metrics.unrealized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.unrealized_gain.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
 
-    <!-- Daily Floating P&L -->
+    <!-- Daily Change -->
     <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
         <div class="card h-100 metric-card">
             <div class="card-body">
@@ -267,14 +267,14 @@
                     <div class="metric-icon bg-{{ 'success' if metrics and metrics.daily_change.cad >= 0 else 'danger' }} bg-opacity-10">
                         <i class="fas fa-wave-square {{ 'text-success' if metrics and metrics.daily_change.cad >= 0 else 'text-danger' }}"></i>
                     </div>
-                    <h6 class="card-title text-muted mb-0">{{ _('Daily Floating P&L') }}</h6>
+                    <h6 class="card-title text-muted mb-0">{{ _('Daily Change') }}</h6>
                 </div>
-                <h4 class="mb-1">
+                <h4 class="mb-1" id="daily-change-display">
                     <span class="{{ 'text-success' if metrics and metrics.daily_change.cad >= 0 else 'text-danger' }}">
                         {% if metrics and metrics.daily_change.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.daily_change.cad if metrics else 0) }}
                     </span>
                 </h4>
-                <small class="text-muted">CAD:${{ "{:,.2f}".format(metrics.daily_change.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.daily_change.usd_only if metrics else 0) }}</small>
+                <small class="text-muted" id="daily-change-breakdown">CAD:${{ "{:,.2f}".format(metrics.daily_change.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.daily_change.usd_only if metrics else 0) }}</small>
             </div>
         </div>
     </div>
@@ -290,7 +290,7 @@
                     </div>
                     <h6 class="card-title text-muted mb-0">{{ _('Cash Balance') }}</h6>
                 </div>
-                <h4 class="text-success mb-1">${{ "{:,.2f}".format(cash_data.total_cad if cash_data else 0) }}</h4>
+                <h4 class="text-success mb-1" id="cash-balance-display">${{ "{:,.2f}".format(cash_data.total_cad if cash_data else 0) }}</h4>
                 <small class="text-muted">CAD:${{ "{:,.0f}".format(cash_data.cad if cash_data else 0) }}|USD:${{ "{:,.0f}".format(cash_data.usd if cash_data else 0) }}</small>
             </div>
             <!-- Edit Icon -->
@@ -313,7 +313,6 @@
                 <span class="badge bg-secondary">{{ holdings|length if holdings else 0 }} {{ _('stocks') }}</span>
             </div>
             <div class="card-body p-0">
-                {% if holdings %}
                 <div class="table-responsive">
                     <table class="table table-hover mb-0 holdings-table" id="holdingsTable">
                         <thead class="table-light">
@@ -494,7 +493,7 @@
                         </tbody>
                     </table>
                 </div>
-                {% else %}
+                {% if not holdings %}
                 <div class="text-center py-5">
                     <i class="fas fa-chart-pie fa-3x text-muted mb-3"></i>
                     <h5 class="text-muted">{{ _('No holdings found') }}</h5>
@@ -521,7 +520,6 @@
                 </div>
             </div>
             <div class="card-body p-0">
-                {% if cleared_holdings %}
                 <div class="table-responsive">
                     <table class="table table-hover mb-0" id="clearedHoldingsTable">
                         <thead class="table-light">
@@ -688,7 +686,7 @@
                         </tbody>
                     </table>
                 </div>
-                {% else %}
+                {% if not cleared_holdings %}
                 <div class="text-center py-5">
                     <i class="fas fa-history fa-3x text-muted mb-3"></i>
                     <h5 class="text-muted">{{ _('No cleared holdings found') }}</h5>
@@ -887,6 +885,14 @@ function hideLoadingOverlay() {
         loadingSpinner.style.display = 'none';
     }
     
+    // 尝试隐藏所有可能的加载提示
+    const allLoadingElements = document.querySelectorAll('[id*="loading"], [class*="loading"], [class*="spinner"]');
+    allLoadingElements.forEach(element => {
+        if (element.style.display !== 'none') {
+            element.style.display = 'none';
+        }
+    });
+    
     // 如果GlobalLoading可用，也使用它
     if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
         GlobalLoading.manualHide(300);
@@ -895,70 +901,473 @@ function hideLoadingOverlay() {
     }
 }
 
+// 异步加载股票价格数据
+function loadStockPricesAsync() {
+    showLoadingOverlay('正在获取股票价格...');
+    
+    // 获取当前页面的账户ID
+    const accountIds = {{ account_ids if account_ids else '[]' }};
+    const memberId = {{ member_id if member_id else 'null' }};
+    const familyId = {{ family.id if family else 'null' }};
+    
+    // 调用异步API获取股票价格
+    fetch('/api/portfolio/async-prices', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            account_ids: accountIds,
+            member_id: memberId,
+            family_id: familyId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // 更新页面数据
+            updatePortfolioData(data);
+            hideLoadingOverlay();
+            
+            // 显示成功提示
+            showSuccessToast('股票价格已更新');
+        } else {
+            hideLoadingOverlay();
+            showErrorToast('获取股票价格失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Error loading stock prices:', error);
+        hideLoadingOverlay();
+        showErrorToast('获取股票价格时发生错误');
+    });
+}
+
+// 更新投资组合数据
+function updatePortfolioData(data) {
+    // 更新持仓表格
+    if (data.holdings && data.holdings.length > 0) {
+        updateHoldingsTable(data.holdings);
+    }
+    
+    // 更新已清仓表格 - 清仓股票数据是历史数据，不应该被股票价格更新影响
+    // 注释掉清仓股票表格的更新，因为清仓股票与当前价格无关
+    // if (data.cleared_holdings && data.cleared_holdings.length > 0) {
+    //     updateClearedHoldingsTable(data.cleared_holdings);
+    // }
+    
+    // 更新指标数据
+    if (data.metrics) {
+        updateMetrics(data.metrics);
+    }
+    
+    // 更新汇率数据
+    if (data.exchange_rates) {
+        updateExchangeRates(data.exchange_rates);
+    }
+}
+
+// 更新持仓表格
+function updateHoldingsTable(holdings) {
+    const tbody = document.querySelector('#holdingsTable tbody');
+    if (!tbody) return;
+    
+    // 创建持仓数据映射，按symbol+currency作为key
+    const holdingsMap = new Map();
+    holdings.forEach(holding => {
+        const key = `${holding.symbol}_${holding.currency}`;
+        holdingsMap.set(key, holding);
+    });
+    
+    // 更新现有行，而不是重新生成整个表格
+    const existingRows = tbody.querySelectorAll('tr');
+    existingRows.forEach(row => {
+        const symbol = row.getAttribute('data-symbol');
+        const currency = row.getAttribute('data-currency');
+        const key = `${symbol}_${currency}`;
+        const updatedHolding = holdingsMap.get(key);
+        
+        if (updatedHolding) {
+            // 只更新需要更新的单元格
+            updateHoldingRowData(row, updatedHolding);
+        }
+    });
+    
+    // 隐藏"No holdings found"提示
+    const cardBody = document.querySelector('#holdingsTable').closest('.card-body');
+    const noHoldingsDiv = cardBody ? cardBody.querySelector('.text-center.py-5') : null;
+    if (noHoldingsDiv) {
+        noHoldingsDiv.style.display = 'none';
+    }
+}
+
+// 更新持仓行数据（只更新价格相关的单元格）
+function updateHoldingRowData(row, holding) {
+    const cells = row.querySelectorAll('td');
+    
+    // 更新当前价格（第4列，索引3）
+    if (cells[3] && holding.current_price) {
+        const priceSpan = cells[3].querySelector('span');
+        if (priceSpan) {
+            priceSpan.textContent = '$' + parseFloat(holding.current_price).toFixed(2);
+        }
+    }
+    
+    // 更新Daily Change（第5列，索引4）
+    if (cells[4] && holding.daily_change_value !== undefined) {
+        const dailyValue = parseFloat(holding.daily_change_value);
+        const dailyPercent = parseFloat(holding.daily_change_percent || 0);
+        const sign = dailyValue >= 0 ? '+' : '';
+        const percentSign = dailyPercent >= 0 ? '+' : '';
+        
+        // 更新金额
+        const valueSpan = cells[4].querySelector('span.fw-medium');
+        if (valueSpan) {
+            valueSpan.textContent = sign + '$' + dailyValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            valueSpan.className = 'fw-medium ' + (dailyValue >= 0 ? 'text-success' : 'text-danger');
+        }
+        
+        // 更新百分比
+        const percentSpan = cells[4].querySelector('small');
+        if (percentSpan) {
+            percentSpan.textContent = percentSign + dailyPercent.toFixed(2) + '%';
+            percentSpan.className = (dailyPercent >= 0 ? 'text-success' : 'text-danger');
+        }
+    }
+    
+    // 更新当前价值（第6列，索引5）
+    if (cells[5] && holding.current_value) {
+        const valueSpan = cells[5].querySelector('span');
+        if (valueSpan) {
+            valueSpan.textContent = '$' + parseFloat(holding.current_value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+    }
+    
+    // 更新未实现收益（第7列，索引6）
+    if (cells[6] && holding.unrealized_gain !== undefined) {
+        const unrealizedGain = parseFloat(holding.unrealized_gain);
+        const sign = unrealizedGain >= 0 ? '+' : '';
+        const span = cells[6].querySelector('span');
+        if (span) {
+            span.textContent = sign + '$' + unrealizedGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            span.className = 'fw-bold ' + (unrealizedGain >= 0 ? 'text-success' : 'text-danger');
+        }
+    }
+    
+    // 更新已实现收益（第8列，索引7）
+    if (cells[7] && holding.realized_gain !== undefined) {
+        const realizedGain = parseFloat(holding.realized_gain);
+        const sign = realizedGain >= 0 ? '+' : '';
+        const span = cells[7].querySelector('span');
+        if (span) {
+            span.textContent = sign + '$' + realizedGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            span.className = 'fw-medium ' + (realizedGain >= 0 ? 'text-success' : 'text-danger');
+        }
+    }
+    
+    // 更新回报率（最后一列）
+    if (cells[cells.length - 1] && holding.unrealized_gain_percent !== undefined) {
+        const percent = parseFloat(holding.unrealized_gain_percent);
+        const sign = percent >= 0 ? '+' : '';
+        const badge = cells[cells.length - 1].querySelector('.badge');
+        if (badge) {
+            badge.textContent = sign + percent.toFixed(1) + '%';
+            badge.className = 'badge ' + (percent >= 0 ? 'bg-success' : 'bg-danger');
+        }
+    }
+}
+
+// 更新已清仓表格
+function updateClearedHoldingsTable(clearedHoldings) {
+    const tbody = document.querySelector('#clearedHoldingsTable tbody');
+    if (!tbody) return;
+    
+    // 创建已清仓数据映射
+    const clearedHoldingsMap = new Map();
+    clearedHoldings.forEach(holding => {
+        const key = `${holding.symbol}_${holding.currency}`;
+        clearedHoldingsMap.set(key, holding);
+    });
+    
+    // 更新现有行，而不是重新生成整个表格
+    const existingRows = tbody.querySelectorAll('tr');
+    existingRows.forEach(row => {
+        const symbol = row.getAttribute('data-symbol');
+        const currency = row.getAttribute('data-currency');
+        const key = `${symbol}_${currency}`;
+        const updatedHolding = clearedHoldingsMap.get(key);
+        
+        if (updatedHolding) {
+            // 只更新需要更新的单元格
+            updateClearedHoldingRowData(row, updatedHolding);
+        }
+    });
+    
+    // 隐藏"No cleared holdings found"提示
+    const cardBody = document.querySelector('#clearedHoldingsTable').closest('.card-body');
+    const noClearedHoldingsDiv = cardBody ? cardBody.querySelector('.text-center.py-5') : null;
+    if (noClearedHoldingsDiv) {
+        noClearedHoldingsDiv.style.display = 'none';
+    }
+}
+
+// 更新已清仓行数据（只更新价格相关的单元格）
+function updateClearedHoldingRowData(row, holding) {
+    const cells = row.querySelectorAll('td');
+    
+    // 更新已实现收益（第4列，索引3）
+    if (cells[3] && holding.realized_gain !== undefined) {
+        const realizedGain = parseFloat(holding.realized_gain);
+        const sign = realizedGain >= 0 ? '+' : '';
+        const span = cells[3].querySelector('span');
+        if (span) {
+            span.textContent = sign + '$' + realizedGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            span.className = 'fw-bold ' + (realizedGain >= 0 ? 'text-success' : 'text-danger');
+        }
+    }
+    
+    // 更新已实现收益率（第5列，索引4）
+    if (cells[4] && holding.realized_gain_percent !== undefined) {
+        const percent = parseFloat(holding.realized_gain_percent);
+        const sign = percent >= 0 ? '+' : '';
+        const span = cells[4].querySelector('span');
+        if (span) {
+            span.textContent = sign + percent.toFixed(1) + '%';
+            span.className = 'fw-bold ' + (percent >= 0 ? 'text-success' : 'text-danger');
+        }
+    }
+}
+
+// 创建持仓行
+function createHoldingRow(holding) {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td>
+            <div class="d-flex align-items-center">
+                <div class="stock-avatar bg-primary text-white rounded-circle me-2">
+                    ${holding.symbol ? holding.symbol.substring(0, 2).toUpperCase() : '??'}
+                </div>
+                <div>
+                    <div class="fw-bold">${holding.symbol || 'N/A'}</div>
+                    <small class="text-muted">${holding.company_name || 'Unknown Company'}</small>
+                </div>
+            </div>
+        </td>
+        <td>${holding.shares || 0}</td>
+        <td>$${parseFloat(holding.average_cost || 0).toFixed(2)}</td>
+        <td>$${parseFloat(holding.current_price || 0).toFixed(2)}</td>
+        <td>$${parseFloat(holding.market_value || 0).toFixed(2)}</td>
+        <td>
+            <span class="badge ${parseFloat(holding.unrealized_gain || 0) >= 0 ? 'bg-success' : 'bg-danger'}">
+                ${parseFloat(holding.unrealized_gain || 0) >= 0 ? '+' : ''}$${parseFloat(holding.unrealized_gain || 0).toFixed(2)}
+            </span>
+        </td>
+        <td>
+            <span class="badge ${parseFloat(holding.return_percent || 0) >= 0 ? 'bg-success' : 'bg-danger'}">
+                ${parseFloat(holding.return_percent || 0) >= 0 ? '+' : ''}${parseFloat(holding.return_percent || 0).toFixed(2)}%
+            </span>
+        </td>
+    `;
+    return row;
+}
+
+// 创建已清仓行
+function createClearedHoldingRow(holding) {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td>
+            <div class="d-flex align-items-center">
+                <div class="stock-avatar bg-secondary text-white rounded-circle me-2">
+                    ${holding.symbol ? holding.symbol.substring(0, 2).toUpperCase() : '??'}
+                </div>
+                <div>
+                    <div class="fw-bold">${holding.symbol || 'N/A'}</div>
+                    <small class="text-muted">${holding.company_name || 'Unknown Company'}</small>
+                </div>
+            </div>
+        </td>
+        <td>${holding.total_bought_shares || 0}</td>
+        <td>${holding.total_sold_shares || 0}</td>
+        <td>$${parseFloat(holding.total_invested || 0).toFixed(2)}</td>
+        <td>$${parseFloat(holding.total_received || 0).toFixed(2)}</td>
+        <td>
+            <span class="badge ${parseFloat(holding.realized_gain || 0) >= 0 ? 'bg-success' : 'bg-danger'}">
+                ${parseFloat(holding.realized_gain || 0) >= 0 ? '+' : ''}$${parseFloat(holding.realized_gain || 0).toFixed(2)}
+            </span>
+        </td>
+    `;
+    return row;
+}
+
+// 更新指标数据
+function updateMetrics(metrics) {
+    // 更新总资产
+    const totalAssetsElement = document.getElementById('total-assets-display');
+    if (totalAssetsElement && metrics.total_assets) {
+        totalAssetsElement.textContent = '$' + parseFloat(metrics.total_assets.cad || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    
+    // 更新总资产分解
+    const totalAssetsBreakdownElement = document.getElementById('total-assets-breakdown');
+    if (totalAssetsBreakdownElement && metrics.total_assets) {
+        const cadOnly = parseFloat(metrics.total_assets.cad_only || 0);
+        const usdOnly = parseFloat(metrics.total_assets.usd_only || 0);
+        totalAssetsBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    
+    // 更新总回报
+    const totalReturnElement = document.getElementById('total-return-display');
+    if (totalReturnElement && metrics.total_return) {
+        const totalReturn = parseFloat(metrics.total_return.cad || 0);
+        const sign = totalReturn >= 0 ? '+' : '';
+        totalReturnElement.textContent = sign + '$' + totalReturn.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        totalReturnElement.className = totalReturn >= 0 ? 'text-success' : 'text-danger';
+    }
+    
+    // 更新总回报分解
+    const totalReturnBreakdownElement = document.getElementById('total-return-breakdown');
+    if (totalReturnBreakdownElement && metrics.total_return) {
+        const cadOnly = parseFloat(metrics.total_return.cad_only || 0);
+        const usdOnly = parseFloat(metrics.total_return.usd_only || 0);
+        totalReturnBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    
+    // 更新回报率
+    const returnRateElement = document.getElementById('total-return-rate-display');
+    if (returnRateElement && metrics.total_return_rate) {
+        const rate = parseFloat(metrics.total_return_rate || 0);
+        const rateSign = rate >= 0 ? '+' : '';
+        returnRateElement.textContent = '(' + rateSign + rate.toFixed(2) + '%)';
+        returnRateElement.className = 'ms-2 ' + (rate >= 0 ? 'text-success' : 'text-danger');
+    }
+    
+    // 更新已实现收益
+    const realizedGainElement = document.getElementById('realized-gain-display');
+    if (realizedGainElement && metrics.realized_gain) {
+        const realizedGain = parseFloat(metrics.realized_gain.cad || 0);
+        const sign = realizedGain >= 0 ? '+' : '';
+        realizedGainElement.textContent = sign + '$' + realizedGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        realizedGainElement.className = realizedGain >= 0 ? 'text-success' : 'text-danger';
+    }
+    
+    // 更新已实现收益分解
+    const realizedGainBreakdownElement = document.getElementById('realized-gain-breakdown');
+    if (realizedGainBreakdownElement && metrics.realized_gain) {
+        const cadOnly = parseFloat(metrics.realized_gain.cad_only || 0);
+        const usdOnly = parseFloat(metrics.realized_gain.usd_only || 0);
+        realizedGainBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    
+    // 更新未实现收益
+    const unrealizedGainElement = document.getElementById('unrealized-gain-display');
+    if (unrealizedGainElement && metrics.unrealized_gain) {
+        const unrealizedGain = parseFloat(metrics.unrealized_gain.cad || 0);
+        const sign = unrealizedGain >= 0 ? '+' : '';
+        unrealizedGainElement.textContent = sign + '$' + unrealizedGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        unrealizedGainElement.className = unrealizedGain >= 0 ? 'text-success' : 'text-danger';
+    }
+    
+    // 更新未实现收益分解
+    const unrealizedGainBreakdownElement = document.getElementById('unrealized-gain-breakdown');
+    if (unrealizedGainBreakdownElement && metrics.unrealized_gain) {
+        const cadOnly = parseFloat(metrics.unrealized_gain.cad_only || 0);
+        const usdOnly = parseFloat(metrics.unrealized_gain.usd_only || 0);
+        unrealizedGainBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    
+    // 更新当日浮动盈亏
+    const dailyChangeElement = document.getElementById('daily-change-display');
+    if (dailyChangeElement && metrics.daily_change) {
+        const dailyChange = parseFloat(metrics.daily_change.cad || 0);
+        const sign = dailyChange >= 0 ? '+' : '';
+        dailyChangeElement.textContent = sign + '$' + dailyChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        dailyChangeElement.className = dailyChange >= 0 ? 'text-success' : 'text-danger';
+    }
+    
+    // 更新当日变化分解
+    const dailyChangeBreakdownElement = document.getElementById('daily-change-breakdown');
+    if (dailyChangeBreakdownElement && metrics.daily_change) {
+        const cadOnly = parseFloat(metrics.daily_change.cad_only || 0);
+        const usdOnly = parseFloat(metrics.daily_change.usd_only || 0);
+        dailyChangeBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    
+    // 更新现金余额
+    const cashBalanceElement = document.getElementById('cash-balance-display');
+    if (cashBalanceElement && metrics.cash_balance) {
+        const cashBalance = parseFloat(metrics.cash_balance.cad || 0);
+        cashBalanceElement.textContent = '$' + cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+}
+
+// 更新汇率数据
+function updateExchangeRates(exchangeRates) {
+    // 这里可以更新汇率相关的显示
+}
+
+// 显示成功提示
+function showSuccessToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast align-items-center text-white bg-success border-0';
+    toast.setAttribute('role', 'alert');
+    toast.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="fas fa-check-circle me-2"></i>${message}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+    
+    document.body.appendChild(toast);
+    const bsToast = new bootstrap.Toast(toast);
+    bsToast.show();
+    
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// 显示错误提示
+function showErrorToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast align-items-center text-white bg-danger border-0';
+    toast.setAttribute('role', 'alert');
+    toast.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="fas fa-exclamation-circle me-2"></i>${message}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+    
+    document.body.appendChild(toast);
+    const bsToast = new bootstrap.Toast(toast);
+    bsToast.show();
+    
+    setTimeout(() => toast.remove(), 5000);
+}
+
 // 刷新投资组合数据
 function refreshPortfolioData() {
-    showLoadingOverlay('正在刷新投资组合数据...');
-    
-    // 模拟API调用
-    setTimeout(() => {
-        // 这里应该是真实的API调用
-        // 例如：fetch('/api/portfolio/refresh')
-        //     .then(response => response.json())
-        //     .then(data => {
-        //         // 更新页面数据
-        //         updatePortfolioData(data);
-        //     })
-        //     .catch(error => {
-        //         console.error('Error refreshing portfolio:', error);
-        //     })
-        //     .finally(() => {
-        //         hideLoadingOverlay();
-        //     });
-        
-        // 模拟数据刷新完成
-        hideLoadingOverlay();
-        
-        // 显示成功提示
-        const toast = document.createElement('div');
-        toast.className = 'toast align-items-center text-white bg-success border-0';
-        toast.setAttribute('role', 'alert');
-        toast.innerHTML = `
-            <div class="d-flex">
-                <div class="toast-body">
-                    <i class="fas fa-check-circle me-2"></i>投资组合数据已刷新
-                </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-            </div>
-        `;
-        
-        // 添加到页面
-        document.body.appendChild(toast);
-        
-        // 显示toast
-        const bsToast = new bootstrap.Toast(toast);
-        bsToast.show();
-        
-        // 3秒后自动移除
-        setTimeout(() => {
-            toast.remove();
-        }, 3000);
-    }, 2000);
+    loadStockPricesAsync();
 }
 
 // 页面加载时显示加载提示
 document.addEventListener('DOMContentLoaded', function() {
     // 检查是否有持仓数据
-    const holdingsTable = document.querySelector('.holdings-table tbody');
+    const holdingsTable = document.querySelector('#holdingsTable tbody');
     const hasHoldings = holdingsTable && holdingsTable.querySelectorAll('tr').length > 0;
     
-    // 如果没有持仓数据，显示加载提示
+    // 如果没有持仓数据，显示加载提示并异步加载股票价格
     if (!hasHoldings) {
         showLoadingOverlay('正在加载投资组合数据...');
         
-        // 模拟数据加载完成（实际应用中这里会是真实的API调用）
-        setTimeout(() => {
-            hideLoadingOverlay();
-        }, 1500);
+        // 异步加载股票价格
+        loadStockPricesAsync();
+    } else {
+        // 如果有持仓数据，但仍然异步更新股票价格以获取最新价格
+        showLoadingOverlay('正在获取最新股票价格...');
+        loadStockPricesAsync();
     }
 });
 </script>
