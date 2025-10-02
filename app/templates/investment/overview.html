@@ -1374,7 +1374,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 异步加载股票价格（使用缓存，不强制更新）
         loadStockPricesAsync(false);
     }
-    // 如果有持仓数据，不自动更新价格，让用户手动点击"refresh data"按钮
+    // 如果有持仓数据，显示数据，不自动更新价格
+    // 用户可以通过"refresh data"按钮手动更新价格
 });
 </script>
 

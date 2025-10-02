@@ -100,18 +100,43 @@ def overview():
         
         print(f"DEBUG: Portfolio Service返回 {len(raw_holdings)} 个当前持仓, {len(raw_cleared_holdings)} 个清仓持仓")
         
-        # 获取综合指标（如果需要）
-        comprehensive_metrics = None
-        if not skip_prices:
-            # 获取现金余额
-            cash_balance = asset_service.get_cash_balance(account_ids[0] if account_ids else None, date.today())
-            comprehensive_metrics = {
-                'total_assets': portfolio_summary.get('summary', {}).get('total_current_value', 0) + cash_balance.get('total_cad', 0),
-                'total_stock_value': portfolio_summary.get('summary', {}).get('total_current_value', 0),
-                'total_cash': cash_balance.get('total_cad', 0),
-                'total_realized_gain': portfolio_summary.get('summary', {}).get('total_realized_gain', 0),
-                'total_unrealized_gain': portfolio_summary.get('summary', {}).get('total_unrealized_gain', 0)
+        # 获取综合指标 - 总是计算，但根据skip_prices决定是否强制更新价格
+        # 获取现金余额
+        cash_balance = asset_service.get_cash_balance(account_ids[0] if account_ids else None, date.today())
+        
+        # 总是使用Portfolio Service的数据构建综合指标，确保数据一致性
+        total_stock_value = portfolio_summary.get('summary', {}).get('total_current_value', 0)
+        total_cash = cash_balance.get('total_cad', 0)
+        total_assets = total_stock_value + total_cash
+        total_realized = portfolio_summary.get('summary', {}).get('total_realized_gain', 0)
+        total_unrealized = portfolio_summary.get('summary', {}).get('total_unrealized_gain', 0)
+        total_return = total_realized + total_unrealized
+        
+        comprehensive_metrics = {
+            'total_assets': {
+                'cad': total_assets,
+                'cad_only': total_assets,
+                'usd_only': 0
+            },
+            'total_return': {
+                'cad': total_return,
+                'cad_only': total_return,
+                'usd_only': 0
+            },
+            'realized_gain': {
+                'cad': total_realized,
+                'cad_only': total_realized,
+                'usd_only': 0
+            },
+            'unrealized_gain': {
+                'cad': total_unrealized,
+                'cad_only': total_unrealized,
+                'usd_only': 0
+            },
+            'cash_balance': {
+                'total_cad': total_cash
             }
+        }
         
         # 创建账户名到账户对象的映射字典，用于获取成员信息
         account_name_to_obj = {acc.name: acc for acc in accounts}
@@ -292,7 +317,7 @@ def overview():
             total_cash_cad = 0
             total_cash_usd = 0
         
-        # 创建包含完整财务指标的metrics对象
+        # 创建包含完整财务指标的metrics对象 - 总是创建
         if comprehensive_metrics:
             class ComprehensiveMetrics:
                 def __init__(self, metrics_data, daily_change_data=None):
