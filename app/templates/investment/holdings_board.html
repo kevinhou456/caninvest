@@ -259,6 +259,10 @@
         <i class="fas fa-angle-double-down me-2"></i>{{ _('Move to Bottom') }}
     </div>
     <div class="context-menu-divider"></div>
+    <div class="context-menu-item" data-action="hideStock">
+        <i class="fas fa-eye-slash me-2"></i>{{ _('Hide Stock') }}
+    </div>
+    <div class="context-menu-divider"></div>
     <div class="context-menu-item" data-action="resetOrder">
         <i class="fas fa-undo me-2"></i>{{ _('Reset Default Order') }}
     </div>
@@ -268,9 +272,17 @@
 // localStorage keys
 const STORAGE_KEY_ACCOUNTS = 'holdingsBoard_selectedAccounts';
 const STORAGE_KEY_SEPARATE = 'holdingsBoard_separateByAccount';
+const STORAGE_KEY_HIDDEN = 'holdingsBoard_hiddenSymbols';
+
+// client-side state
+let hiddenSymbols = new Set();
+let contextMenuDocumentListenerAttached = false;
+let contextMenuActionsBound = false;
 
 // 多选下拉框功能
 document.addEventListener('DOMContentLoaded', function() {
+    hiddenSymbols = loadHiddenSymbolsFromStorage();
+
     const dropdownToggle = document.getElementById('accountDropdownToggle');
     const dropdownMenu = document.getElementById('accountDropdownMenu');
     const selectAllCheckbox = document.getElementById('selectAll');
@@ -426,31 +438,43 @@ function renderHoldings(accountsData, separateByAccount, selectedAccountIds) {
         return;
     }
 
-    if (separateByAccount) {
-        renderSequentialView(accountsData);
-    } else {
-        renderMergedView(accountsData);
-    }
-}
+    const clonedAccounts = cloneHoldingsData(accountsData);
 
-function renderMergedView(accountsData) {
-    // 合并所有持仓
-    let allHoldings = [];
-    accountsData.forEach(account => {
-        if (account.holdings && account.holdings.length > 0) {
-            account.holdings.forEach(holding => {
-                holding.account_name = account.account_name;
-                allHoldings.push(holding);
-            });
-        }
-    });
-
-    if (allHoldings.length === 0) {
+    const hasAnyHoldings = clonedAccounts.some(account => (account.holdings || []).length > 0);
+    if (!hasAnyHoldings) {
         document.getElementById('holdingsContent').innerHTML = `
             <div class="alert alert-info m-3">
                 <i class="fas fa-chart-pie me-2"></i>{{ _('No holdings found') }}
             </div>
         `;
+        return;
+    }
+
+    const visibleAccountsData = clonedAccounts
+        .map(account => {
+            const visibleHoldings = filterVisibleHoldings(account.holdings);
+            return { ...account, holdings: visibleHoldings };
+        })
+        .filter(account => account.holdings && account.holdings.length > 0);
+
+    if (visibleAccountsData.length === 0) {
+        showAllHiddenHoldingsMessage();
+        return;
+    }
+
+    if (separateByAccount) {
+        renderSequentialView(visibleAccountsData);
+    } else {
+        const mergedHoldings = mergeHoldingsBySymbol(visibleAccountsData);
+        renderMergedView(mergedHoldings);
+    }
+}
+
+function renderMergedView(holdings) {
+    const mergedHoldings = Array.isArray(holdings) ? holdings : [];
+
+    if (mergedHoldings.length === 0) {
+        showAllHiddenHoldingsMessage();
         return;
     }
 
@@ -461,7 +485,7 @@ function renderMergedView(accountsData) {
                 <h5 class="mb-0">
                     <i class="fas fa-chart-pie me-2"></i>{{ _('Current Holdings') }}
                 </h5>
-                <span class="badge bg-secondary">${allHoldings.length} {{ _('stocks') }}</span>
+                <span class="badge bg-secondary" data-label-stocks="{{ _('stocks') }}">${mergedHoldings.length} {{ _('stocks') }}</span>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -484,7 +508,7 @@ function renderMergedView(accountsData) {
                         <tbody>
     `;
 
-    allHoldings.forEach(holding => {
+    mergedHoldings.forEach(holding => {
         // 使用与overview完全相同的字段名
         const unrealizedGain = holding.unrealized_gain || 0;
         const returnPct = holding.unrealized_gain_percent || 0;
@@ -597,8 +621,10 @@ function renderMergedView(accountsData) {
 function renderSequentialView(accountsData) {
     let html = '';
 
-    accountsData.forEach((account, index) => {
-        if (!account.holdings || account.holdings.length === 0) return;
+    accountsData.forEach(account => {
+        if (!account.holdings || account.holdings.length === 0) {
+            return;
+        }
 
         html += `
             <div class="card mb-3">
@@ -606,7 +632,7 @@ function renderSequentialView(accountsData) {
                     <h5 class="mb-0">
                         <i class="fas fa-university me-2"></i>${account.account_name}
                     </h5>
-                    <span class="badge bg-secondary">${account.holdings.length} {{ _('stocks') }}</span>
+                    <span class="badge bg-secondary" data-label-stocks="{{ _('stocks') }}">${account.holdings.length} {{ _('stocks') }}</span>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
@@ -731,11 +757,8 @@ function renderSequentialView(accountsData) {
     });
 
     if (html === '') {
-        html = `
-            <div class="alert alert-info m-3">
-                <i class="fas fa-chart-pie me-2"></i>{{ _('No holdings found in selected accounts') }}
-            </div>
-        `;
+        showAllHiddenHoldingsMessage();
+        return;
     }
 
     document.getElementById('holdingsContent').innerHTML = html;
@@ -743,6 +766,240 @@ function renderSequentialView(accountsData) {
     // 添加拖拽和右键菜单事件监听器
     setupDragAndDropEvents();
     setupContextMenuEvents();
+}
+
+function cloneHoldingsData(accountsData) {
+    return (accountsData || []).map(account => ({
+        ...account,
+        holdings: (account.holdings || []).map(holding => ({ ...holding }))
+    }));
+}
+
+function filterVisibleHoldings(holdings) {
+    return (holdings || []).filter(holding => holding && !hiddenSymbols.has(holding.symbol));
+}
+
+function mergeHoldingsBySymbol(accountsData) {
+    const merged = new Map();
+
+    const toNumber = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+    };
+
+    (accountsData || []).forEach(account => {
+        (account.holdings || []).forEach(holding => {
+            if (!holding || !holding.symbol) {
+                return;
+            }
+
+            const currency = (holding.currency || 'USD').toUpperCase();
+            const key = `${holding.symbol}__${currency}`;
+
+            const shares = toNumber(holding.shares ?? holding.current_shares);
+            const currentValue = toNumber(holding.current_value);
+            const currentValueCad = toNumber(holding.current_value_cad ?? currentValue);
+            const dailyChangeValue = toNumber(holding.daily_change_value);
+            const averageCost = toNumber(holding.average_cost);
+            const averageCostCad = toNumber(holding.average_cost_cad ?? averageCost);
+            const totalCost = toNumber(holding.total_cost);
+            const totalCostNative = toNumber(holding.total_cost_native ?? (averageCost * shares));
+            const totalCostCad = toNumber(holding.total_cost_cad ?? totalCost ?? averageCostCad * shares);
+            const currentPrice = toNumber(holding.current_price);
+            const unrealizedGain = toNumber(holding.unrealized_gain);
+            const realizedGain = toNumber(holding.realized_gain);
+            const dividends = toNumber(holding.dividends ?? holding.dividend_received);
+            const interest = toNumber(holding.interest ?? holding.interest_received);
+            const previousValue = currentValue - dailyChangeValue;
+
+            let entry = merged.get(key);
+            if (!entry) {
+                entry = {
+                    symbol: holding.symbol,
+                    currency,
+                    company_name: holding.company_name,
+                    sector: holding.sector,
+                    shares,
+                    current_shares: shares,
+                    current_value: currentValue,
+                    current_value_cad: currentValueCad,
+                    daily_change_value: dailyChangeValue,
+                    realized_gain: realizedGain,
+                    unrealized_gain: unrealizedGain,
+                    dividends,
+                    interest,
+                    average_cost: averageCost,
+                    average_cost_cad: averageCostCad,
+                    current_price: currentPrice,
+                    unrealized_gain_percent: toNumber(holding.unrealized_gain_percent),
+                    daily_change_percent: toNumber(holding.daily_change_percent),
+                    total_cost: totalCost,
+                    total_cost_native: totalCostNative,
+                    total_cost_cad: totalCostCad,
+                    _total_cost_native: totalCostNative,
+                    _total_cost_cad: totalCostCad,
+                    _previous_value: previousValue,
+                    _weight_current_price: currentPrice * shares,
+                    account_details: []
+                };
+                merged.set(key, entry);
+            } else {
+                entry.shares += shares;
+                entry.current_shares = entry.shares;
+                entry.current_value += currentValue;
+                entry.current_value_cad += currentValueCad;
+                entry.daily_change_value += dailyChangeValue;
+                entry.realized_gain += realizedGain;
+                entry.unrealized_gain += unrealizedGain;
+                entry.dividends += dividends;
+                entry.interest += interest;
+                entry._total_cost_native += totalCostNative;
+                entry._total_cost_cad += totalCostCad;
+                entry._previous_value += previousValue;
+                entry._weight_current_price += currentPrice * shares;
+                entry.total_cost = toNumber(entry.total_cost) + totalCost;
+                entry.total_cost_native += totalCostNative;
+                entry.total_cost_cad += totalCostCad;
+            }
+
+            entry.account_details.push({
+                account_name: account.account_name,
+                shares,
+                cost: totalCostNative,
+                realized_gain: realizedGain,
+                unrealized_gain: unrealizedGain
+            });
+        });
+    });
+
+    const mergedList = Array.from(merged.values()).map(entry => {
+        const result = { ...entry };
+        const shares = result.shares || 0;
+
+        if (shares > 0) {
+            result.current_price = result._weight_current_price / shares;
+            result.average_cost = result._total_cost_native / shares;
+            result.average_cost_cad = result._total_cost_cad / shares;
+        } else {
+            result.current_price = 0;
+            result.average_cost = 0;
+            result.average_cost_cad = 0;
+        }
+
+        const costBase = result.currency === 'USD' ? result._total_cost_native : result._total_cost_cad;
+        result.unrealized_gain_percent = costBase ? (result.unrealized_gain / costBase) * 100 : 0;
+
+        const previousValue = Number(result._previous_value);
+        if (Number.isFinite(previousValue) && previousValue !== 0) {
+            result.daily_change_percent = (result.daily_change_value / previousValue) * 100;
+        } else {
+            const baseValue = result.current_value - result.daily_change_value;
+            result.daily_change_percent = baseValue ? (result.daily_change_value / baseValue) * 100 : 0;
+        }
+
+        // 清理临时字段
+        delete result._total_cost_native;
+        delete result._total_cost_cad;
+        delete result._previous_value;
+        delete result._weight_current_price;
+
+        return result;
+    });
+
+    // 按市值降序排序，方便查看
+    mergedList.sort((a, b) => (b.current_value || 0) - (a.current_value || 0));
+    return mergedList;
+}
+
+function loadHiddenSymbolsFromStorage() {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY_HIDDEN);
+        if (!stored) {
+            return new Set();
+        }
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+            return new Set(parsed.map(symbol => String(symbol)));
+        }
+    } catch (error) {
+        console.warn('Failed to load hidden stocks:', error);
+    }
+    return new Set();
+}
+
+function saveHiddenSymbolsToStorage() {
+    try {
+        localStorage.setItem(STORAGE_KEY_HIDDEN, JSON.stringify(Array.from(hiddenSymbols)));
+    } catch (error) {
+        console.warn('Failed to persist hidden stocks:', error);
+    }
+}
+
+function clearHiddenSymbols() {
+    hiddenSymbols.clear();
+    saveHiddenSymbolsToStorage();
+}
+
+function showAllHiddenHoldingsMessage() {
+    document.getElementById('holdingsContent').innerHTML = `
+        <div class="alert alert-info m-3">
+            <i class="fas fa-eye-slash me-2"></i>{{ _('All selected holdings are hidden. Reset default order to display them again.') }}
+        </div>
+    `;
+}
+
+function escapeForSelector(value) {
+    if (window.CSS && CSS.escape) {
+        return CSS.escape(value);
+    }
+    return String(value).replace(/([!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+}
+
+function updateCardAfterRowRemoval(card) {
+    if (!card) {
+        return;
+    }
+
+    const remainingRows = card.querySelectorAll('tbody tr').length;
+
+    if (remainingRows === 0) {
+        card.remove();
+        return;
+    }
+
+    const badge = card.querySelector('.card-header .badge[data-label-stocks]');
+    if (badge) {
+        const stocksLabel = badge.dataset.labelStocks || badge.textContent.replace(/^[0-9]+\s*/, '');
+        badge.textContent = `${remainingRows} ${stocksLabel}`.trim();
+    }
+}
+
+function hideStock(symbol) {
+    const normalizedSymbol = symbol ? symbol.trim() : '';
+    if (!normalizedSymbol) {
+        return;
+    }
+
+    hiddenSymbols.add(normalizedSymbol);
+    saveHiddenSymbolsToStorage();
+
+    const escapedSymbol = escapeForSelector(normalizedSymbol);
+    const matchingRows = document.querySelectorAll(`.holdings-row[data-symbol="${escapedSymbol}"]`);
+    const affectedCards = new Set();
+
+    matchingRows.forEach(rowEl => {
+        const card = rowEl.closest('.card');
+        rowEl.remove();
+        if (card) {
+            affectedCards.add(card);
+        }
+    });
+
+    affectedCards.forEach(updateCardAfterRowRemoval);
+
+    if (!document.querySelector('.holdings-row')) {
+        showAllHiddenHoldingsMessage();
+    }
 }
 
 // localStorage 功能
@@ -911,17 +1168,24 @@ function setupContextMenuEvents() {
 
     // 为每个持仓行添加右键事件
     holdingsRows.forEach(row => {
+        row.removeEventListener('contextmenu', handleContextMenu);
         row.addEventListener('contextmenu', handleContextMenu);
     });
 
     // 点击其他地方关闭菜单
-    document.addEventListener('click', hideContextMenu);
+    if (!contextMenuDocumentListenerAttached) {
+        document.addEventListener('click', hideContextMenu);
+        contextMenuDocumentListenerAttached = true;
+    }
 
     // 菜单项点击事件
-    const menuItems = document.querySelectorAll('.context-menu-item');
-    menuItems.forEach(item => {
-        item.addEventListener('click', handleContextMenuAction);
-    });
+    if (!contextMenuActionsBound) {
+        const menuItems = document.querySelectorAll('.context-menu-item');
+        menuItems.forEach(item => {
+            item.addEventListener('click', handleContextMenuAction);
+        });
+        contextMenuActionsBound = true;
+    }
 }
 
 // 处理右键菜单
@@ -949,27 +1213,35 @@ function hideContextMenu() {
 // 处理右键菜单动作
 function handleContextMenuAction(e) {
     const action = this.dataset.action;
-    const symbol = currentContextRow ? currentContextRow.dataset.symbol : null;
+    const row = currentContextRow;
+    const symbol = row ? row.dataset.symbol : null;
 
     hideContextMenu();
 
-    if (!symbol) return;
+    if (action === 'resetOrder') {
+        resetDefaultOrder();
+        return;
+    }
+
+    if (!row || !symbol) {
+        return;
+    }
 
     switch (action) {
         case 'moveUp':
-            moveRowUp(currentContextRow);
+            moveRowUp(row);
             break;
         case 'moveDown':
-            moveRowDown(currentContextRow);
+            moveRowDown(row);
             break;
         case 'moveToTop':
-            moveRowToTop(currentContextRow);
+            moveRowToTop(row);
             break;
         case 'moveToBottom':
-            moveRowToBottom(currentContextRow);
+            moveRowToBottom(row);
             break;
-        case 'resetOrder':
-            resetDefaultOrder();
+        case 'hideStock':
+            hideStock(symbol);
             break;
     }
 }
@@ -1011,9 +1283,9 @@ function moveRowDown(row) {
 
 // 重置默认顺序
 function resetDefaultOrder() {
-    // 重新加载数据以恢复默认顺序
+    clearHiddenSymbols();
     loadHoldings();
-    console.log('Reset to default order');
+    console.log('Reset to default order and cleared hidden stocks');
 }
 </script>
 {% endblock %}

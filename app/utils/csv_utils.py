@@ -4,6 +4,8 @@ CSV处理工具函数
 
 import csv
 import io
+from collections import Counter
+from typing import Dict, Iterable
 
 
 def detect_csv_delimiter(sample_text: str) -> str:
@@ -85,3 +87,80 @@ def detect_csv_delimiter_from_fileobj(file_obj, encoding: str = 'utf-8-sig') -> 
         sample = sample.decode(encoding)
     
     return detect_csv_delimiter(sample)
+
+
+def analyze_csv_content(content: str,
+                        delimiters: Iterable[str] = (',', ';', '\t', '|'),
+                        max_lines: int = 500) -> Dict[str, int]:
+    """
+    Analyze CSV text content to determine header position and delimiter.
+
+    Args:
+        content: Full CSV text content.
+        delimiters: Candidate delimiters to evaluate.
+        max_lines: Maximum number of lines to inspect when inferring the header.
+
+    Returns:
+        Dictionary with detected delimiter, header_index (0-based) and field_count.
+    """
+    if not content or not content.strip():
+        return {'delimiter': ',', 'header_index': 0, 'field_count': 0}
+
+    best_match = None
+
+    for delimiter in delimiters:
+        reader = csv.reader(io.StringIO(content), delimiter=delimiter)
+        candidate_rows = []
+
+        try:
+            for idx, row in enumerate(reader):
+                candidate_rows.append((idx, row))
+                if max_lines and idx + 1 >= max_lines:
+                    break
+        except csv.Error:
+            continue
+
+        # 只考虑包含多个字段的行，用于判断结构化数据
+        structured_rows = [(idx, row) for idx, row in candidate_rows if len(row) > 1]
+        if not structured_rows:
+            continue
+
+        length_counter = Counter(len(row) for _, row in structured_rows)
+        if not length_counter:
+            continue
+
+        common_length, _ = length_counter.most_common(1)[0]
+
+        header_index = None
+        for idx, row in structured_rows:
+            if len(row) != common_length:
+                continue
+
+            tokens = [token.strip() for token in row if token and token.strip()]
+            if not tokens:
+                continue
+
+            alpha_tokens = sum(1 for token in tokens if any(ch.isalpha() for ch in token))
+            if alpha_tokens >= max(1, len(tokens) // 2):
+                header_index = idx
+                break
+
+        if header_index is None:
+            header_index = next(idx for idx, row in structured_rows if len(row) == common_length)
+
+        consistent_rows = sum(1 for idx, row in structured_rows if idx >= header_index and len(row) == common_length)
+        quality_score = (consistent_rows, -header_index)
+
+        match_info = {
+            'delimiter': delimiter,
+            'header_index': header_index,
+            'field_count': common_length
+        }
+
+        if best_match is None or quality_score > best_match[0]:
+            best_match = (quality_score, match_info)
+
+    if best_match:
+        return best_match[1]
+
+    return {'delimiter': ',', 'header_index': 0, 'field_count': 0}

@@ -2,6 +2,8 @@
 数据导入API（CSV和OCR）
 """
 
+import io
+import json
 import os
 import uuid
 from datetime import datetime
@@ -18,6 +20,130 @@ def allowed_file(filename, allowed_extensions):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
+
+def _build_encoding_candidates(primary_encodings=None):
+    """Combine preferred encodings with sensible fallbacks."""
+    fallback_encodings = [
+        'utf-8-sig', 'utf-8', 'gb2312', 'gbk', 'gb18030', 'big5',
+        'latin1', 'cp1252', 'iso-8859-1'
+    ]
+
+    primary_list = []
+    if primary_encodings:
+        if isinstance(primary_encodings, (list, tuple, set)):
+            primary_list.extend(primary_encodings)
+        else:
+            primary_list.append(primary_encodings)
+
+    ordered = primary_list + fallback_encodings
+    seen = set()
+    result = []
+    for encoding in ordered:
+        if not encoding:
+            continue
+        key = encoding.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(encoding)
+    return result
+
+
+def _parse_csv_bytes(file_bytes, preferred_encodings=None):
+    """Decode CSV bytes, detect header row, and return parsed DataFrame with metadata."""
+    if not file_bytes:
+        raise ValueError('CSV file is empty')
+
+    import pandas as pd
+    from app.utils.csv_utils import analyze_csv_content
+
+    encodings_to_try = _build_encoding_candidates(preferred_encodings)
+    last_error = None
+
+    for encoding in encodings_to_try:
+        try:
+            decoded_content = file_bytes.decode(encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+
+        if not decoded_content.strip():
+            continue
+
+        analysis = analyze_csv_content(decoded_content)
+        delimiter = analysis.get('delimiter') or ','
+        header_index = int(max(0, analysis.get('header_index', 0)))
+
+        stream = io.StringIO(decoded_content)
+        try:
+            df = pd.read_csv(
+                stream,
+                sep=delimiter,
+                skiprows=header_index,
+                skipinitialspace=True
+            )
+        except Exception as exc:
+            last_error = exc
+            continue
+
+        if df.empty and analysis.get('field_count', 0) == 0:
+            last_error = ValueError('No structured rows detected in CSV content')
+            continue
+
+        return {
+            'dataframe': df,
+            'encoding': encoding,
+            'delimiter': delimiter,
+            'header_index': header_index,
+            'analysis': analysis
+        }
+
+    raise ValueError(last_error or 'Unable to decode CSV with available encodings')
+
+
+def _load_csv_dataframe(file_path, meta_path=None, preferred_encodings=None):
+    """Load DataFrame from CSV file using stored metadata or automatic detection."""
+    import pandas as pd
+
+    meta = None
+    if meta_path and os.path.exists(meta_path):
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as meta_file:
+                meta = json.load(meta_file)
+        except Exception:
+            meta = None
+
+    if meta:
+        encoding = meta.get('encoding') or 'utf-8-sig'
+        delimiter = meta.get('delimiter') or ','
+        header_index = int(max(0, meta.get('header_index', 0)))
+        df = pd.read_csv(
+            file_path,
+            encoding=encoding,
+            sep=delimiter,
+            skiprows=header_index,
+            skipinitialspace=True
+        )
+        return df, meta
+
+    with open(file_path, 'rb') as fh:
+        file_bytes = fh.read()
+
+    parsed = _parse_csv_bytes(file_bytes, preferred_encodings)
+    meta = {
+        'encoding': parsed['encoding'],
+        'delimiter': parsed['delimiter'],
+        'header_index': parsed['header_index']
+    }
+
+    if meta_path:
+        try:
+            with open(meta_path, 'w', encoding='utf-8') as meta_file:
+                json.dump(meta, meta_file)
+        except Exception:
+            pass
+
+    return parsed['dataframe'], meta
 @bp.route('/csv-preview', methods=['POST'])
 def csv_preview():
     """CSV预览和分析端点"""
@@ -116,44 +242,28 @@ def csv_preview():
         if not decoded_content.strip():
             return jsonify({'success': False, 'error': _('CSV file is empty or contains only whitespace')}), 400
         
-        # 使用通用的分隔符检测（基于解码后的内容）
-        from app.utils.csv_utils import detect_csv_delimiter
-        delimiter = detect_csv_delimiter(decoded_content[:1024])
-        
-        # 读取CSV文件，使用检测到的编码
-        df = None
-        successful_encoding = None
+        # 读取完整文件内容以进行表头检测
+        file.seek(0)
+        full_bytes = file.read()
+        if not full_bytes:
+            return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
 
-        # 尝试多种编码读取CSV
-        encodings_to_try = [detected_encoding, 'utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin1']
-        # 去重并保持顺序
-        encodings_to_try = list(dict.fromkeys(encodings_to_try))
+        encodings_to_try = _build_encoding_candidates(detected_encoding)
 
-        for encoding in encodings_to_try:
-            file.seek(0)
-            try:
-                df = pd.read_csv(file, encoding=encoding, sep=delimiter, skipinitialspace=True)
-                successful_encoding = encoding
-                break
-            except pd.errors.EmptyDataError:
-                return jsonify({'success': False, 'error': _('CSV file contains no data')}), 400
-            except Exception as e:
-                # 尝试不指定分隔符，让pandas自动检测
-                try:
-                    file.seek(0)
-                    df = pd.read_csv(file, encoding=encoding, skipinitialspace=True)
-                    successful_encoding = encoding
-                    break
-                except Exception as e2:
-                    continue
+        try:
+            parsed_csv = _parse_csv_bytes(full_bytes, encodings_to_try)
+        except ValueError as parse_error:
+            return jsonify({'success': False, 'error': str(parse_error)}), 400
 
-        if df is None:
-            return jsonify({'success': False, 'error': _('Failed to parse CSV file. Please ensure the file is a valid CSV with proper encoding (UTF-8 recommended).')}), 400
-        
-        
+        df = parsed_csv['dataframe']
+        successful_encoding = parsed_csv['encoding']
+        delimiter = parsed_csv['delimiter']
+        header_index = parsed_csv['header_index']
+
+
         if df.empty:
             return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
-        
+
         if len(df.columns) == 0:
             return jsonify({'success': False, 'error': _('No columns found in CSV file')}), 400
         
@@ -163,11 +273,22 @@ def csv_preview():
         os.makedirs(temp_dir, exist_ok=True)
         
         temp_file_path = os.path.join(temp_dir, f'{session_id}.csv')
+        meta_file_path = os.path.join(temp_dir, f'{session_id}.json')
         
-        # 重置文件指针并保存
-        file.seek(0)
-        file.save(temp_file_path)
-        
+        # 保存CSV原始内容和解析元数据
+        with open(temp_file_path, 'wb') as temp_file:
+            temp_file.write(full_bytes)
+
+        try:
+            with open(meta_file_path, 'w', encoding='utf-8') as meta_file:
+                json.dump({
+                    'encoding': successful_encoding,
+                    'delimiter': delimiter,
+                    'header_index': header_index
+                }, meta_file)
+        except Exception:
+            pass
+
         # 获取列名
         columns = df.columns.tolist()
         
@@ -283,8 +404,8 @@ def import_csv_smart():
         if not os.path.exists(temp_file_path):
             return jsonify({'success': False, 'error': _('Session expired or file not found')}), 400
 
-        # 读取CSV文件
-        df = pd.read_csv(temp_file_path)
+        meta_file_path = os.path.join(temp_dir, f'{session_id}.json')
+        df, _meta = _load_csv_dataframe(temp_file_path, meta_file_path)
 
         # 验证是否包含CFP_Account_ID列
         if 'CFP_Account_ID' not in df.columns:
@@ -382,10 +503,11 @@ def import_csv_smart():
         db.session.commit()
 
         # 清理临时文件
-        try:
-            os.remove(temp_file_path)
-        except:
-            pass
+        for path in (temp_file_path, meta_file_path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
 
         # 生成跳转URL
         redirect_url = '/transactions'  # 默认跳转到所有交易记录
@@ -446,38 +568,8 @@ def import_csv_with_mapping():
         if not os.path.exists(temp_file_path):
             return jsonify({'success': False, 'error': _('Session expired, please upload the file again')}), 400
         
-        # 智能编码和分隔符检测
-        def detect_file_encoding_and_delimiter(file_path):
-            with open(file_path, 'rb') as f:
-                raw_content = f.read(2048)
-            
-            # 编码检测
-            encodings = ['utf-8-sig', 'utf-8', 'gb2312', 'gbk', 'gb18030', 'big5', 'latin1', 'cp1252', 'iso-8859-1']
-            detected_encoding = 'utf-8-sig'
-            decoded_content = ''
-            
-            for encoding in encodings:
-                try:
-                    decoded_content = raw_content.decode(encoding)
-                    if decoded_content.strip():
-                        detected_encoding = encoding
-                        print(f"DEBUG: File encoding detected: {encoding}")
-                        break
-                except (UnicodeDecodeError, UnicodeError):
-                    continue
-            else:
-                decoded_content = raw_content.decode('latin1', errors='ignore')
-                detected_encoding = 'latin1'
-            
-            # 分隔符检测
-            from app.utils.csv_utils import detect_csv_delimiter
-            delimiter = detect_csv_delimiter(decoded_content[:1024])
-            print(f"DEBUG: File delimiter detected: {delimiter!r}")
-            
-            return detected_encoding, delimiter
-        
-        detected_encoding, delimiter = detect_file_encoding_and_delimiter(temp_file_path)
-        df = pd.read_csv(temp_file_path, encoding=detected_encoding, sep=delimiter)
+        meta_file_path = os.path.join(temp_dir, f'{session_id}.json')
+        df, _meta = _load_csv_dataframe(temp_file_path, meta_file_path)
         
         # 处理数据
         transactions_data, processing_errors = process_csv_with_mapping(df, column_mappings)
@@ -580,12 +672,7 @@ def import_csv_with_mapping():
         
         # 保存格式映射以备将来使用
         if created_count > 0:
-            # 重新读取CSV以获取原始headers，使用相同的分隔符检测逻辑
-            from app.utils.csv_utils import detect_csv_delimiter_from_file
-            delimiter = detect_csv_delimiter_from_file(temp_file_path)
-            
-            df_headers = pd.read_csv(temp_file_path, encoding='utf-8-sig', nrows=0, sep=delimiter)
-            original_headers = df_headers.columns.tolist()
+            original_headers = df.columns.tolist()
             
             # 如果用户没有输入格式名称，自动生成一个友好的名称
             if not format_name or not format_name.strip():
@@ -603,10 +690,11 @@ def import_csv_with_mapping():
             save_format_mapping(format_name, original_headers, column_mappings)
         
         # 清理临时文件
-        try:
-            os.remove(temp_file_path)
-        except:
-            pass
+        for path in (temp_file_path, meta_file_path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
         
         return jsonify({
             'success': True,
@@ -620,6 +708,7 @@ def import_csv_with_mapping():
         })
         
     except Exception as e:
+        current_app.logger.exception('import_csv_with_mapping failed')
         return jsonify({'success': False, 'error': f'Import error: {str(e)}'}), 500
 
 def process_csv_with_mapping(df, column_mappings):
@@ -969,29 +1058,17 @@ def import_csv_flexible():
     account = Account.query.get_or_404(account_id)
     
     try:
-        # 重置文件指针并进行编码检测
         file.seek(0)
-        raw_content = file.read(2048)
-        file.seek(0)
-        
-        # 智能编码检测
-        encodings = ['utf-8-sig', 'utf-8', 'gb2312', 'gbk', 'gb18030', 'big5', 'latin1', 'cp1252', 'iso-8859-1']
-        detected_encoding = 'utf-8-sig'
-        
-        for encoding in encodings:
-            try:
-                decoded_content = raw_content.decode(encoding)
-                if decoded_content.strip():
-                    detected_encoding = encoding
-                    print(f"DEBUG: Smart import encoding detected: {encoding}")
-                    break
-            except (UnicodeDecodeError, UnicodeError):
-                continue
-        else:
-            detected_encoding = 'latin1'
-        
-        # 读取CSV文件
-        df = pd.read_csv(file, encoding=detected_encoding)
+        full_bytes = file.read()
+        if not full_bytes:
+            return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
+
+        try:
+            parsed_csv = _parse_csv_bytes(full_bytes)
+        except ValueError as parse_error:
+            return jsonify({'success': False, 'error': str(parse_error)}), 400
+
+        df = parsed_csv['dataframe']
         
         if df.empty:
             return jsonify({'success': False, 'error': _('CSV file is empty')}), 400
