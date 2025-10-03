@@ -229,9 +229,70 @@ def overview():
 
             return list(merged.values())
         
-        # 应用股票合并逻辑
-        holdings = merge_holdings_by_stock(raw_holdings)
-        cleared_holdings = merge_holdings_by_stock(raw_cleared_holdings)
+        def merge_holdings_and_cleared_cross_accounts(raw_holdings, raw_cleared_holdings):
+            """跨账户合并持仓和清仓数据，确保同一股票不会同时出现在两个列表中"""
+            # 首先按股票符号分组所有数据
+            all_stocks = {}  # {symbol: {'holdings': [], 'cleared': []}}
+            
+            # 处理持仓数据
+            for holding in raw_holdings:
+                symbol = holding.get('symbol')
+                if symbol:
+                    if symbol not in all_stocks:
+                        all_stocks[symbol] = {'holdings': [], 'cleared': []}
+                    all_stocks[symbol]['holdings'].append(holding)
+            
+            # 处理清仓数据
+            for cleared in raw_cleared_holdings:
+                symbol = cleared.get('symbol')
+                if symbol:
+                    if symbol not in all_stocks:
+                        all_stocks[symbol] = {'holdings': [], 'cleared': []}
+                    all_stocks[symbol]['cleared'].append(cleared)
+            
+            # 合并每个股票的数据
+            final_holdings = []
+            final_cleared = []
+            
+            for symbol, data in all_stocks.items():
+                holdings_list = data['holdings']
+                cleared_list = data['cleared']
+                
+                # 计算该股票的总持仓
+                total_current_shares = sum(h.get('current_shares', 0) for h in holdings_list)
+                total_cleared_shares = sum(c.get('total_sold_shares', 0) for c in cleared_list)
+                
+                if total_current_shares > 0:
+                    # 有持仓，合并到holdings
+                    if len(holdings_list) == 1:
+                        # 只有一个账户有持仓
+                        final_holdings.append(holdings_list[0])
+                    else:
+                        # 多个账户有持仓，需要合并
+                        merged_holding = merge_holdings_by_stock(holdings_list)[0]
+                        final_holdings.append(merged_holding)
+                    
+                    # 如果有清仓数据，将已实现收益合并到持仓中
+                    if cleared_list:
+                        total_cleared_realized_gain = sum(c.get('realized_gain', 0) for c in cleared_list)
+                        if total_cleared_realized_gain != 0:
+                            final_holdings[-1]['realized_gain'] = final_holdings[-1].get('realized_gain', 0) + total_cleared_realized_gain
+                            print(f"DEBUG: {symbol} 合并清仓已实现收益: {total_cleared_realized_gain}")
+                
+                elif total_cleared_shares > 0:
+                    # 只有清仓数据，合并到cleared
+                    if len(cleared_list) == 1:
+                        # 只有一个账户有清仓
+                        final_cleared.append(cleared_list[0])
+                    else:
+                        # 多个账户有清仓，需要合并
+                        merged_cleared = merge_holdings_by_stock(cleared_list)[0]
+                        final_cleared.append(merged_cleared)
+            
+            return final_holdings, final_cleared
+        
+        # 应用股票合并逻辑 - 需要跨账户合并持仓和清仓数据
+        holdings, cleared_holdings = merge_holdings_and_cleared_cross_accounts(raw_holdings, raw_cleared_holdings)
         
         # 对于IBIT等跨账户股票，需要额外汇总已实现收益
         # 因为Portfolio Service按账户分别计算，没有跨账户汇总
