@@ -195,7 +195,10 @@
                     <h6 class="card-title text-muted mb-0">{{ _('Total Assets') }}</h6>
                 </div>
                 <h4 id="total-assets-display" class="text-primary mb-1">${{ "{:,.2f}".format(metrics.total_assets.cad if metrics else 0) }}</h4>
-                <small class="text-muted" id="total-assets-breakdown">CAD:${{ "{:,.2f}".format(metrics.total_assets.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.total_assets.usd_only if metrics else 0) }}</small>
+                <div class="text-muted">
+                    <small class="d-block" id="total-assets-breakdown-cad">CAD:${{ "{:,.2f}".format(metrics.total_assets.cad_only if metrics else 0) }}</small>
+                    <small class="d-block" id="total-assets-breakdown-usd">USD:${{ "{:,.2f}".format(metrics.total_assets.usd_only if metrics else 0) }}</small>
+                </div>
             </div>
         </div>
     </div>
@@ -218,7 +221,10 @@
                         ({% if metrics %}{{ "+" if metrics.total_return_rate >= 0 else "" }}{{ "{:.2f}".format(metrics.total_return_rate) }}{% else %}0.00{% endif %}%)
                     </small>
                 </h4>
-                <small class="text-muted" id="total-return-breakdown">CAD:${{ "{:,.2f}".format(metrics.total_return.cad_only if metrics else 0) }} | USD:${{ "{:,.2f}".format(metrics.total_return.usd_only if metrics else 0) }}</small>
+                <div class="text-muted">
+                    <small class="d-block" id="total-return-breakdown-cad">CAD:${{ "{:,.2f}".format(metrics.total_return.cad_only if metrics else 0) }}</small>
+                    <small class="d-block" id="total-return-breakdown-usd">USD:${{ "{:,.2f}".format(metrics.total_return.usd_only if metrics else 0) }}</small>
+                </div>
             </div>
         </div>
     </div>
@@ -236,7 +242,10 @@
                 <h4 id="realized-gain-display" class="{{ 'text-success' if metrics and metrics.realized_gain.cad >= 0 else 'text-danger' }} mb-1">
                     {% if metrics and metrics.realized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.realized_gain.cad if metrics else 0) }}
                 </h4>
-                <small class="text-muted" id="realized-gain-breakdown">CAD:${{ "{:,.2f}".format(metrics.realized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.realized_gain.usd_only if metrics else 0) }}</small>
+                <div class="text-muted">
+                    <small class="d-block" id="realized-gain-breakdown-cad">CAD:${{ "{:,.2f}".format(metrics.realized_gain.cad_only if metrics else 0) }}</small>
+                    <small class="d-block" id="realized-gain-breakdown-usd">USD:${{ "{:,.2f}".format(metrics.realized_gain.usd_only if metrics else 0) }}</small>
+                </div>
             </div>
         </div>
     </div>
@@ -254,7 +263,10 @@
                 <h4 id="unrealized-gain-display" class="{{ 'text-success' if metrics and metrics.unrealized_gain.cad >= 0 else 'text-danger' }} mb-1">
                     {% if metrics and metrics.unrealized_gain.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.unrealized_gain.cad if metrics else 0) }}
                 </h4>
-                <small class="text-muted" id="unrealized-gain-breakdown">CAD:${{ "{:,.2f}".format(metrics.unrealized_gain.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.unrealized_gain.usd_only if metrics else 0) }}</small>
+                <div class="text-muted">
+                    <small class="d-block" id="unrealized-gain-breakdown-cad">CAD:${{ "{:,.2f}".format(metrics.unrealized_gain.cad_only if metrics else 0) }}</small>
+                    <small class="d-block" id="unrealized-gain-breakdown-usd">USD:${{ "{:,.2f}".format(metrics.unrealized_gain.usd_only if metrics else 0) }}</small>
+                </div>
             </div>
         </div>
     </div>
@@ -274,7 +286,10 @@
                         {% if metrics and metrics.daily_change.cad >= 0 %}+{% endif %}${{ "{:,.2f}".format(metrics.daily_change.cad if metrics else 0) }}
                     </span>
                 </h4>
-                <small class="text-muted" id="daily-change-breakdown">CAD:${{ "{:,.2f}".format(metrics.daily_change.cad_only if metrics else 0) }}|USD:${{ "{:,.2f}".format(metrics.daily_change.usd_only if metrics else 0) }}</small>
+                <div class="text-muted">
+                    <small class="d-block" id="daily-change-breakdown-cad">CAD:${{ "{:,.2f}".format(metrics.daily_change.cad_only if metrics else 0) }}</small>
+                    <small class="d-block" id="daily-change-breakdown-usd">USD:${{ "{:,.2f}".format(metrics.daily_change.usd_only if metrics else 0) }}</small>
+                </div>
             </div>
         </div>
     </div>
@@ -1026,13 +1041,13 @@ function updateHoldingRowData(row, holding) {
     if (cells[4] && holding.daily_change_value !== undefined) {
         const dailyValue = parseFloat(holding.daily_change_value);
         const dailyPercent = parseFloat(holding.daily_change_percent || 0);
-        const sign = dailyValue >= 0 ? '+' : '';
+        const sign = dailyValue >= 0 ? '+' : '-';
         const percentSign = dailyPercent >= 0 ? '+' : '';
         
         // 更新金额
         const valueSpan = cells[4].querySelector('span.fw-medium');
         if (valueSpan) {
-            valueSpan.textContent = sign + '$' + dailyValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            valueSpan.textContent = sign + '$' + Math.abs(dailyValue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             valueSpan.className = 'fw-medium ' + (dailyValue >= 0 ? 'text-success' : 'text-danger');
         }
         
@@ -1055,10 +1070,10 @@ function updateHoldingRowData(row, holding) {
     // 更新未实现收益（第7列，索引6）
     if (cells[6] && holding.unrealized_gain !== undefined) {
         const unrealizedGain = parseFloat(holding.unrealized_gain);
-        const sign = unrealizedGain >= 0 ? '+' : '';
+        const sign = unrealizedGain >= 0 ? '+' : '-';
         const span = cells[6].querySelector('span');
         if (span) {
-            span.textContent = sign + '$' + unrealizedGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            span.textContent = sign + '$' + Math.abs(unrealizedGain).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             span.className = 'fw-bold ' + (unrealizedGain >= 0 ? 'text-success' : 'text-danger');
         }
     }
@@ -1066,10 +1081,10 @@ function updateHoldingRowData(row, holding) {
     // 更新已实现收益（第8列，索引7）
     if (cells[7] && holding.realized_gain !== undefined) {
         const realizedGain = parseFloat(holding.realized_gain);
-        const sign = realizedGain >= 0 ? '+' : '';
+        const sign = realizedGain >= 0 ? '+' : '-';
         const span = cells[7].querySelector('span');
         if (span) {
-            span.textContent = sign + '$' + realizedGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            span.textContent = sign + '$' + Math.abs(realizedGain).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             span.className = 'fw-medium ' + (realizedGain >= 0 ? 'text-success' : 'text-danger');
         }
     }
@@ -1217,11 +1232,17 @@ function updateMetrics(metrics) {
     }
     
     // 更新总资产分解
-    const totalAssetsBreakdownElement = document.getElementById('total-assets-breakdown');
-    if (totalAssetsBreakdownElement && metrics.total_assets) {
+    const totalAssetsCadElement = document.getElementById('total-assets-breakdown-cad');
+    const totalAssetsUsdElement = document.getElementById('total-assets-breakdown-usd');
+    if (metrics.total_assets) {
         const cadOnly = parseFloat(metrics.total_assets.cad_only || 0);
         const usdOnly = parseFloat(metrics.total_assets.usd_only || 0);
-        totalAssetsBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (totalAssetsCadElement) {
+            totalAssetsCadElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (totalAssetsUsdElement) {
+            totalAssetsUsdElement.textContent = `USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
     }
     
     // 更新总回报
@@ -1234,11 +1255,17 @@ function updateMetrics(metrics) {
     }
     
     // 更新总回报分解
-    const totalReturnBreakdownElement = document.getElementById('total-return-breakdown');
-    if (totalReturnBreakdownElement && metrics.total_return) {
+    const totalReturnCadElement = document.getElementById('total-return-breakdown-cad');
+    const totalReturnUsdElement = document.getElementById('total-return-breakdown-usd');
+    if (metrics.total_return) {
         const cadOnly = parseFloat(metrics.total_return.cad_only || 0);
         const usdOnly = parseFloat(metrics.total_return.usd_only || 0);
-        totalReturnBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (totalReturnCadElement) {
+            totalReturnCadElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (totalReturnUsdElement) {
+            totalReturnUsdElement.textContent = `USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
     }
     
     // 更新回报率
@@ -1260,11 +1287,17 @@ function updateMetrics(metrics) {
     }
     
     // 更新已实现收益分解
-    const realizedGainBreakdownElement = document.getElementById('realized-gain-breakdown');
-    if (realizedGainBreakdownElement && metrics.realized_gain) {
+    const realizedGainCadElement = document.getElementById('realized-gain-breakdown-cad');
+    const realizedGainUsdElement = document.getElementById('realized-gain-breakdown-usd');
+    if (metrics.realized_gain) {
         const cadOnly = parseFloat(metrics.realized_gain.cad_only || 0);
         const usdOnly = parseFloat(metrics.realized_gain.usd_only || 0);
-        realizedGainBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (realizedGainCadElement) {
+            realizedGainCadElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (realizedGainUsdElement) {
+            realizedGainUsdElement.textContent = `USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
     }
     
     // 更新未实现收益
@@ -1277,11 +1310,17 @@ function updateMetrics(metrics) {
     }
     
     // 更新未实现收益分解
-    const unrealizedGainBreakdownElement = document.getElementById('unrealized-gain-breakdown');
-    if (unrealizedGainBreakdownElement && metrics.unrealized_gain) {
+    const unrealizedGainCadElement = document.getElementById('unrealized-gain-breakdown-cad');
+    const unrealizedGainUsdElement = document.getElementById('unrealized-gain-breakdown-usd');
+    if (metrics.unrealized_gain) {
         const cadOnly = parseFloat(metrics.unrealized_gain.cad_only || 0);
         const usdOnly = parseFloat(metrics.unrealized_gain.usd_only || 0);
-        unrealizedGainBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (unrealizedGainCadElement) {
+            unrealizedGainCadElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (unrealizedGainUsdElement) {
+            unrealizedGainUsdElement.textContent = `USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
     }
     
     // 更新当日浮动盈亏
@@ -1294,11 +1333,17 @@ function updateMetrics(metrics) {
     }
     
     // 更新当日变化分解
-    const dailyChangeBreakdownElement = document.getElementById('daily-change-breakdown');
-    if (dailyChangeBreakdownElement && metrics.daily_change) {
+    const dailyChangeCadElement = document.getElementById('daily-change-breakdown-cad');
+    const dailyChangeUsdElement = document.getElementById('daily-change-breakdown-usd');
+    if (metrics.daily_change) {
         const cadOnly = parseFloat(metrics.daily_change.cad_only || 0);
         const usdOnly = parseFloat(metrics.daily_change.usd_only || 0);
-        dailyChangeBreakdownElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}|USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (dailyChangeCadElement) {
+            dailyChangeCadElement.textContent = `CAD:$${cadOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (dailyChangeUsdElement) {
+            dailyChangeUsdElement.textContent = `USD:$${usdOnly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
     }
     
     // 更新现金余额

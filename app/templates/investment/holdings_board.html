@@ -551,7 +551,7 @@ function renderMergedView(holdings) {
                 <!-- Daily Change -->
                 <td class="text-end">
                     <span class="fw-medium ${(holding.daily_change_value || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                        ${(holding.daily_change_value || 0) >= 0 ? '+' : ''}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
+                        ${(holding.daily_change_value || 0) >= 0 ? '+' : '-'}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
                     </span>
                     <br>
                     <small class="${(holding.daily_change_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
@@ -568,14 +568,14 @@ function renderMergedView(holdings) {
                 <!-- Unrealized Gain/Loss -->
                 <td class="text-end">
                     <span class="fw-bold ${unrealizedGain >= 0 ? 'text-success' : 'text-danger'}">
-                        ${unrealizedGain >= 0 ? '+' : ''}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        ${unrealizedGain >= 0 ? '+' : '-'}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </span>
                 </td>
 
                 <!-- Realized Gains -->
                 <td class="text-end">
                     <span class="fw-medium ${(holding.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                        ${(holding.realized_gain || 0) >= 0 ? '+' : ''}$${Math.abs(holding.realized_gain || 0).toFixed(2)}
+                        ${(holding.realized_gain || 0) >= 0 ? '+' : '-'}$${Math.abs(holding.realized_gain || 0).toFixed(2)}
                     </span>
                 </td>
 
@@ -695,7 +695,7 @@ function renderSequentialView(accountsData) {
                     <!-- Daily Change -->
                     <td class="text-end">
                         <span class="fw-medium ${(holding.daily_change_value || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                            ${(holding.daily_change_value || 0) >= 0 ? '+' : ''}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
+                            ${(holding.daily_change_value || 0) >= 0 ? '+' : '-'}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
                         </span>
                         <br>
                         <small class="${(holding.daily_change_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
@@ -712,14 +712,14 @@ function renderSequentialView(accountsData) {
                     <!-- Unrealized Gain/Loss -->
                     <td class="text-end">
                         <span class="fw-bold ${unrealizedGain >= 0 ? 'text-success' : 'text-danger'}">
-                            ${unrealizedGain >= 0 ? '+' : ''}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            ${unrealizedGain >= 0 ? '+' : '-'}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                         </span>
                     </td>
 
                     <!-- Realized Gains -->
                     <td class="text-end">
                         <span class="fw-medium ${(holding.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                            ${(holding.realized_gain || 0) >= 0 ? '+' : ''}$${Math.abs(holding.realized_gain || 0).toFixed(2)}
+                            ${(holding.realized_gain || 0) >= 0 ? '+' : '-'}$${Math.abs(holding.realized_gain || 0).toFixed(2)}
                         </span>
                     </td>
 

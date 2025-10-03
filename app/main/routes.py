@@ -100,63 +100,15 @@ def overview():
         
         print(f"DEBUG: Portfolio Service返回 {len(raw_holdings)} 个当前持仓, {len(raw_cleared_holdings)} 个清仓持仓")
         
-        # 获取综合指标 - 总是计算，但根据skip_prices决定是否强制更新价格
-        # 获取现金余额
+        # 使用统一计算架构获取综合指标 - 确保CAD和USD分解正确
+        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
+            account_ids, 
+            target_date=date.today(),
+            ownership_map=ownership_map
+        )
+        
+        # 获取现金余额用于显示
         cash_balance = asset_service.get_cash_balance(account_ids[0] if account_ids else None, date.today())
-        
-        # 总是使用Portfolio Service的数据构建综合指标，确保数据一致性
-        total_stock_value = float(portfolio_summary.get('summary', {}).get('total_current_value', 0))
-        total_cash = float(cash_balance.get('total_cad', 0))
-        total_assets = total_stock_value + total_cash
-        total_realized = float(portfolio_summary.get('summary', {}).get('total_realized_gain', 0))
-        total_unrealized = float(portfolio_summary.get('summary', {}).get('total_unrealized_gain', 0))
-        total_return = total_realized + total_unrealized
-        
-        comprehensive_metrics = {
-            'total_assets': {
-                'cad': total_assets,
-                'cad_only': total_assets,
-                'usd_only': 0
-            },
-            'total_return': {
-                'cad': total_return,
-                'cad_only': total_return,
-                'usd_only': 0
-            },
-            'realized_gain': {
-                'cad': total_realized,
-                'cad_only': total_realized,
-                'usd_only': 0
-            },
-            'unrealized_gain': {
-                'cad': total_unrealized,
-                'cad_only': total_unrealized,
-                'usd_only': 0
-            },
-            'dividends': {
-                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
-                'cad_only': 0,
-                'usd_only': 0
-            },
-            'interest': {
-                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
-                'cad_only': 0,
-                'usd_only': 0
-            },
-            'total_deposits': {
-                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
-                'cad_only': 0,
-                'usd_only': 0
-            },
-            'total_withdrawals': {
-                'cad': 0,  # 暂时设为0，后续可以从Portfolio Service获取
-                'cad_only': 0,
-                'usd_only': 0
-            },
-            'cash_balance': {
-                'total_cad': total_cash
-            }
-        }
         
         # 创建账户名到账户对象的映射字典，用于获取成员信息
         account_name_to_obj = {acc.name: acc for acc in accounts}
@@ -324,13 +276,13 @@ def overview():
                 'usd_only': float(daily_change_usd_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
             }
         
-        # 从综合指标中提取数据 - 使用我们构建的数据结构
+        # 从综合指标中提取数据 - 使用统一计算架构的正确数据
         if comprehensive_metrics:
             total_assets = comprehensive_metrics['total_assets']['cad']
-            # 使用我们构建的数据结构中的字段
+            # 使用统一计算架构的现金数据
+            total_cash_cad = comprehensive_metrics['cash_balance']['cad']
+            total_cash_usd = comprehensive_metrics['cash_balance']['usd']
             total_stock_value = comprehensive_metrics['total_assets']['cad'] - comprehensive_metrics['cash_balance']['total_cad']
-            total_cash_cad = comprehensive_metrics['cash_balance']['total_cad']
-            total_cash_usd = 0  # 我们只计算了CAD现金
         else:
             # 当跳过价格获取时，使用默认值
             total_assets = 0
