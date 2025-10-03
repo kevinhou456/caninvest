@@ -2067,7 +2067,15 @@ document.addEventListener('DOMContentLoaded', function() {
 <script>
 // Function to open modal with stock pre-filled
 function openAddTransactionModalForStock(symbol, currency, accountId = null) {
-    const modal = new bootstrap.Modal(document.getElementById('addTransactionModal'));
+    console.log('Opening transaction modal for:', symbol, currency, accountId);
+    
+    const modalElement = document.getElementById('addTransactionModal');
+    if (!modalElement) {
+        console.error('Modal element not found!');
+        return;
+    }
+    
+    const modal = new bootstrap.Modal(modalElement);
     
     // Reset form to default state
     resetTransactionForm();
@@ -2098,6 +2106,7 @@ function openAddTransactionModalForStock(symbol, currency, accountId = null) {
     // Trigger stock lookup
     handleStockSymbolChange();
     
+    console.log('Showing modal...');
     modal.show();
 }
 
@@ -2209,6 +2218,8 @@ function handleStockSymbolChange() {
 
 // Add event listeners for stock symbol and currency changes
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, initializing transaction modal...');
+    
     const stockSymbolInput = document.getElementById('modal_stock_symbol');
     const currencySelect = document.getElementById('modal_currency');
     
@@ -2218,6 +2229,21 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (currencySelect) {
         currencySelect.addEventListener('change', handleStockSymbolChange);
+    }
+    
+    // Test if modal element exists
+    const modalElement = document.getElementById('addTransactionModal');
+    if (modalElement) {
+        console.log('Modal element found:', modalElement);
+    } else {
+        console.error('Modal element not found!');
+    }
+    
+    // Test if Bootstrap is available
+    if (typeof bootstrap !== 'undefined') {
+        console.log('Bootstrap is available');
+    } else {
+        console.error('Bootstrap is not available!');
     }
 });
 
