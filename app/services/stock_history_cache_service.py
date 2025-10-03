@@ -307,13 +307,15 @@ class StockHistoryCacheService:
             if response.status_code == 200:
                 content = response.text
 
-                # 多种IPO日期查找模式
+                # 多种IPO日期查找模式 - 按优先级排序
                 patterns = [
+                    # 最准确的IPO日期格式
                     r'"ipoDate"\s*:\s*"([^"]+)"',
                     r'"firstTradeDateEpochUtc"\s*:\s*(\d+)',
-                    r'founded\s+in\s+(\d{4})',
-                    r'incorporated\s+in\s+(\d{4})',
+                    # 明确的IPO相关文本
+                    r'IPO\s*[:\s]*(\d{4}-\d{2}-\d{2})',
                     r'IPO\s*[:\s]*(\d{4})',
+                    # 避免公司成立年份等误导性信息
                 ]
 
                 for pattern in patterns:
@@ -323,13 +325,29 @@ class StockHistoryCacheService:
                             # 处理时间戳格式
                             if match.isdigit() and len(match) >= 10:
                                 timestamp = int(match)
-                                return datetime.fromtimestamp(timestamp).date()
+                                ipo_date = datetime.fromtimestamp(timestamp).date()
+                                # 验证IPO日期的合理性（不能太早，不能是未来）
+                                if ipo_date >= date(1990, 1, 1) and ipo_date <= date.today():
+                                    logger.info(f"从时间戳获取 {symbol} IPO日期: {ipo_date}")
+                                    return ipo_date
 
-                            # 处理年份格式
+                            # 处理完整日期格式 (YYYY-MM-DD)
+                            elif re.match(r'\d{4}-\d{2}-\d{2}', match):
+                                ipo_date = datetime.strptime(match, '%Y-%m-%d').date()
+                                if ipo_date >= date(1990, 1, 1) and ipo_date <= date.today():
+                                    logger.info(f"从完整日期获取 {symbol} IPO日期: {ipo_date}")
+                                    return ipo_date
+
+                            # 处理年份格式 - 但需要更严格的验证
                             elif match.isdigit() and len(match) == 4:
                                 year = int(match)
-                                if 1900 <= year <= date.today().year:
-                                    return date(year, 1, 1)
+                                # 更严格的年份验证：IPO年份应该在合理范围内
+                                current_year = date.today().year
+                                if 1990 <= year <= current_year and year >= current_year - 30:  # 最近30年内
+                                    # 对于年份，设置为该年的6月1日（年中），而不是1月1日
+                                    ipo_date = date(year, 6, 1)
+                                    logger.info(f"从年份获取 {symbol} IPO日期: {ipo_date}")
+                                    return ipo_date
 
                         except (ValueError, OverflowError):
                             continue
