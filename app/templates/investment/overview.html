@@ -407,7 +407,9 @@
                                 <td class="ps-3">
                                     <div class="d-flex align-items-center">
                                         <div class="bg-{{ 'warning' if holding['currency'] == 'CAD' else 'success' }} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar" 
-                                             style="color: {{ 'black' if holding['currency'] == 'CAD' else 'white' }};">
+                                             style="color: {{ 'black' if holding['currency'] == 'CAD' else 'white' }}; cursor: pointer;"
+                                             onclick="openAddTransactionModalForStock('{{ holding['symbol'] }}', '{{ holding['currency'] }}', {{ account_id if account_id else 'null' }})"
+                                             title="{{ _('Click to add transaction for') }} {{ holding['symbol'] }}">
                                             {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
                                         </div>
                                         <div>
@@ -1935,4 +1937,307 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 </script>
+
+<!-- Transaction Creation Modal -->
+<div class="modal fade" id="addTransactionModal" tabindex="-1" aria-labelledby="addTransactionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addTransactionModalLabel">
+                    <i class="fas fa-plus me-2"></i>{{ _('Add New Transaction') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+            </div>
+            <form method="POST" id="addTransactionForm" action="{{ url_for('main.create_transaction') }}">
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="modal_account_id" class="form-label">{{ _('Account') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_account_id" name="account_id" required>
+                                <option value="">{{ _('Select Account') }}</option>
+                                {% for account in accounts %}
+                                <option value="{{ account.id }}">{{ account.name }} ({{ account.account_members|map(attribute='member.name')|join(', ') }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6" id="stock_symbol_section">
+                            <label for="modal_stock_symbol" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger" id="stock_required">*</span></label>
+                            <input type="text" class="form-control" id="modal_stock_symbol" name="stock_symbol" 
+                                   placeholder="{{ _('e.g. AAPL, SHOP.TO') }}" required>
+                            <small class="form-text text-muted">{{ _('System will auto-lookup stock information') }}</small>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="modal_currency" class="form-label">{{ _('Currency') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_currency" name="currency" required>
+                                <option value="">{{ _('Select Currency') }}</option>
+                                <option value="USD">USD</option>
+                                <option value="CAD">CAD</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6" id="stock_info_section">
+                            <label for="modal_stock_info" class="form-label">{{ _('Stock Information') }}</label>
+                            <div id="modal_stock_info" class="form-control-plaintext">
+                                <small class="text-muted">{{ _('Enter symbol and currency to lookup') }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Hidden fields for stock info -->
+                    <input type="hidden" id="modal_stock_name" name="stock_name">
+                    <input type="hidden" id="modal_exchange" name="exchange">
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="modal_transaction_type" class="form-label">{{ _('Transaction Type') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_transaction_type" name="type" required>
+                                <option value="">{{ _('Select Type') }}</option>
+                                <optgroup label="{{ _('Stock Transactions') }}">
+                                    <option value="BUY">{{ _('Buy') }}</option>
+                                    <option value="SELL" selected>{{ _('Sell') }}</option>
+                                </optgroup>
+                                <optgroup label="{{ _('Cash Transactions') }}">
+                                    <option value="DEPOSIT">{{ _('Deposit') }}</option>
+                                    <option value="WITHDRAWAL">{{ _('Withdrawal') }}</option>
+                                    <option value="DIVIDEND">{{ _('Dividend') }}</option>
+                                    <option value="INTEREST">{{ _('Interest') }}</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal_trade_date" class="form-label">{{ _('Transaction Date') }} <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="modal_trade_date" name="trade_date" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-4" id="quantity_section">
+                            <label for="modal_quantity" class="form-label"><span id="quantity_label">{{ _('Quantity') }}</span> <span class="text-danger" id="quantity_required">*</span></label>
+                            <input type="number" class="form-control" id="modal_quantity" name="quantity" 
+                                   step="0.0001" min="0.0001" required>
+                        </div>
+                        <!-- Amount Field for cash transactions -->
+                        <div class="col-md-4" id="amount_section" style="display: none;">
+                            <label for="modal_amount" class="form-label"><span id="amount_label">{{ _('Amount') }}</span> <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="modal_amount" name="amount"
+                                   step="0.01" min="0.01" placeholder="{{ _('Enter amount') }}">
+                        </div>
+                        <div class="col-md-4" id="price_section">
+                            <label for="modal_price_per_share" class="form-label"><span id="price_label">{{ _('Price per Share') }}</span> <span class="text-danger" id="price_required">*</span></label>
+                            <input type="number" class="form-control" id="modal_price_per_share" name="price" 
+                                   step="0.01" min="0.01" required>
+                        </div>
+                        <div class="col-md-4" id="fee_section">
+                            <label for="modal_transaction_fee" class="form-label">{{ _('Transaction Fee') }}</label>
+                            <input type="number" class="form-control" id="modal_transaction_fee" name="fee" 
+                                   step="0.01" min="0" value="0">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="modal_notes" class="form-label">{{ _('Notes') }}</label>
+                        <textarea class="form-control" id="modal_notes" name="notes" rows="2" 
+                                  placeholder="{{ _('Optional transaction notes...') }}"></textarea>
+                    </div>
+                    
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            <h6 class="card-title">{{ _('Transaction Summary') }}</h6>
+                            <div id="modal-summary-content">
+                                <p class="text-muted">{{ _('Fill in the form to see transaction summary') }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>{{ _('Cancel') }}
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>{{ _('Create Transaction') }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Function to open modal with stock pre-filled
+function openAddTransactionModalForStock(symbol, currency, accountId = null) {
+    const modal = new bootstrap.Modal(document.getElementById('addTransactionModal'));
+    
+    // Reset form to default state
+    resetTransactionForm();
+    
+    // Pre-fill stock information
+    document.getElementById('modal_stock_symbol').value = symbol;
+    document.getElementById('modal_currency').value = currency;
+    document.getElementById('modal_transaction_type').value = 'SELL'; // Default to sell
+    
+    // Pre-fill account if provided
+    if (accountId) {
+        document.getElementById('modal_account_id').value = accountId;
+    }
+    
+    // Trigger stock lookup
+    handleStockSymbolChange();
+    
+    modal.show();
+}
+
+// Handle stock symbol change for stock lookup
+function handleStockSymbolChange() {
+    const symbol = document.getElementById('modal_stock_symbol').value;
+    const currency = document.getElementById('modal_currency').value;
+    
+    if (symbol && currency) {
+        // Show loading state
+        document.getElementById('modal_stock_info').innerHTML = '<small class="text-muted"><i class="fas fa-spinner fa-spin"></i> {{ _("Looking up stock information...") }}</small>';
+        
+        // Make API call to lookup stock
+        fetch('/api/stocks/lookup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                symbol: symbol,
+                currency: currency
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.stock) {
+                // Update stock info display
+                document.getElementById('modal_stock_info').innerHTML = `
+                    <div class="d-flex align-items-center">
+                        <div class="me-2">
+                            <strong>${data.stock.name || symbol}</strong>
+                        </div>
+                        <div class="ms-auto">
+                            <small class="text-muted">${data.stock.exchange || ''}</small>
+                        </div>
+                    </div>
+                `;
+                
+                // Update hidden fields
+                document.getElementById('modal_stock_name').value = data.stock.name || '';
+                document.getElementById('modal_exchange').value = data.stock.exchange || '';
+            } else {
+                document.getElementById('modal_stock_info').innerHTML = '<small class="text-danger">{{ _("Stock not found") }}</small>';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            document.getElementById('modal_stock_info').innerHTML = '<small class="text-danger">{{ _("Error looking up stock") }}</small>';
+        });
+    } else {
+        document.getElementById('modal_stock_info').innerHTML = '<small class="text-muted">{{ _("Enter symbol and currency to lookup") }}</small>';
+    }
+}
+
+// Add event listeners for stock symbol and currency changes
+document.addEventListener('DOMContentLoaded', function() {
+    const stockSymbolInput = document.getElementById('modal_stock_symbol');
+    const currencySelect = document.getElementById('modal_currency');
+    
+    if (stockSymbolInput) {
+        stockSymbolInput.addEventListener('input', handleStockSymbolChange);
+    }
+    
+    if (currencySelect) {
+        currencySelect.addEventListener('change', handleStockSymbolChange);
+    }
+});
+
+// Reset form to default state
+function resetTransactionForm() {
+    // Reset form fields
+    document.getElementById('addTransactionForm').reset();
+    
+    // Reset visibility and requirements
+    document.getElementById('stock_symbol_section').style.display = 'block';
+    document.getElementById('stock_info_section').style.display = 'block';
+    document.getElementById('price_section').style.display = 'block';
+    document.getElementById('quantity_section').style.display = 'block';
+    document.getElementById('amount_section').style.display = 'none';
+    
+    // Reset required fields
+    document.getElementById('modal_stock_symbol').required = true;
+    document.getElementById('modal_quantity').required = true;
+    document.getElementById('modal_price_per_share').required = true;
+    document.getElementById('modal_amount').required = false;
+    
+    // Reset labels
+    document.getElementById('quantity_label').textContent = '{{ _("Quantity") }}';
+    document.getElementById('price_label').textContent = '{{ _("Price per Share") }}';
+    
+    // Reset required indicators
+    document.getElementById('stock_required').style.display = 'inline';
+    document.getElementById('quantity_required').style.display = 'inline';
+    document.getElementById('price_required').style.display = 'inline';
+    
+    // Set today's date
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('modal_trade_date').value = today;
+    
+    // Reset summary
+    document.getElementById('modal-summary-content').innerHTML = '<p class="text-muted">{{ _("Fill in the form to see transaction summary") }}</p>';
+}
+
+// Handle form submission with AJAX
+document.getElementById('addTransactionForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const submitButton = this.querySelector('button[type="submit"]');
+    const originalButtonContent = submitButton.innerHTML;
+    
+    // Show loading state
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>{{ _("Creating...") }}';
+    
+    // Get form data
+    const formData = new FormData(this);
+    
+    // Send AJAX request
+    fetch(this.action, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => {
+        return response.json().then(data => ({ status: response.status, data: data }));
+    })
+    .then(({ status, data }) => {
+        if (status === 200 && data.success) {
+            // Success - show success popup and redirect
+            alert(data.message || '{{ _("Transaction created successfully!") }}');
+            const accountId = formData.get('account_id');
+            window.location.href = '{{ url_for("main.transactions") }}' + (accountId ? '?account_id=' + accountId : '');
+        } else {
+            // Error - show error popup
+            const errorMessage = data.error || '{{ _("An error occurred while creating the transaction") }}';
+            alert(errorMessage);
+            
+            // Reset button state
+            submitButton.disabled = false;
+            submitButton.innerHTML = originalButtonContent;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('{{ _("Network error occurred. Please try again.") }}');
+        
+        // Reset button state
+        submitButton.disabled = false;
+        submitButton.innerHTML = originalButtonContent;
+    });
+});
+</script>
+
 {% endblock %}
