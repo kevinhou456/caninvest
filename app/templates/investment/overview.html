@@ -2089,18 +2089,24 @@ function openAddTransactionModalForStock(symbol, currency, accountId = null) {
     const accountSelect = document.getElementById('modal_account_id');
     if (accountId) {
         // Use provided account ID
+        console.log('Using provided account ID:', accountId);
         accountSelect.value = accountId;
     } else {
-        // Try to find the best account for this stock
-        const currentMemberId = {{ member_id if member_id else 'null' }};
-        const bestAccountId = findBestAccountForStock(symbol, currency, currentMemberId);
-        
-        if (bestAccountId) {
-            accountSelect.value = bestAccountId;
-        } else if (accountSelect.options.length > 1) {
-            // Fallback to first available account
+        // Simplified logic - just use first available account for now
+        console.log('No account ID provided, using first available account');
+        if (accountSelect.options.length > 1) {
             accountSelect.selectedIndex = 1;
+            console.log('Selected first available account');
         }
+        
+        // TODO: Re-enable smart account selection after fixing the issue
+        // const currentMemberId = {{ member_id if member_id else 'null' }};
+        // const bestAccountId = findBestAccountForStock(symbol, currency, currentMemberId);
+        // if (bestAccountId) {
+        //     accountSelect.value = bestAccountId;
+        // } else if (accountSelect.options.length > 1) {
+        //     accountSelect.selectedIndex = 1;
+        // }
     }
     
     // Trigger stock lookup
@@ -2112,50 +2118,71 @@ function openAddTransactionModalForStock(symbol, currency, accountId = null) {
 
 // Function to find the best account for a specific stock
 function findBestAccountForStock(symbol, currency, memberId) {
-    const accountSelect = document.getElementById('modal_account_id');
-    const options = Array.from(accountSelect.options);
-    
-    // Get current member name from the page context
-    const currentMemberName = getCurrentMemberName();
-    
-    // If we have a specific member selected, prioritize accounts for that member
-    if (memberId && currentMemberName) {
-        // Look for accounts that belong to the current member
-        for (let i = 1; i < options.length; i++) { // Skip the first "Select Account" option
-            const option = options[i];
-            const accountText = option.textContent;
-            
-            // Check if this account belongs to the current member
-            // Account text format: "Account Name (Member1, Member2)"
-            if (accountText.includes('(') && accountText.includes(')')) {
-                const membersPart = accountText.split('(')[1].split(')')[0];
-                const members = membersPart.split(',').map(m => m.trim());
+    try {
+        console.log('Finding best account for:', symbol, currency, memberId);
+        
+        const accountSelect = document.getElementById('modal_account_id');
+        if (!accountSelect) {
+            console.error('Account select element not found');
+            return null;
+        }
+        
+        const options = Array.from(accountSelect.options);
+        console.log('Available accounts:', options.length);
+        
+        // Get current member name from the page context
+        const currentMemberName = getCurrentMemberName();
+        console.log('Current member name:', currentMemberName);
+        
+        // If we have a specific member selected, prioritize accounts for that member
+        if (memberId && currentMemberName) {
+            console.log('Looking for member-specific accounts...');
+            // Look for accounts that belong to the current member
+            for (let i = 1; i < options.length; i++) { // Skip the first "Select Account" option
+                const option = options[i];
+                const accountText = option.textContent;
+                console.log('Checking account:', accountText);
                 
-                // If current member is in this account, this is a good candidate
-                if (members.some(member => member === currentMemberName)) {
-                    return option.value;
+                // Check if this account belongs to the current member
+                // Account text format: "Account Name (Member1, Member2)"
+                if (accountText.includes('(') && accountText.includes(')')) {
+                    const membersPart = accountText.split('(')[1].split(')')[0];
+                    const members = membersPart.split(',').map(m => m.trim());
+                    console.log('Account members:', members);
+                    
+                    // If current member is in this account, this is a good candidate
+                    if (members.some(member => member === currentMemberName)) {
+                        console.log('Found member-specific account:', option.value);
+                        return option.value;
+                    }
                 }
             }
         }
-    }
-    
-    // If no member-specific account found, or no member selected, 
-    // look for accounts that might have this stock based on currency
-    for (let i = 1; i < options.length; i++) {
-        const option = options[i];
-        const accountText = option.textContent;
         
-        // For CAD stocks, prefer accounts with CAD in the name or description
-        // For USD stocks, prefer accounts with USD in the name or description
-        if (currency === 'CAD' && accountText.toLowerCase().includes('cad')) {
-            return option.value;
-        } else if (currency === 'USD' && accountText.toLowerCase().includes('usd')) {
-            return option.value;
+        // If no member-specific account found, or no member selected, 
+        // look for accounts that might have this stock based on currency
+        console.log('Looking for currency-specific accounts...');
+        for (let i = 1; i < options.length; i++) {
+            const option = options[i];
+            const accountText = option.textContent;
+            
+            // For CAD stocks, prefer accounts with CAD in the name or description
+            // For USD stocks, prefer accounts with USD in the name or description
+            if (currency === 'CAD' && accountText.toLowerCase().includes('cad')) {
+                console.log('Found CAD account:', option.value);
+                return option.value;
+            } else if (currency === 'USD' && accountText.toLowerCase().includes('usd')) {
+                console.log('Found USD account:', option.value);
+                return option.value;
+            }
         }
+        
+        console.log('No specific account found, returning null');
+        return null;
+    } catch (error) {
+        console.error('Error in findBestAccountForStock:', error);
+        return null;
     }
-    
-    // If no currency-specific account found, return null to use default logic
-    return null;
 }
 
 // Function to get current member name from page context
@@ -2245,6 +2272,20 @@ document.addEventListener('DOMContentLoaded', function() {
     } else {
         console.error('Bootstrap is not available!');
     }
+    
+    // Test function - add a simple test button
+    const testButton = document.createElement('button');
+    testButton.textContent = 'Test Modal';
+    testButton.className = 'btn btn-warning btn-sm';
+    testButton.style.position = 'fixed';
+    testButton.style.top = '10px';
+    testButton.style.right = '10px';
+    testButton.style.zIndex = '9999';
+    testButton.onclick = function() {
+        console.log('Test button clicked');
+        openAddTransactionModalForStock('TEST', 'USD', null);
+    };
+    document.body.appendChild(testButton);
 });
 
 // Reset form to default state
