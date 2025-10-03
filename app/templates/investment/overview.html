@@ -2077,19 +2077,83 @@ function openAddTransactionModalForStock(symbol, currency, accountId = null) {
     document.getElementById('modal_currency').value = currency;
     document.getElementById('modal_transaction_type').value = 'SELL'; // Default to sell
     
-    // Pre-fill account - use provided accountId or default to first available account
+    // Smart account selection logic
     const accountSelect = document.getElementById('modal_account_id');
     if (accountId) {
+        // Use provided account ID
         accountSelect.value = accountId;
-    } else if (accountSelect.options.length > 1) {
-        // Select first available account (skip the "Select Account" option)
-        accountSelect.selectedIndex = 1;
+    } else {
+        // Try to find the best account for this stock
+        const currentMemberId = {{ member_id if member_id else 'null' }};
+        const bestAccountId = findBestAccountForStock(symbol, currency, currentMemberId);
+        
+        if (bestAccountId) {
+            accountSelect.value = bestAccountId;
+        } else if (accountSelect.options.length > 1) {
+            // Fallback to first available account
+            accountSelect.selectedIndex = 1;
+        }
     }
     
     // Trigger stock lookup
     handleStockSymbolChange();
     
     modal.show();
+}
+
+// Function to find the best account for a specific stock
+function findBestAccountForStock(symbol, currency, memberId) {
+    const accountSelect = document.getElementById('modal_account_id');
+    const options = Array.from(accountSelect.options);
+    
+    // Get current member name from the page context
+    const currentMemberName = getCurrentMemberName();
+    
+    // If we have a specific member selected, prioritize accounts for that member
+    if (memberId && currentMemberName) {
+        // Look for accounts that belong to the current member
+        for (let i = 1; i < options.length; i++) { // Skip the first "Select Account" option
+            const option = options[i];
+            const accountText = option.textContent;
+            
+            // Check if this account belongs to the current member
+            // Account text format: "Account Name (Member1, Member2)"
+            if (accountText.includes('(') && accountText.includes(')')) {
+                const membersPart = accountText.split('(')[1].split(')')[0];
+                const members = membersPart.split(',').map(m => m.trim());
+                
+                // If current member is in this account, this is a good candidate
+                if (members.some(member => member === currentMemberName)) {
+                    return option.value;
+                }
+            }
+        }
+    }
+    
+    // If no member-specific account found, or no member selected, 
+    // look for accounts that might have this stock based on currency
+    for (let i = 1; i < options.length; i++) {
+        const option = options[i];
+        const accountText = option.textContent;
+        
+        // For CAD stocks, prefer accounts with CAD in the name or description
+        // For USD stocks, prefer accounts with USD in the name or description
+        if (currency === 'CAD' && accountText.toLowerCase().includes('cad')) {
+            return option.value;
+        } else if (currency === 'USD' && accountText.toLowerCase().includes('usd')) {
+            return option.value;
+        }
+    }
+    
+    // If no currency-specific account found, return null to use default logic
+    return null;
+}
+
+// Function to get current member name from page context
+function getCurrentMemberName() {
+    // Use the current member info passed from the server
+    const currentMember = {{ current_member.name if current_member else 'null' }};
+    return currentMember;
 }
 
 // Handle stock symbol change for stock lookup

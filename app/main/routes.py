@@ -419,6 +419,12 @@ def overview():
         
         logging.info(f"统一服务overview成功: {len(holdings)}个持仓, 总资产${total_assets:,.2f}")
         
+        # Get current member info for smart account selection
+        current_member = None
+        if member_id:
+            from app.models.member import Member
+            current_member = Member.query.get(member_id)
+        
         return render_template('investment/overview.html',
                              title=_('Overview'),
                              family=family,
@@ -435,6 +441,7 @@ def overview():
                              account_id=account_id,
                              account_ids=account_ids,
                              accounts=accounts,
+                             current_member=current_member,
                              current_view='overview')
         
     except Exception as e:
@@ -468,6 +475,7 @@ def overview():
                              account_id=None,
                              account_ids=[],
                              accounts=accounts,
+                             current_member=None,
                              current_view='overview')
 
 
