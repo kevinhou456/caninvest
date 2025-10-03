@@ -2077,9 +2077,13 @@ function openAddTransactionModalForStock(symbol, currency, accountId = null) {
     document.getElementById('modal_currency').value = currency;
     document.getElementById('modal_transaction_type').value = 'SELL'; // Default to sell
     
-    // Pre-fill account if provided
+    // Pre-fill account - use provided accountId or default to first available account
+    const accountSelect = document.getElementById('modal_account_id');
     if (accountId) {
-        document.getElementById('modal_account_id').value = accountId;
+        accountSelect.value = accountId;
+    } else if (accountSelect.options.length > 1) {
+        // Select first available account (skip the "Select Account" option)
+        accountSelect.selectedIndex = 1;
     }
     
     // Trigger stock lookup
@@ -2183,6 +2187,12 @@ function resetTransactionForm() {
     // Set today's date
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('modal_trade_date').value = today;
+    
+    // Set default account if available
+    const accountSelect = document.getElementById('modal_account_id');
+    if (accountSelect.options.length > 1) {
+        accountSelect.selectedIndex = 1; // Select first available account
+    }
     
     // Reset summary
     document.getElementById('modal-summary-content').innerHTML = '<p class="text-muted">{{ _("Fill in the form to see transaction summary") }}</p>';

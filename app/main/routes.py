@@ -434,6 +434,7 @@ def overview():
                              member_id=member_id,
                              account_id=account_id,
                              account_ids=account_ids,
+                             accounts=accounts,
                              current_view='overview')
         
     except Exception as e:
@@ -466,6 +467,7 @@ def overview():
                              member_id=None,
                              account_id=None,
                              account_ids=[],
+                             accounts=accounts,
                              current_view='overview')
 
 
