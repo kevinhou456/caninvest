@@ -34,6 +34,42 @@ class StockPriceService:
     def __init__(self):
         pass
     
+    def _extract_first_trade_date(self, info: Dict) -> Optional[date]:
+        """从yfinance返回的信息中提取IPO/首个交易日期"""
+        first_trade_date = None
+
+        first_trade_epoch = info.get('firstTradeDateEpochUtc') or info.get('firstTradeDate')
+        if first_trade_epoch:
+            try:
+                first_trade_date = datetime.fromtimestamp(int(first_trade_epoch), tz=timezone.utc).date()
+            except (TypeError, ValueError, OSError, OverflowError):
+                logger.debug("Unable to parse firstTradeDateEpochUtc=%s", first_trade_epoch)
+
+        if not first_trade_date:
+            ipo_value = info.get('ipoDate') or info.get('ipo_date') or info.get('ipo')
+            if isinstance(ipo_value, str):
+                cleaned_value = ipo_value.strip()
+                parse_formats = ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d")
+                for fmt in parse_formats:
+                    try:
+                        first_trade_date = datetime.strptime(cleaned_value, fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                if not first_trade_date:
+                    if len(cleaned_value) == 4 and cleaned_value.isdigit():
+                        try:
+                            first_trade_date = date(int(cleaned_value), 1, 1)
+                        except ValueError:
+                            pass
+            elif isinstance(ipo_value, (int, float)):
+                try:
+                    first_trade_date = datetime.fromtimestamp(int(ipo_value), tz=timezone.utc).date()
+                except (TypeError, ValueError, OSError, OverflowError):
+                    logger.debug("Unable to parse IPO date timestamp=%s", ipo_value)
+
+        return first_trade_date
+    
     def get_stock_price(self, symbol: str, expected_currency: str = None) -> Optional[Dict]:
         """使用yfinance获取股票当前价格，并验证货币匹配
 
@@ -59,6 +95,9 @@ class StockPriceService:
             # 获取货币信息
             yahoo_currency = info.get('currency', 'USD').upper()
 
+            # 获取IPO日期/首个交易日
+            first_trade_date = self._extract_first_trade_date(info)
+
             # 如果指定了期望的货币，进行验证
             if expected_currency:
                 expected_currency = expected_currency.upper()
@@ -72,7 +111,8 @@ class StockPriceService:
                 'currency': yahoo_currency,
                 'exchange': info.get('exchange', ''),
                 'name': info.get('longName', ''),
-                'updated_at': datetime.utcnow()
+                'updated_at': datetime.utcnow(),
+                'first_trade_date': first_trade_date
             }
 
         except Exception as e:
@@ -141,6 +181,8 @@ class StockPriceService:
                     stock.name = price_data['name']
                 if price_data.get('exchange') and not stock.exchange:
                     stock.exchange = price_data['exchange']
+                if price_data.get('first_trade_date'):
+                    stock.first_trade_date = price_data['first_trade_date']
 
                 db.session.commit()
                 return True

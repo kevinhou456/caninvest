@@ -99,6 +99,7 @@
                         <th>{{ _('Exchange') }}</th>
                         <th>{{ _('Currency') }}</th>
                         <th>{{ _('Current Price') }}</th>
+                        <th>{{ _('IPO Date') }}</th>
                         <th>{{ _('Category') }}</th>
                         <th>{{ _('Actions') }}</th>
                     </tr>
@@ -122,6 +123,13 @@
                             {% endif %}
                         </td>
                         <td>
+                            {% if stock.first_trade_date %}
+                            {{ stock.first_trade_date.strftime('%Y-%m-%d') }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>
                             <select class="form-select form-select-sm category-select" 
                                     data-stock-id="{{ stock.id }}" 
                                     style="max-width: 200px;">
@@ -137,7 +145,7 @@
                         <td>
                             <div class="btn-group btn-group-sm">
                                 <button class="btn btn-outline-primary btn-sm" 
-                                        onclick="editStock('{{ stock.id }}', '{{ stock.symbol }}', '{{ stock.name or '' }}', '{{ stock.exchange or '' }}', '{{ stock.currency }}')">
+                                        onclick="editStock('{{ stock.id }}', '{{ stock.symbol }}', '{{ stock.name or '' }}', '{{ stock.exchange or '' }}', '{{ stock.currency }}', '{{ stock.first_trade_date.strftime('%Y-%m-%d') if stock.first_trade_date else '' }}')">
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <button class="btn btn-outline-danger btn-sm" 
@@ -257,7 +265,7 @@ function categorizeAllStocks() {
     alert('{{ _("Auto categorize functionality is under development") }}');
 }
 
-function editStock(stockId, symbol, name, exchange, currency) {
+function editStock(stockId, symbol, name, exchange, currency, firstTradeDate) {
     const correction = new StockSymbolCorrection({
         onSuccess: () => {
             location.reload();
@@ -267,7 +275,8 @@ function editStock(stockId, symbol, name, exchange, currency) {
     correction.show({
         stockId: stockId,
         symbol: symbol,
-        currency: currency
+        currency: currency,
+        firstTradeDate: firstTradeDate
     });
 }
 

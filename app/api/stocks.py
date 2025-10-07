@@ -3,6 +3,8 @@
 Stock and StockCategory models have been deleted during system redesign
 """
 
+from datetime import datetime, date
+
 from flask import request, jsonify
 from flask_babel import _
 from app import db
@@ -70,6 +72,20 @@ def update_stock(stock_id):
         
         # 只有当股票代码或货币发生变化时才检查重复
         new_currency = data.get('currency', stock.currency)
+
+        has_first_trade_date = 'first_trade_date' in data
+        first_trade_date = None
+        if has_first_trade_date:
+            first_trade_date_raw = data.get('first_trade_date')
+            if isinstance(first_trade_date_raw, str) and first_trade_date_raw.strip():
+                try:
+                    first_trade_date = datetime.strptime(first_trade_date_raw.strip(), '%Y-%m-%d').date()
+                except ValueError:
+                    return jsonify({'success': False, 'error': _('Invalid IPO date format. Please use YYYY-MM-DD')}), 400
+            elif first_trade_date_raw in (None, ''):
+                first_trade_date = None
+            else:
+                return jsonify({'success': False, 'error': _('Invalid IPO date value')}), 400
         existing_stock_transactions_updated = 0
         if new_symbol != old_symbol or new_currency != stock.currency:
             existing_stock = StocksCache.query.filter(
@@ -144,6 +160,9 @@ def update_stock(stock_id):
             else:
                 print(f"无法从Yahoo Finance获取{new_symbol}的信息")
         
+        if has_first_trade_date:
+            stock.first_trade_date = first_trade_date
+
         # 重置价格更新时间，强制下次访问时重新获取价格
         stock.price_updated_at = None
         
@@ -160,7 +179,8 @@ def update_stock(stock_id):
                 'name': stock.name,
                 'exchange': stock.exchange,
                 'currency': stock.currency,
-                'current_price': float(stock.current_price) if stock.current_price else None
+                'current_price': float(stock.current_price) if stock.current_price else None,
+                'first_trade_date': stock.first_trade_date.isoformat() if stock.first_trade_date else None
             }
         }
         
@@ -246,6 +266,7 @@ def refresh_stock_info():
         stock_data = price_service.get_stock_price(symbol)
         
         if stock_data:
+            first_trade_date = stock_data.get('first_trade_date')
             return jsonify({
                 'success': True,
                 'stock_info': {
@@ -253,7 +274,8 @@ def refresh_stock_info():
                     'name': stock_data.get('name', ''),
                     'exchange': stock_data.get('exchange', ''),
                     'currency': stock_data.get('currency', currency),
-                    'current_price': stock_data.get('price', 0)
+                    'current_price': stock_data.get('price', 0),
+                    'first_trade_date': first_trade_date.isoformat() if isinstance(first_trade_date, date) else None
                 }
             })
         else:

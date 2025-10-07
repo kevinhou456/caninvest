@@ -100,6 +100,15 @@ class StockSymbolCorrection {
                                        style="background-color: #f8f9fa;">
                                 <div class="form-text">货币不可修改，由原始交易记录决定</div>
                             </div>
+
+                            <div class="mb-3">
+                                <label for="${this.modalId}_ipo_date" class="form-label">IPO日期</label>
+                                <input type="date" class="form-control stock-ipo-input"
+                                       id="${this.modalId}_ipo_date"
+                                       name="first_trade_date"
+                                       placeholder="YYYY-MM-DD">
+                                <div class="form-text">验证时会尝试自动获取IPO日期，也可以手动输入</div>
+                            </div>
                             
                             <div class="verification-result" style="display: none;">
                                 <div class="alert alert-success" role="alert">
@@ -140,6 +149,12 @@ class StockSymbolCorrection {
         this.modal.querySelector('.stock-id-input').value = this.stockId || '';
         this.modal.querySelector('.stock-symbol-input').value = this.currentSymbol;
         this.modal.querySelector('.stock-currency-input').value = this.currentCurrency;
+        const ipoInput = this.modal.querySelector('.stock-ipo-input');
+        if (stockData.firstTradeDate) {
+            ipoInput.value = stockData.firstTradeDate;
+        } else {
+            ipoInput.value = '';
+        }
 
         // 清空验证结果和只读字段
         this.modal.querySelector('.stock-name-input').value = '';
@@ -169,6 +184,7 @@ class StockSymbolCorrection {
         const currencyInput = this.modal.querySelector('.stock-currency-input');
         const verifyBtn = this.modal.querySelector('.verify-symbol-btn');
         const resultDiv = this.modal.querySelector('.verification-result');
+        const ipoInput = this.modal.querySelector('.stock-ipo-input');
         
         const symbol = symbolInput.value.trim().toUpperCase();
         const currency = currencyInput.value;
@@ -215,6 +231,10 @@ class StockSymbolCorrection {
                 if (info.name) details.push(`名称: ${info.name}`);
                 if (info.exchange) details.push(`交易所: ${info.exchange}`);
                 if (info.current_price) details.push(`当前价格: ${currency} $${info.current_price}`);
+                if (info.first_trade_date) {
+                    ipoInput.value = info.first_trade_date;
+                    details.push(`IPO日期: ${info.first_trade_date}`);
+                }
                 
                 this.modal.querySelector('.verification-details').innerHTML = details.join('<br>');
                 resultDiv.style.display = 'block';
@@ -240,7 +260,8 @@ class StockSymbolCorrection {
             symbol: formData.get('symbol'),
             name: formData.get('name'),
             exchange: formData.get('exchange'),
-            currency: formData.get('currency')
+            currency: formData.get('currency'),
+            first_trade_date: formData.get('first_trade_date') || null
         };
         
         if (!this.stockId) {
@@ -278,6 +299,9 @@ class StockSymbolCorrection {
                     if (result.stock_info && result.stock_info.current_price) {
                         message += `\n当前价格: ${result.stock_info.currency} $${result.stock_info.current_price}`;
                     }
+                }
+                if (result.stock_info && result.stock_info.first_trade_date) {
+                    message += `\nIPO日期: ${result.stock_info.first_trade_date}`;
                 }
                 
                 alert(message);
