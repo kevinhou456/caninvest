@@ -629,6 +629,31 @@ class CurrencyService:
 
         return result
 
+    def refresh_annual_rates_from_bank_of_canada(
+        self,
+        years: List[int],
+        from_currency: str = 'USD',
+        to_currency: str = 'CAD'
+    ) -> Dict[int, Optional[Decimal]]:
+        """强制从加拿大银行刷新指定年份的年度平均汇率"""
+        refreshed_rates: Dict[int, Optional[Decimal]] = {}
+
+        for year in years:
+            cache_key = f"annual_{from_currency}_{to_currency}_{year}"
+            rate = self._fetch_annual_rate_from_bank_of_canada(year, from_currency, to_currency)
+
+            if rate:
+                # 清理缓存并保存最新值
+                if cache_key in self._cache:
+                    del self._cache[cache_key]
+                self._save_annual_rate_to_db(year, from_currency, to_currency, rate)
+                refreshed_rates[year] = rate
+            else:
+                # 如果加拿大银行没有数据，保持现有逻辑尝试其它渠道
+                refreshed_rates[year] = self.get_annual_average_rate(year, from_currency, to_currency)
+
+        return refreshed_rates
+
 
 # 全局货币服务实例
 currency_service = CurrencyService()

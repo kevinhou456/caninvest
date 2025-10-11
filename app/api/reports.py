@@ -12,6 +12,7 @@ from app.services.account_service import AccountService
 # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
 from app.models.transaction import Transaction
 from app.models.contribution import Contribution
+from app.services.currency_service import currency_service
 from . import bp
 
 
@@ -575,6 +576,45 @@ def get_family_annual_analysis(family_id):
             'success': False,
             'error': f'Failed to generate annual analysis: {str(e)}'
         }), 500
+
+
+@bp.route('/families/<int:family_id>/reports/annual-analysis/exchange-rates', methods=['POST'])
+def refresh_annual_exchange_rates(family_id):
+    """刷新指定年份的年度平均汇率（来源：加拿大银行）"""
+    Family.query.get_or_404(family_id)
+
+    payload = request.get_json() or {}
+    years = payload.get('years')
+    from_currency = (payload.get('from_currency') or 'USD').upper()
+    to_currency = (payload.get('to_currency') or 'CAD').upper()
+
+    if not isinstance(years, list) or not years:
+        return jsonify({'success': False, 'error': _('Years list is required')}), 400
+
+    try:
+        year_values = sorted({int(year) for year in years})
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': _('Invalid year format provided')}), 400
+
+    refreshed = currency_service.refresh_annual_rates_from_bank_of_canada(
+        year_values,
+        from_currency=from_currency,
+        to_currency=to_currency
+    )
+
+    # 将Decimal转换为float以便JSON序列化
+    formatted_rates = {
+        year: (float(rate) if rate is not None else None)
+        for year, rate in refreshed.items()
+    }
+
+    return jsonify({
+        'success': True,
+        'family_id': family_id,
+        'from_currency': from_currency,
+        'to_currency': to_currency,
+        'rates': formatted_rates
+    })
 
 @bp.route('/families/<int:family_id>/reports/quarterly-analysis', methods=['GET'])
 def get_family_quarterly_analysis(family_id):

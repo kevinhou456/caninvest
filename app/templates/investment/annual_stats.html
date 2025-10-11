@@ -14,9 +14,14 @@
 <div class="card shadow mb-4">
     <div class="card-header py-3 d-flex justify-content-between align-items-center bg-info">
         <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Data Analysis') }}</h6>
-        <div class="form-check form-switch text-white mb-0">
-            <input class="form-check-input" type="checkbox" id="toggleCurrencyBreakdown">
-            <label class="form-check-label" for="toggleCurrencyBreakdown">{{ _('Currency Details') }}</label>
+        <div class="d-flex align-items-center">
+            <button type="button" class="btn btn-light btn-sm me-3" id="fetchAnnualRatesBtn">
+                <i class="fas fa-sync-alt me-1"></i>{{ _('Fetch Annual Average FX') }}
+            </button>
+            <div class="form-check form-switch text-white mb-0">
+                <input class="form-check-input" type="checkbox" id="toggleCurrencyBreakdown">
+                <label class="form-check-label" for="toggleCurrencyBreakdown">{{ _('Currency Details') }}</label>
+            </div>
         </div>
     </div>
     <div class="card-body">
@@ -202,6 +207,10 @@ let combinedAssetsChart = null;
 let enhancedReturnsChart = null;
 let showCurrencyBreakdown = false;
 
+const familyId = {{ (current_family.id if current_family else 1) | tojson }};
+const memberId = {{ (current_member_id if current_member_id else None) | tojson }};
+const accountId = {{ (current_account_id if current_account_id else None) | tojson }};
+
 function showLoadingOverlay(message) {
     const msg = message || '正在加载数据...';
     if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
@@ -221,13 +230,9 @@ function hideLoadingOverlay() {
 
 // Load annual analysis data
 function loadAnnualAnalysis() {
-    const familyId = {{ current_family.id if current_family else 1 }};
-    const memberId = {{ current_member_id if current_member_id else 'null' }};
-    const accountId = {{ current_account_id if current_account_id else 'null' }};
-    
     let apiUrl = `/api/v1/families/${familyId}/reports/annual-analysis`;
     const params = new URLSearchParams();
-    
+
     if (memberId) {
         params.append('member_id', memberId);
     }
@@ -269,6 +274,82 @@ function loadAnnualAnalysis() {
         .finally(() => {
             hideLoadingOverlay();
         });
+}
+
+async function fetchAnnualExchangeRates() {
+    if (!annualData || annualData.length === 0) {
+        alert('{{ _('Load annual analysis data before fetching rates.') }}');
+        return;
+    }
+
+    const years = [...new Set(
+        annualData
+            .filter(item => !item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row)
+            .map(item => item.year)
+            .filter(year => typeof year === 'number')
+    )].sort((a, b) => a - b);
+
+    if (years.length === 0) {
+        alert('{{ _('No valid years found for annual exchange rate refresh.') }}');
+        return;
+    }
+
+    const button = document.getElementById('fetchAnnualRatesBtn');
+    const originalContent = button ? button.innerHTML : '';
+
+    showLoadingOverlay('{{ _('Fetching annual average exchange rates...') }}');
+
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>{{ _('Fetching...') }}';
+    }
+
+    try {
+        const response = await fetch(`/api/v1/families/${familyId}/reports/annual-analysis/exchange-rates`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+                years: years,
+                from_currency: 'USD',
+                to_currency: 'CAD'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error || '{{ _('Failed to refresh exchange rates.') }}');
+        }
+
+        const rates = result.rates || {};
+        let message = '{{ _('Annual average exchange rates refreshed:') }}\n';
+        years.forEach(year => {
+            if (rates.hasOwnProperty(year) && rates[year] !== null && rates[year] !== undefined) {
+                message += `${year}: ${Number(rates[year]).toFixed(4)}\n`;
+            } else {
+                message += `${year}: N/A\n`;
+            }
+        });
+
+        alert(message.trim());
+        loadAnnualAnalysis();
+    } catch (error) {
+        console.error('Error refreshing annual exchange rates:', error);
+        alert('{{ _('Failed to refresh exchange rates:') }} ' + error.message);
+    } finally {
+        hideLoadingOverlay();
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalContent;
+        }
+    }
 }
 
 // Update combined assets chart (Total + Members)
@@ -869,6 +950,11 @@ function exportTableToPDF() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadAnnualAnalysis();
+
+    const fetchBtn = document.getElementById('fetchAnnualRatesBtn');
+    if (fetchBtn) {
+        fetchBtn.addEventListener('click', fetchAnnualExchangeRates);
+    }
 
     const toggle = document.getElementById('toggleCurrencyBreakdown');
     if (toggle) {
