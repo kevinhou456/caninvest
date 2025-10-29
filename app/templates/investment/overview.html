@@ -894,12 +894,25 @@
     </div>
 </div>
 
-<!-- Loading Spinner -->
-<div id="loading-spinner" class="text-center py-5" style="display: none;">
-    <div class="spinner-border text-primary" role="status">
-        <span class="sr-only">{{ _('Loading...') }}</span>
+<!-- 非模态加载提示 -->
+<div id="loading-toast" class="toast-container position-fixed top-0 start-50 translate-middle-x" style="z-index: 9999; margin-top: 20px;">
+    <div class="toast show" role="alert" aria-live="assertive" aria-atomic="true" style="display: none;">
+        <div class="toast-header bg-primary text-white">
+            <div class="spinner-border spinner-border-sm me-2" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <strong class="me-auto">正在获取数据</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <span id="loading-message">正在获取当前股票价格...</span>
+            </div>
+        </div>
     </div>
-    <p class="mt-2 text-muted">{{ _('Loading portfolio data...') }}</p>
 </div>
 
 {% endblock %}
@@ -908,43 +921,25 @@
 <script>
 // 加载提示函数
 function showLoadingOverlay(message) {
-    const msg = message || '正在加载数据...';
-    const loadingSpinner = document.getElementById('loading-spinner');
-    if (loadingSpinner) {
-        const messageElement = loadingSpinner.querySelector('p');
-        if (messageElement) {
-            messageElement.textContent = msg;
-        }
-        loadingSpinner.style.display = 'block';
-    }
+    const msg = message || '正在获取当前股票价格...';
+    const loadingToast = document.getElementById('loading-toast');
+    const loadingMessage = document.getElementById('loading-message');
     
-    // 如果GlobalLoading可用，也使用它
-    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
-        GlobalLoading.manualShow(msg);
-    } else if (window.GlobalLoading && typeof GlobalLoading.show === 'function') {
-        GlobalLoading.show(msg);
+    if (loadingToast && loadingMessage) {
+        loadingMessage.textContent = msg;
+        loadingToast.style.display = 'block';
+        
+        // 自动隐藏toast（8秒后）
+        setTimeout(() => {
+            hideLoadingOverlay();
+        }, 8000);
     }
 }
 
 function hideLoadingOverlay() {
-    const loadingSpinner = document.getElementById('loading-spinner');
-    if (loadingSpinner) {
-        loadingSpinner.style.display = 'none';
-    }
-    
-    // 尝试隐藏所有可能的加载提示
-    const allLoadingElements = document.querySelectorAll('[id*="loading"], [class*="loading"], [class*="spinner"]');
-    allLoadingElements.forEach(element => {
-        if (element.style.display !== 'none') {
-            element.style.display = 'none';
-        }
-    });
-    
-    // 如果GlobalLoading可用，也使用它
-    if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
-        GlobalLoading.manualHide(300);
-    } else if (window.GlobalLoading && typeof GlobalLoading.hide === 'function') {
-        GlobalLoading.hide(300);
+    const loadingToast = document.getElementById('loading-toast');
+    if (loadingToast) {
+        loadingToast.style.display = 'none';
     }
 }
 
@@ -1514,6 +1509,24 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <style>
+/* 加载提示样式 */
+#loading-toast .toast {
+    min-width: 300px;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    border: none;
+    border-radius: 0.5rem;
+}
+
+#loading-toast .toast-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 0.5rem 0.5rem 0 0;
+}
+
+#loading-toast .toast-body {
+    background-color: #f8f9fa;
+    border-radius: 0 0 0.5rem 0.5rem;
+}
+
 .sortable {
     user-select: none;
     transition: background-color 0.2s ease;
