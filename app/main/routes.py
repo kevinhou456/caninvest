@@ -305,57 +305,164 @@ def overview():
             accounts = Account.query.filter_by(family_id=family.id).all()
             filter_description = "All Members"
 
-        # 异步版本：只获取基本数据，不计算价格相关数据
+        # 获取投资组合数据（使用缓存的价格，不强制更新）
         account_ids = [acc.id for acc in accounts]
         
-        # 创建空的占位数据，页面将立即显示
-        holdings = []
-        cleared_holdings = []
-        daily_change_metrics = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
-        comprehensive_metrics = None
+        # 获取汇率信息
+        exchange_rates = currency_service.get_cad_usd_rates()
+        
+        # 使用Portfolio Service统一计算架构
+        from app.services.portfolio_service import PortfolioService, TimePeriod
+        portfolio_service = PortfolioService()
+        
+        # 使用Portfolio Service获取投资组合数据（使用缓存价格）
+        portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
 
-        # 异步版本：使用默认值，数据将通过AJAX异步更新
-        total_assets = 0
-        total_stock_value = 0
-        total_cash_cad = 0
-        total_cash_usd = 0
+        view_data = _build_portfolio_view_data(
+            account_ids=account_ids,
+            accounts=accounts,
+            portfolio_summary=portfolio_summary,
+            asset_service=AssetValuationService(),
+            ownership_map=ownership_map,
+            target_date=date.today(),
+            exchange_rates=exchange_rates
+        )
+
+        holdings = view_data['holdings']
+        cleared_holdings = view_data['cleared_holdings']
+        daily_change_metrics = view_data['daily_change']
+        comprehensive_metrics = view_data['metrics']
+
+        # 从综合指标中提取数据 - 使用统一计算架构的正确数据
+        if comprehensive_metrics:
+            total_assets = comprehensive_metrics['total_assets']['cad']
+            # 使用统一计算架构的现金数据
+            total_cash_cad = comprehensive_metrics['cash_balance']['cad']
+            total_cash_usd = comprehensive_metrics['cash_balance']['usd']
+            total_stock_value = comprehensive_metrics['total_assets']['cad'] - comprehensive_metrics['cash_balance']['total_cad']
+        else:
+            # 当没有数据时，使用默认值
+            total_assets = 0
+            total_stock_value = 0
+            total_cash_cad = 0
+            total_cash_usd = 0
         
-        # 异步版本：创建空的metrics对象，数据将通过AJAX异步更新
-        class EmptyMetrics:
-            def __init__(self):
-                self.total_assets = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.stock_market_value = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.cash_balance_total = 0
-                self.total_return = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.total_return_rate = 0
-                self.realized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.unrealized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.daily_change = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.total_dividends = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.total_interest = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.total_deposits = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
-                self.total_withdrawals = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+        # 创建包含完整财务指标的metrics对象 - 总是创建
+        if comprehensive_metrics:
+            class ComprehensiveMetrics:
+                def __init__(self, metrics_data, daily_change_data=None):
+                    self.total_assets = type('obj', (object,), {
+                        'cad': metrics_data['total_assets']['cad'],
+                        'cad_only': metrics_data['total_assets']['cad_only'], 
+                        'usd_only': metrics_data['total_assets']['usd_only']
+                    })
+                    # 计算股票市值：总资产 - 现金余额
+                    stock_value_cad = metrics_data['total_assets']['cad'] - metrics_data['cash_balance']['total_cad']
+                    self.stock_market_value = type('obj', (object,), {
+                        'cad': stock_value_cad,
+                        'cad_only': stock_value_cad, 
+                        'usd_only': 0
+                    })
+                    self.cash_balance_total = metrics_data['cash_balance']['total_cad']
+                    
+                    # 完整的财务指标 - 使用新架构的准确计算
+                    self.total_return = type('obj', (object,), {
+                        'cad': metrics_data['total_return']['cad'], 
+                        'cad_only': metrics_data['total_return']['cad_only'], 
+                        'usd_only': metrics_data['total_return']['usd_only']
+                    })
+                    # 使用统一计算后的总回报率
+                    self.total_return_rate = metrics_data.get('total_return_rate', 0)
+                    self.realized_gain = type('obj', (object,), {
+                        'cad': metrics_data['realized_gain']['cad'], 
+                        'cad_only': metrics_data['realized_gain']['cad_only'], 
+                        'usd_only': metrics_data['realized_gain']['usd_only']
+                    })
+                    self.unrealized_gain = type('obj', (object,), {
+                        'cad': metrics_data['unrealized_gain']['cad'], 
+                        'cad_only': metrics_data['unrealized_gain']['cad_only'], 
+                        'usd_only': metrics_data['unrealized_gain']['usd_only']
+                    })
+                    daily_data = daily_change_data or {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
+                    self.daily_change = type('obj', (object,), {
+                        'cad': daily_data.get('cad', 0.0),
+                        'cad_only': daily_data.get('cad_only', 0.0),
+                        'usd_only': daily_data.get('usd_only', 0.0)
+                    })
+                    self.total_dividends = type('obj', (object,), {
+                        'cad': metrics_data['dividends']['cad'], 
+                        'cad_only': metrics_data['dividends']['cad_only'], 
+                        'usd_only': metrics_data['dividends']['usd_only']
+                    })
+                    self.total_interest = type('obj', (object,), {
+                        'cad': metrics_data['interest']['cad'], 
+                        'cad_only': metrics_data['interest']['cad_only'], 
+                        'usd_only': metrics_data['interest']['usd_only']
+                    })
+                    self.total_deposits = type('obj', (object,), {
+                        'cad': metrics_data['total_deposits']['cad'], 
+                        'cad_only': metrics_data['total_deposits']['cad_only'], 
+                        'usd_only': metrics_data['total_deposits']['usd_only']
+                    })
+                    self.total_withdrawals = type('obj', (object,), {
+                        'cad': metrics_data['total_withdrawals']['cad'], 
+                        'cad_only': metrics_data['total_withdrawals']['cad_only'], 
+                        'usd_only': metrics_data['total_withdrawals']['usd_only']
+                    })
+            
+            metrics = ComprehensiveMetrics(comprehensive_metrics, daily_change_metrics)
+        else:
+            # 当没有数据时，创建空的metrics对象
+            class EmptyMetrics:
+                def __init__(self):
+                    self.total_assets = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.stock_market_value = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.cash_balance_total = 0
+                    self.total_return = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_return_rate = 0
+                    self.realized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.unrealized_gain = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.daily_change = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_dividends = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_interest = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_deposits = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+                    self.total_withdrawals = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
+            
+            metrics = EmptyMetrics()
         
-        metrics = EmptyMetrics()
-        
-        # 异步版本：准备空的现金数据，将通过AJAX异步更新
+        # 准备现金数据
         cash_data = {
-            'cad': 0,
-            'usd': 0, 
-            'total_cad': 0
+            'cad': total_cash_cad,
+            'usd': total_cash_usd, 
+            'total_cad': Decimal(str(total_cash_cad)) + Decimal(str(total_cash_usd)) * Decimal(str(exchange_rates.get('usd_to_cad', 1.35) if exchange_rates else 1.35))
         }
         
-        # 异步版本：获取基本统计数据（不涉及价格计算）
+        # 获取统计数据
         from app.models.member import Member
         members_count = Member.query.filter_by(family_id=family.id).count()
+        
+        account_ids = [acc.id for acc in accounts] if accounts else []
+        transactions_count = Transaction.query.filter(Transaction.account_id.in_(account_ids)).count() if account_ids else 0
+        
+        # 获取最近的交易
+        if account_ids:
+            recent_transactions = Transaction.query.filter(
+                Transaction.account_id.in_(account_ids)
+            ).order_by(Transaction.trade_date.desc()).limit(8).all()
+        else:
+            recent_transactions = []
+        
+        # 获取待处理任务
+        pending_imports = ImportTask.query.filter_by(status='pending').count()
+        pending_ocr = OCRTask.query.filter_by(status='pending').count()
         
         stats = {
             'members_count': members_count,
             'accounts_count': len(accounts),
-            'transactions_count': 0,  # 将通过AJAX异步更新
-            'stocks_count': 0,  # 将通过AJAX异步更新
-            'pending_imports': 0,  # 将通过AJAX异步更新
-            'pending_ocr': 0  # 将通过AJAX异步更新
+            'transactions_count': transactions_count,
+            'stocks_count': StocksCache.query.count(),
+            'pending_imports': pending_imports,
+            'pending_ocr': pending_ocr
         }
         
         # Get current member info for smart account selection
@@ -370,8 +477,8 @@ def overview():
                              metrics=metrics,
                              holdings=holdings,
                              cleared_holdings=cleared_holdings,
-                             exchange_rates=None,  # 将通过AJAX异步更新
-                             recent_transactions=[],  # 将通过AJAX异步更新
+                             exchange_rates=exchange_rates,
+                             recent_transactions=recent_transactions,
                              filter_description=filter_description,
                              cash_data=cash_data,
                              current_period=time_period,
