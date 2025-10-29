@@ -475,10 +475,14 @@
                                 
                                 <!-- Unrealized Gain/Loss -->
                                 <td class="text-end">
-                                    <span class="fw-bold {{ 'text-success' if holding['unrealized_gain'] >= 0 else 'text-danger' }}">
-                                        {% if holding['unrealized_gain'] >= 0 %}+{% endif %}
+                                    <span class="fw-bold {{ 'text-success' if holding.get('unrealized_gain', 0) >= 0 else 'text-danger' }}">
+                                        {% if holding.get('unrealized_gain', 0) >= 0 %}+{% endif %}
                                         ${{ "{:,.2f}".format(holding['unrealized_gain'] or 0) }}
                                     </span>
+                                    <br><small class="text-muted {{ 'text-success' if holding.get('unrealized_gain_percent', 0) >= 0 else 'text-danger' }}">
+                                        {% if holding.get('unrealized_gain_percent', 0) >= 0 %}+{% endif %}
+                                        {{ "{:.1f}".format(holding.get('unrealized_gain_percent', 0)) }}%
+                                    </small>
                                 </td>
                                 
                                 <!-- Realized Gains -->
@@ -501,9 +505,12 @@
                                 
                                 <!-- Return Percentage -->
                                 <td class="text-end pe-3">
-                                    <span class="badge {{ 'bg-success' if holding.get('unrealized_gain_percent', 0) >= 0 else 'bg-danger' }} return-badge">
-                                        {% if holding.get('unrealized_gain_percent', 0) >= 0 %}+{% endif %}
-                                        {{ "{:.1f}".format(holding.get('unrealized_gain_percent', 0)) }}%
+                                    {% set total_gain = (holding.get('unrealized_gain', 0) or 0) + (holding.get('realized_gain', 0) or 0) + (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) %}
+                                    {% set total_cost = holding.get('total_cost', 0) or 0 %}
+                                    {% set total_return_percent = (total_gain / total_cost * 100) if total_cost > 0 else 0 %}
+                                    <span class="badge {{ 'bg-success' if total_return_percent >= 0 else 'bg-danger' }} return-badge">
+                                        {% if total_return_percent >= 0 %}+{% endif %}
+                                        {{ "{:.1f}".format(total_return_percent) }}%
                                     </span>
                                 </td>
                             </tr>
@@ -524,7 +531,6 @@
 </div>
 
 <!-- Cleared Holdings Section -->
-{% if cleared_holdings %}
 <div class="row">
     <div class="col-12">
         <div class="card border-0 shadow-sm">
@@ -715,7 +721,6 @@
         </div>
     </div>
 </div>
-{% endif %}
 
 <!-- Additional Information Cards -->
 {% if exchange_rates %}
@@ -927,21 +932,19 @@ function loadStockPricesAsync(forceRefresh = false) {
         showLoadingOverlay('正在获取股票价格...');
     }
     
-    // 获取当前页面的账户ID
-    const accountIds = {{ account_ids if account_ids else '[]' }};
+    // 获取当前页面的过滤参数
+    const accountId = {{ account_id if account_id else 'null' }};
     const memberId = {{ member_id if member_id else 'null' }};
-    const familyId = {{ family.id if family else 'null' }};
     
     // 调用异步API获取股票价格
-    fetch('/api/portfolio/async-prices', {
+    fetch('/api/overview/update-prices', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            account_ids: accountIds,
+            account_id: accountId,
             member_id: memberId,
-            family_id: familyId,
             force_refresh: forceRefresh  // 添加强制刷新参数
         })
     })
@@ -972,13 +975,14 @@ function loadStockPricesAsync(forceRefresh = false) {
 
 // 更新投资组合数据
 function updatePortfolioData(data) {
+    console.log('更新投资组合数据:', data);
+    
     // 更新持仓表格
     if (data.holdings && data.holdings.length > 0) {
         updateHoldingsTable(data.holdings);
     }
     
-    // 更新已清仓表格 - 清仓股票数据是历史数据，不应该被股票价格更新影响
-    // 注释掉清仓股票表格的更新，因为清仓股票与当前价格无关
+    // 已清仓表格与当前股价无关，不需要异步更新
     // if (data.cleared_holdings && data.cleared_holdings.length > 0) {
     //     updateClearedHoldingsTable(data.cleared_holdings);
     // }
@@ -988,16 +992,57 @@ function updatePortfolioData(data) {
         updateMetrics(data.metrics);
     }
     
+    // 更新日变化数据
+    if (data.daily_change) {
+        updateDailyChange(data.daily_change);
+    }
+    
     // 更新汇率数据
     if (data.exchange_rates) {
         updateExchangeRates(data.exchange_rates);
     }
+    
+    // 显示更新结果
+    if (data.update_result) {
+        const updated = data.update_result.updated || 0;
+        const failed = data.update_result.failed || 0;
+        if (updated > 0) {
+            showSuccessToast(`成功更新 ${updated} 只股票价格`);
+        }
+        if (failed > 0) {
+            showErrorToast(`${failed} 只股票价格更新失败`);
+        }
+    }
+}
+
+// 更新日变化数据
+function updateDailyChange(dailyChange) {
+    // 更新日变化指标显示
+    const dailyChangeElements = document.querySelectorAll('[data-daily-change]');
+    dailyChangeElements.forEach(element => {
+        const currency = element.getAttribute('data-daily-change') || 'cad';
+        const value = dailyChange[currency] || 0;
+        element.textContent = formatCurrency(value, currency);
+        
+        // 添加颜色样式
+        if (value > 0) {
+            element.classList.add('text-success');
+            element.classList.remove('text-danger');
+        } else if (value < 0) {
+            element.classList.add('text-danger');
+            element.classList.remove('text-success');
+        } else {
+            element.classList.remove('text-success', 'text-danger');
+        }
+    });
 }
 
 // 更新持仓表格
 function updateHoldingsTable(holdings) {
     const tbody = document.querySelector('#holdingsTable tbody');
     if (!tbody) return;
+    
+    console.log('更新持仓表格，数据:', holdings);
     
     // 创建持仓数据映射，按symbol+currency作为key
     const holdingsMap = new Map();
@@ -1027,6 +1072,7 @@ function updateHoldingsTable(holdings) {
         noHoldingsDiv.style.display = 'none';
     }
 }
+
 
 // 更新持仓行数据（只更新价格相关的单元格）
 function updateHoldingRowData(row, holding) {
@@ -1070,14 +1116,25 @@ function updateHoldingRowData(row, holding) {
         }
     }
     
-    // 更新未实现收益（第7列，索引6）
+    // 更新未实现收益（第7列，索引6）- 先显示金额，再显示收益率
     if (cells[6] && holding.unrealized_gain !== undefined) {
-        const unrealizedGain = parseFloat(holding.unrealized_gain);
-        const sign = unrealizedGain >= 0 ? '+' : '-';
+        const unrealizedGain = parseFloat(holding.unrealized_gain || 0);
+        const unrealizedGainPercent = parseFloat(holding.unrealized_gain_percent || 0);
+        const gainSign = unrealizedGain >= 0 ? '+' : '';
+        const percentSign = unrealizedGainPercent >= 0 ? '+' : '';
+        
+        // 更新主要显示（金额）
         const span = cells[6].querySelector('span');
         if (span) {
-            span.textContent = sign + '$' + Math.abs(unrealizedGain).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            span.textContent = gainSign + '$' + Math.abs(unrealizedGain).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             span.className = 'fw-bold ' + (unrealizedGain >= 0 ? 'text-success' : 'text-danger');
+        }
+        
+        // 更新小字显示（收益率）
+        const smallSpan = cells[6].querySelector('small');
+        if (smallSpan) {
+            smallSpan.textContent = percentSign + unrealizedGainPercent.toFixed(1) + '%';
+            smallSpan.className = 'text-muted ' + (unrealizedGainPercent >= 0 ? 'text-success' : 'text-danger');
         }
     }
     
@@ -1092,14 +1149,22 @@ function updateHoldingRowData(row, holding) {
         }
     }
     
-    // 更新回报率（最后一列）
-    if (cells[cells.length - 1] && holding.unrealized_gain_percent !== undefined) {
-        const percent = parseFloat(holding.unrealized_gain_percent);
-        const sign = percent >= 0 ? '+' : '';
+    // 更新总收益率（最后一列）- 计算所有时间的总收益率
+    if (cells[cells.length - 1]) {
+        const unrealizedGain = parseFloat(holding.unrealized_gain || 0);
+        const realizedGain = parseFloat(holding.realized_gain || 0);
+        const dividends = parseFloat(holding.dividends || 0);
+        const interest = parseFloat(holding.interest || 0);
+        const totalCost = parseFloat(holding.total_cost || 0);
+        
+        const totalGain = unrealizedGain + realizedGain + dividends + interest;
+        const totalReturnPercent = totalCost > 0 ? (totalGain / totalCost * 100) : 0;
+        
+        const sign = totalReturnPercent >= 0 ? '+' : '';
         const badge = cells[cells.length - 1].querySelector('.badge');
         if (badge) {
-            badge.textContent = sign + percent.toFixed(1) + '%';
-            badge.className = 'badge ' + (percent >= 0 ? 'bg-success' : 'bg-danger');
+            badge.textContent = sign + totalReturnPercent.toFixed(1) + '%';
+            badge.className = 'badge ' + (totalReturnPercent >= 0 ? 'bg-success' : 'bg-danger');
         }
     }
 }
@@ -1108,6 +1173,8 @@ function updateHoldingRowData(row, holding) {
 function updateClearedHoldingsTable(clearedHoldings) {
     const tbody = document.querySelector('#clearedHoldingsTable tbody');
     if (!tbody) return;
+    
+    console.log('更新清仓表格，数据:', clearedHoldings);
     
     // 创建已清仓数据映射
     const clearedHoldingsMap = new Map();
@@ -1137,6 +1204,7 @@ function updateClearedHoldingsTable(clearedHoldings) {
         noClearedHoldingsDiv.style.display = 'none';
     }
 }
+
 
 // 更新已清仓行数据（只更新价格相关的单元格）
 function updateClearedHoldingRowData(row, holding) {
@@ -1409,21 +1477,16 @@ function refreshPortfolioData() {
     loadStockPricesAsync(true);  // 强制更新股票价格
 }
 
-// 页面加载时显示加载提示
+// 页面加载时立即显示页面，然后异步更新数据
 document.addEventListener('DOMContentLoaded', function() {
-    // 检查是否有持仓数据
-    const holdingsTable = document.querySelector('#holdingsTable tbody');
-    const hasHoldings = holdingsTable && holdingsTable.querySelectorAll('tr').length > 0;
+    // 异步版本：页面立即显示，然后异步加载数据
+    console.log('页面加载完成，开始异步更新数据...');
     
-    // 如果没有持仓数据，显示加载提示并异步加载股票价格（使用缓存）
-    if (!hasHoldings) {
-        showLoadingOverlay('正在加载投资组合数据...');
-        
-        // 异步加载股票价格（使用缓存，不强制更新）
-        loadStockPricesAsync(false);
-    }
-    // 如果有持仓数据，显示数据，不自动更新价格
-    // 用户可以通过"refresh data"按钮手动更新价格
+    // 显示加载提示
+    showLoadingOverlay('正在获取最新数据...');
+    
+    // 异步加载股票价格和投资组合数据
+    loadStockPricesAsync(false);
 });
 </script>
 

@@ -25,6 +25,238 @@ from app.services.report_service import ReportService
 from app.services.account_service import AccountService
 
 
+def _build_ownership_map(member_id):
+    if not member_id:
+        return None
+
+    ownership_map = {}
+    memberships = AccountMember.query.filter_by(member_id=member_id).all()
+    for membership in memberships:
+        try:
+            ownership_map[membership.account_id] = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
+        except Exception:
+            ownership_map[membership.account_id] = Decimal('0')
+    return ownership_map
+
+
+def _build_portfolio_view_data(
+    *,
+    account_ids,
+    accounts,
+    portfolio_summary,
+    asset_service,
+    ownership_map=None,
+    target_date=None,
+    exchange_rates=None
+):
+    target_date = target_date or date.today()
+    exchange_rates = exchange_rates or currency_service.get_cad_usd_rates()
+
+    raw_holdings = portfolio_summary.get('current_holdings', [])
+    raw_cleared_holdings = portfolio_summary.get('cleared_holdings', [])
+    account_lookup = {acc.name: acc for acc in accounts} if accounts else {}
+
+    def safe_float(value, default=0.0):
+        if value in (None, ""):
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def extract_shares(holding_dict):
+        return safe_float(holding_dict.get('current_shares', 0))
+
+    def format_account_name(account_name):
+        if not account_lookup or not account_name:
+            return account_name
+        account_obj = account_lookup.get(account_name)
+        if account_obj and account_obj.account_members:
+            member_names = [am.member.name for am in account_obj.account_members]
+            if member_names:
+                return f"{account_name} - {', '.join(member_names)}"
+        return account_name
+
+    def merge_holdings_by_stock(holdings_list):
+        if len(account_ids) <= 1:
+            for holding in holdings_list:
+                total_shares = extract_shares(holding)
+                holding['current_shares'] = total_shares
+                holding['shares'] = total_shares
+            return holdings_list
+
+        merged = {}
+        for holding in holdings_list:
+            key = f"{holding.get('symbol', '')}_{holding.get('currency', 'USD')}"
+            incoming_shares = extract_shares(holding)
+
+            if key not in merged:
+                merged_holding = holding.copy()
+                merged_holding['current_shares'] = incoming_shares
+                merged_holding['shares'] = incoming_shares
+                merged_holding['total_cost'] = safe_float(holding.get('total_cost'))
+                merged_holding['average_cost'] = safe_float(holding.get('average_cost'))
+                merged_holding['current_value'] = safe_float(holding.get('current_value'))
+                merged_holding['unrealized_gain'] = safe_float(holding.get('unrealized_gain'))
+                merged_holding['realized_gain'] = safe_float(holding.get('realized_gain'))
+                merged_holding['total_dividends'] = safe_float(holding.get('total_dividends'))
+                merged_holding['total_interest'] = safe_float(holding.get('total_interest'))
+                merged_holding['merged_accounts'] = [holding.get('account_name', '')]
+
+                account_name = holding.get('account_name', '')
+                merged_holding['account_details'] = [{
+                    'account_name': format_account_name(account_name),
+                    'shares': incoming_shares,
+                    'cost': safe_float(holding.get('total_cost')),
+                    'realized_gain': safe_float(holding.get('realized_gain')),
+                    'unrealized_gain': safe_float(holding.get('unrealized_gain'))
+                }]
+                merged[key] = merged_holding
+            else:
+                existing = merged[key]
+                existing['current_shares'] = safe_float(existing.get('current_shares')) + incoming_shares
+                existing['shares'] = existing['current_shares']
+                existing['total_cost'] = safe_float(existing.get('total_cost')) + safe_float(holding.get('total_cost'))
+                existing['current_value'] = safe_float(existing.get('current_value')) + safe_float(holding.get('current_value'))
+                existing['unrealized_gain'] = safe_float(existing.get('unrealized_gain')) + safe_float(holding.get('unrealized_gain'))
+                existing['realized_gain'] = safe_float(existing.get('realized_gain')) + safe_float(holding.get('realized_gain'))
+                existing['total_dividends'] = safe_float(existing.get('total_dividends')) + safe_float(holding.get('total_dividends'))
+                existing['total_interest'] = safe_float(existing.get('total_interest')) + safe_float(holding.get('total_interest'))
+                existing.setdefault('merged_accounts', []).append(holding.get('account_name', ''))
+
+                account_name = holding.get('account_name', '')
+                existing.setdefault('account_details', []).append({
+                    'account_name': format_account_name(account_name),
+                    'shares': incoming_shares,
+                    'cost': safe_float(holding.get('total_cost')),
+                    'realized_gain': safe_float(holding.get('realized_gain')),
+                    'unrealized_gain': safe_float(holding.get('unrealized_gain'))
+                })
+
+        for merged_holding in merged.values():
+            if merged_holding['current_shares'] > 0:
+                merged_holding['average_cost'] = merged_holding['total_cost'] / merged_holding['current_shares']
+                merged_holding['average_cost_display'] = merged_holding['average_cost']
+            else:
+                merged_holding['average_cost'] = 0
+                merged_holding['average_cost_display'] = 0
+
+            daily_change_value = safe_float(merged_holding.get('daily_change_value'))
+            previous_value = safe_float(merged_holding.get('previous_value'))
+
+            if previous_value:
+                merged_holding['daily_change_percent'] = (daily_change_value / previous_value) * 100
+            else:
+                current_value = safe_float(merged_holding.get('current_value'))
+                base_value = current_value - daily_change_value
+                merged_holding['daily_change_percent'] = ((daily_change_value / base_value) * 100
+                                                          if base_value else 0.0)
+
+        return list(merged.values())
+
+    def merge_holdings_and_cleared_cross_accounts(raw_holdings_list, raw_cleared_list):
+        all_stocks = {}
+        for holding in raw_holdings_list:
+            symbol = holding.get('symbol')
+            if not symbol:
+                continue
+            all_stocks.setdefault(symbol, {'holdings': [], 'cleared': []})['holdings'].append(holding)
+
+        for cleared in raw_cleared_list:
+            symbol = cleared.get('symbol')
+            if not symbol:
+                continue
+            all_stocks.setdefault(symbol, {'holdings': [], 'cleared': []})['cleared'].append(cleared)
+
+        final_holdings = []
+        final_cleared = []
+
+        for symbol, grouped in all_stocks.items():
+            holdings_list = grouped['holdings']
+            cleared_list = grouped['cleared']
+
+            total_current_shares = sum(h.get('current_shares', 0) for h in holdings_list)
+            total_cleared_shares = sum(c.get('total_sold_shares', 0) for c in cleared_list)
+
+            if total_current_shares > 0:
+                if len(holdings_list) == 1:
+                    final_holdings.append(holdings_list[0])
+                else:
+                    merged_entries = merge_holdings_by_stock(holdings_list)
+                    if merged_entries:
+                        final_holdings.append(merged_entries[0])
+
+                if cleared_list:
+                    total_cleared_realized_gain = sum(c.get('realized_gain', 0) for c in cleared_list)
+                    if total_cleared_realized_gain and final_holdings:
+                        final_holdings[-1]['realized_gain'] = final_holdings[-1].get('realized_gain', 0) + total_cleared_realized_gain
+            elif total_cleared_shares > 0:
+                if len(cleared_list) == 1:
+                    final_cleared.append(cleared_list[0])
+                else:
+                    merged_cleared_entries = merge_holdings_by_stock(cleared_list)
+                    if merged_cleared_entries:
+                        final_cleared.append(merged_cleared_entries[0])
+
+        return final_holdings, final_cleared
+
+    holdings, cleared_holdings = merge_holdings_and_cleared_cross_accounts(raw_holdings, raw_cleared_holdings)
+
+    ibit_holdings = [h for h in holdings if h.get('symbol') == 'IBIT']
+    ibit_cleared = [h for h in cleared_holdings if h.get('symbol') == 'IBIT']
+    if ibit_holdings and ibit_cleared:
+        total_realized_gain = ibit_holdings[0].get('realized_gain', 0) + ibit_cleared[0].get('realized_gain', 0)
+        ibit_holdings[0]['realized_gain'] = total_realized_gain
+
+    daily_change_metrics = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
+    usd_to_cad_rate = Decimal(str(exchange_rates.get('usd_to_cad', 1)))
+    if holdings:
+        daily_change_cad_only = Decimal('0')
+        daily_change_usd_only = Decimal('0')
+
+        for holding in holdings:
+            raw_change = holding.get('daily_change_value')
+            if raw_change in (None, ''):
+                continue
+
+            change_value = Decimal(str(raw_change))
+            currency = (holding.get('currency') or 'USD').upper()
+
+            if currency == 'USD':
+                daily_change_usd_only += change_value
+            else:
+                daily_change_cad_only += change_value
+
+        total_daily_change_cad = daily_change_cad_only + (daily_change_usd_only * usd_to_cad_rate)
+
+        daily_change_metrics = {
+            'cad': float(total_daily_change_cad.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+            'cad_only': float(daily_change_cad_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+            'usd_only': float(daily_change_usd_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        }
+
+    comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
+        account_ids,
+        target_date=target_date,
+        ownership_map=ownership_map
+    )
+
+    summary_data = portfolio_summary.get('summary', {})
+    total_cost = summary_data.get('total_cost', 0)
+    total_realized = summary_data.get('total_realized_gain', 0)
+    total_unrealized = summary_data.get('total_unrealized_gain', 0)
+    total_return = total_realized + total_unrealized
+    comprehensive_metrics['total_return_rate'] = (total_return / total_cost * 100) if total_cost else 0
+
+    return {
+        'holdings': holdings,
+        'cleared_holdings': cleared_holdings,
+        'daily_change': daily_change_metrics,
+        'metrics': comprehensive_metrics,
+        'portfolio_summary': portfolio_summary
+    }
+
+
 @bp.route('/')
 @bp.route('/index')
 def index():
@@ -34,7 +266,7 @@ def index():
 
 @bp.route('/overview')
 def overview():
-    """仪表板 - 投资组合总览 - 使用统一的AssetValuationService"""
+    """仪表板 - 投资组合总览 - 真正的异步版本，立即显示页面"""
     import logging
     
     # 获取默认家庭（假设只有一个家庭，或者使用第一个家庭）
@@ -50,14 +282,9 @@ def overview():
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
     time_period = request.args.get('period', 'all_time')
-    skip_prices = request.args.get('skip_prices', 'true').lower() == 'true'
     
     try:
-        # 初始化统一服务
-        asset_service = AssetValuationService()
-        report_service = ReportService()
-        
-        # 根据过滤条件获取账户
+        # 根据过滤条件获取账户（不涉及价格计算）
         ownership_map = None
 
         if account_id:
@@ -68,275 +295,44 @@ def overview():
             member_accounts = AccountMember.query.filter_by(member_id=member_id).all()
             account_ids = [am.account_id for am in member_accounts]
             accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
-            
+
             from app.models.member import Member
             member = Member.query.get(member_id)
             filter_description = f"成员: {member.name}" if member else "未找到成员"
 
-            ownership_map = {}
-            for membership in member_accounts:
-                try:
-                    ownership_map[membership.account_id] = Decimal(str(membership.ownership_percentage or 0)) / Decimal('100')
-                except Exception:
-                    ownership_map[membership.account_id] = Decimal('0')
+            ownership_map = _build_ownership_map(member_id)
         else:
             accounts = Account.query.filter_by(family_id=family.id).all()
             filter_description = "All Members"
 
+        # 获取投资组合数据（使用缓存的价格，不强制更新）
+        account_ids = [acc.id for acc in accounts]
+        
         # 获取汇率信息
         exchange_rates = currency_service.get_cad_usd_rates()
         
         # 使用Portfolio Service统一计算架构
         from app.services.portfolio_service import PortfolioService, TimePeriod
         portfolio_service = PortfolioService()
-        account_ids = [acc.id for acc in accounts]
         
-        # 使用Portfolio Service获取投资组合数据
+        # 使用Portfolio Service获取投资组合数据（使用缓存价格）
         portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
-        
-        # 从Portfolio Service结果中提取数据
-        raw_holdings = portfolio_summary.get('current_holdings', [])
-        raw_cleared_holdings = portfolio_summary.get('cleared_holdings', [])
-        
-        print(f"DEBUG: Portfolio Service返回 {len(raw_holdings)} 个当前持仓, {len(raw_cleared_holdings)} 个清仓持仓")
-        
-        # 使用统一计算架构获取综合指标 - 确保CAD和USD分解正确
-        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
-            account_ids, 
+
+        view_data = _build_portfolio_view_data(
+            account_ids=account_ids,
+            accounts=accounts,
+            portfolio_summary=portfolio_summary,
+            asset_service=AssetValuationService(),
+            ownership_map=ownership_map,
             target_date=date.today(),
-            ownership_map=ownership_map
+            exchange_rates=exchange_rates
         )
-        
-        # 获取现金余额用于显示
-        cash_balance = asset_service.get_cash_balance(account_ids[0] if account_ids else None, date.today())
-        
-        # 创建账户名到账户对象的映射字典，用于获取成员信息
-        account_name_to_obj = {acc.name: acc for acc in accounts}
-        
-        # 多账户股票合并逻辑 - 将相同股票(symbol+currency)合并显示
-        def merge_holdings_by_stock(holdings_list):
-            """合并相同股票的持仓数据 - 兼容Portfolio Service数据格式"""
 
-            def safe_float(value, default=0.0):
-                if value in (None, ""):
-                    return default
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    return default
+        holdings = view_data['holdings']
+        cleared_holdings = view_data['cleared_holdings']
+        daily_change_metrics = view_data['daily_change']
+        comprehensive_metrics = view_data['metrics']
 
-            def extract_shares(holding_dict):
-                # Portfolio Service使用current_shares字段
-                return safe_float(holding_dict.get('current_shares', 0))
-
-            if len(account_ids) <= 1:
-                # 单账户时确保数据格式一致
-                for holding in holdings_list:
-                    total_shares = extract_shares(holding)
-                    holding['current_shares'] = total_shares
-                    holding['shares'] = total_shares
-                return holdings_list
-
-            merged = {}
-            for holding in holdings_list:
-                # 使用股票代码+货币作为合并key
-                key = f"{holding.get('symbol', '')}_{holding.get('currency', 'USD')}"
-                incoming_shares = extract_shares(holding)
-                
-                if key not in merged:
-                    # 第一次遇到这个股票，直接添加
-                    merged_holding = holding.copy()
-                    merged_holding['current_shares'] = incoming_shares
-                    merged_holding['shares'] = incoming_shares
-                    merged_holding['total_cost'] = safe_float(holding.get('total_cost'))
-                    merged_holding['average_cost'] = safe_float(holding.get('average_cost'))
-                    merged_holding['current_value'] = safe_float(holding.get('current_value'))
-                    merged_holding['unrealized_gain'] = safe_float(holding.get('unrealized_gain'))
-                    merged_holding['realized_gain'] = safe_float(holding.get('realized_gain'))
-                    merged_holding['total_dividends'] = safe_float(holding.get('total_dividends'))
-                    merged_holding['total_interest'] = safe_float(holding.get('total_interest'))
-                    merged_holding['merged_accounts'] = [holding.get('account_name', '')]
-                    
-                    # 保存每个账户的详细信息用于悬停提示，包含成员信息
-                    account_name = holding.get('account_name', '')
-                    account_obj = account_name_to_obj.get(account_name)
-                    account_name_with_members = account_name
-                    if account_obj and account_obj.account_members:
-                        member_names = [am.member.name for am in account_obj.account_members]
-                        account_name_with_members = f"{account_name} - {', '.join(member_names)}"
-                    
-                    merged_holding['account_details'] = [{
-                        'account_name': account_name_with_members,
-                        'shares': incoming_shares,
-                        'cost': safe_float(holding.get('total_cost')),
-                        'realized_gain': safe_float(holding.get('realized_gain')),
-                        'unrealized_gain': safe_float(holding.get('unrealized_gain'))
-                    }]
-                    merged[key] = merged_holding
-                else:
-                    # 合并相同股票的数据
-                    existing = merged[key]
-                    existing['current_shares'] = safe_float(existing.get('current_shares')) + incoming_shares
-                    existing['shares'] = existing['current_shares']  # 确保shares字段与current_shares同步
-                    existing['total_cost'] = safe_float(existing.get('total_cost')) + safe_float(holding.get('total_cost'))
-                    existing['current_value'] = safe_float(existing.get('current_value')) + safe_float(holding.get('current_value'))
-                    existing['unrealized_gain'] = safe_float(existing.get('unrealized_gain')) + safe_float(holding.get('unrealized_gain'))
-                    existing['realized_gain'] = safe_float(existing.get('realized_gain')) + safe_float(holding.get('realized_gain'))
-                    existing['total_dividends'] = safe_float(existing.get('total_dividends')) + safe_float(holding.get('total_dividends'))
-                    existing['total_interest'] = safe_float(existing.get('total_interest')) + safe_float(holding.get('total_interest'))
-
-                    # 记录涉及的账户
-                    existing['merged_accounts'].append(holding.get('account_name', ''))
-
-                    # 添加当前账户的详细信息，包含成员信息
-                    account_name = holding.get('account_name', '')
-                    account_obj = account_name_to_obj.get(account_name)
-                    account_name_with_members = account_name
-                    if account_obj and account_obj.account_members:
-                        member_names = [am.member.name for am in account_obj.account_members]
-                        account_name_with_members = f"{account_name} - {', '.join(member_names)}"
-
-                    existing['account_details'].append({
-                        'account_name': account_name_with_members,
-                        'shares': incoming_shares,
-                        'cost': safe_float(holding.get('total_cost')),
-                        'realized_gain': safe_float(holding.get('realized_gain')),
-                        'unrealized_gain': safe_float(holding.get('unrealized_gain'))
-                    })
-
-                    # 重新计算平均价格
-                    if existing['current_shares'] > 0:
-                        existing['average_cost'] = existing['total_cost'] / existing['current_shares']
-                        existing['average_cost_display'] = existing['average_cost']
-                    else:
-                        existing['average_cost'] = 0
-                        existing['average_cost_display'] = 0
-
-                    # 保持其他字段不变（价格、汇率等）
-
-            # 重新计算合并后的衍生指标，确保百分比基于汇总数据
-            for merged_holding in merged.values():
-                daily_change_value = safe_float(merged_holding.get('daily_change_value'))
-                previous_value = safe_float(merged_holding.get('previous_value'))
-
-                if previous_value:
-                    merged_holding['daily_change_percent'] = (daily_change_value / previous_value) * 100
-                else:
-                    current_value = safe_float(merged_holding.get('current_value'))
-                    base_value = current_value - daily_change_value
-                    merged_holding['daily_change_percent'] = ((daily_change_value / base_value) * 100
-                                                              if base_value else 0.0)
-
-            return list(merged.values())
-        
-        def merge_holdings_and_cleared_cross_accounts(raw_holdings, raw_cleared_holdings):
-            """跨账户合并持仓和清仓数据，确保同一股票不会同时出现在两个列表中"""
-            # 首先按股票符号分组所有数据
-            all_stocks = {}  # {symbol: {'holdings': [], 'cleared': []}}
-            
-            # 处理持仓数据
-            for holding in raw_holdings:
-                symbol = holding.get('symbol')
-                if symbol:
-                    if symbol not in all_stocks:
-                        all_stocks[symbol] = {'holdings': [], 'cleared': []}
-                    all_stocks[symbol]['holdings'].append(holding)
-            
-            # 处理清仓数据
-            for cleared in raw_cleared_holdings:
-                symbol = cleared.get('symbol')
-                if symbol:
-                    if symbol not in all_stocks:
-                        all_stocks[symbol] = {'holdings': [], 'cleared': []}
-                    all_stocks[symbol]['cleared'].append(cleared)
-            
-            # 合并每个股票的数据
-            final_holdings = []
-            final_cleared = []
-            
-            for symbol, data in all_stocks.items():
-                holdings_list = data['holdings']
-                cleared_list = data['cleared']
-                
-                # 计算该股票的总持仓
-                total_current_shares = sum(h.get('current_shares', 0) for h in holdings_list)
-                total_cleared_shares = sum(c.get('total_sold_shares', 0) for c in cleared_list)
-                
-                if total_current_shares > 0:
-                    # 有持仓，合并到holdings
-                    if len(holdings_list) == 1:
-                        # 只有一个账户有持仓
-                        final_holdings.append(holdings_list[0])
-                    else:
-                        # 多个账户有持仓，需要合并
-                        merged_holding = merge_holdings_by_stock(holdings_list)[0]
-                        final_holdings.append(merged_holding)
-                    
-                    # 如果有清仓数据，将已实现收益合并到持仓中
-                    if cleared_list:
-                        total_cleared_realized_gain = sum(c.get('realized_gain', 0) for c in cleared_list)
-                        if total_cleared_realized_gain != 0:
-                            final_holdings[-1]['realized_gain'] = final_holdings[-1].get('realized_gain', 0) + total_cleared_realized_gain
-                            print(f"DEBUG: {symbol} 合并清仓已实现收益: {total_cleared_realized_gain}")
-                
-                elif total_cleared_shares > 0:
-                    # 只有清仓数据，合并到cleared
-                    if len(cleared_list) == 1:
-                        # 只有一个账户有清仓
-                        final_cleared.append(cleared_list[0])
-                    else:
-                        # 多个账户有清仓，需要合并
-                        merged_cleared = merge_holdings_by_stock(cleared_list)[0]
-                        final_cleared.append(merged_cleared)
-            
-            return final_holdings, final_cleared
-        
-        # 应用股票合并逻辑 - 需要跨账户合并持仓和清仓数据
-        holdings, cleared_holdings = merge_holdings_and_cleared_cross_accounts(raw_holdings, raw_cleared_holdings)
-        
-        # 对于IBIT等跨账户股票，需要额外汇总已实现收益
-        # 因为Portfolio Service按账户分别计算，没有跨账户汇总
-        ibit_holdings = [h for h in holdings if h.get('symbol') == 'IBIT']
-        ibit_cleared = [h for h in cleared_holdings if h.get('symbol') == 'IBIT']
-        
-        if ibit_holdings and ibit_cleared:
-            # 汇总IBIT的已实现收益
-            total_realized_gain = ibit_holdings[0].get('realized_gain', 0) + ibit_cleared[0].get('realized_gain', 0)
-            ibit_holdings[0]['realized_gain'] = total_realized_gain
-            print(f"DEBUG: IBIT汇总已实现收益: {total_realized_gain}")
-
-        # 汇总每日浮动盈亏（以CAD展示）
-        daily_change_metrics = {
-            'cad': 0.0,
-            'cad_only': 0.0,
-            'usd_only': 0.0
-        }
-        usd_to_cad_rate = Decimal(str(exchange_rates['usd_to_cad'])) if exchange_rates else Decimal('1')
-        if holdings:
-            daily_change_cad_only = Decimal('0')
-            daily_change_usd_only = Decimal('0')
-
-            for holding in holdings:
-                raw_change = holding.get('daily_change_value')
-                if raw_change in (None, ''):
-                    continue
-
-                change_value = Decimal(str(raw_change))
-                currency = (holding.get('currency') or 'USD').upper()
-
-                if currency == 'USD':
-                    daily_change_usd_only += change_value
-                else:
-                    daily_change_cad_only += change_value
-
-            total_daily_change_cad = daily_change_cad_only + (daily_change_usd_only * usd_to_cad_rate)
-
-            daily_change_metrics = {
-                'cad': float(total_daily_change_cad.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
-                'cad_only': float(daily_change_cad_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
-                'usd_only': float(daily_change_usd_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
-            }
-        
         # 从综合指标中提取数据 - 使用统一计算架构的正确数据
         if comprehensive_metrics:
             total_assets = comprehensive_metrics['total_assets']['cad']
@@ -345,7 +341,7 @@ def overview():
             total_cash_usd = comprehensive_metrics['cash_balance']['usd']
             total_stock_value = comprehensive_metrics['total_assets']['cad'] - comprehensive_metrics['cash_balance']['total_cad']
         else:
-            # 当跳过价格获取时，使用默认值
+            # 当没有数据时，使用默认值
             total_assets = 0
             total_stock_value = 0
             total_cash_cad = 0
@@ -375,17 +371,8 @@ def overview():
                         'cad_only': metrics_data['total_return']['cad_only'], 
                         'usd_only': metrics_data['total_return']['usd_only']
                     })
-                    # 使用Portfolio Service的数据计算总回报率
-                    # 从portfolio_summary获取正确的投资成本数据
-                    portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
-                    portfolio_summary_data = portfolio_summary.get('summary', {})
-                    total_cost = portfolio_summary_data.get('total_cost', 0)
-                    total_realized = portfolio_summary_data.get('total_realized_gain', 0)
-                    total_unrealized = portfolio_summary_data.get('total_unrealized_gain', 0)
-                    total_return = total_realized + total_unrealized
-                    
-                    self.total_return_rate = (total_return / total_cost * 100
-                                              if total_cost > 0 else 0)
+                    # 使用统一计算后的总回报率
+                    self.total_return_rate = metrics_data.get('total_return_rate', 0)
                     self.realized_gain = type('obj', (object,), {
                         'cad': metrics_data['realized_gain']['cad'], 
                         'cad_only': metrics_data['realized_gain']['cad_only'], 
@@ -425,7 +412,7 @@ def overview():
             
             metrics = ComprehensiveMetrics(comprehensive_metrics, daily_change_metrics)
         else:
-            # 当跳过价格获取时，创建空的metrics对象
+            # 当没有数据时，创建空的metrics对象
             class EmptyMetrics:
                 def __init__(self):
                     self.total_assets = type('obj', (object,), {'cad': 0, 'cad_only': 0, 'usd_only': 0})
@@ -478,12 +465,9 @@ def overview():
             'pending_ocr': pending_ocr
         }
         
-        logging.info(f"统一服务overview成功: {len(holdings)}个持仓, 总资产${total_assets:,.2f}")
-        
         # Get current member info for smart account selection
         current_member = None
         if member_id:
-            from app.models.member import Member
             current_member = Member.query.get(member_id)
         
         return render_template('investment/overview.html',
@@ -538,6 +522,110 @@ def overview():
                              accounts=accounts,
                              current_member=None,
                              current_view='overview')
+
+
+@bp.route('/api/overview/update-prices', methods=['POST'])
+def update_overview_prices():
+    """异步更新overview页面的股票价格"""
+    try:
+        # 获取请求参数
+        data = request.get_json() or {}
+        member_id = data.get('member_id')
+        account_id = data.get('account_id')
+        force_refresh = data.get('force_refresh', False)
+        
+        # 获取默认家庭
+        family = Family.query.first()
+        if not family:
+            return jsonify({'success': False, 'error': 'No family found'}), 400
+        
+        # 根据过滤条件获取账户
+        if account_id:
+            accounts = Account.query.filter_by(id=account_id, family_id=family.id).all()
+        elif member_id:
+            from app.models.account import AccountMember
+            member_accounts = AccountMember.query.filter_by(member_id=member_id).all()
+            account_ids = [am.account_id for am in member_accounts]
+            accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
+        else:
+            accounts = Account.query.filter_by(family_id=family.id).all()
+        
+        if not accounts:
+            return jsonify({'success': False, 'error': 'No accounts found'}), 400
+        
+        # 获取这些账户中所有股票的symbol和currency组合
+        from app.models.stocks_cache import StocksCache
+        from app.models.transaction import Transaction
+        
+        account_ids = [acc.id for acc in accounts]
+        symbols_currencies = db.session.query(StocksCache.symbol, StocksCache.currency).join(
+            Transaction, Transaction.stock == StocksCache.symbol
+        ).filter(
+            Transaction.account_id.in_(account_ids),
+            StocksCache.symbol.isnot(None),
+            StocksCache.symbol != ''
+        ).distinct().all()
+        
+        if not symbols_currencies:
+            return jsonify({'success': True, 'message': 'No stocks to update'})
+        
+        # 更新股票价格
+        from app.services.stock_price_service import StockPriceService
+        stock_service = StockPriceService()
+        
+        symbol_currency_pairs = [(sc.symbol, sc.currency) for sc in symbols_currencies]
+        update_result = stock_service.update_prices_for_symbols(symbol_currency_pairs, force_refresh=force_refresh)
+        
+        # 重新计算投资组合数据
+        from app.services.portfolio_service import PortfolioService, TimePeriod
+        from app.services.currency_service import CurrencyService
+        
+        portfolio_service = PortfolioService()
+        currency_service = CurrencyService()
+        
+        # 获取汇率信息
+        exchange_rates = currency_service.get_cad_usd_rates()
+        
+        # 使用Portfolio Service获取投资组合数据
+        portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
+        
+        # 构建视图数据
+        ownership_map = None
+        if member_id:
+            ownership_map = _build_ownership_map(member_id)
+        
+        view_data = _build_portfolio_view_data(
+            account_ids=account_ids,
+            accounts=accounts,
+            portfolio_summary=portfolio_summary,
+            asset_service=AssetValuationService(),
+            ownership_map=ownership_map,
+            target_date=date.today(),
+            exchange_rates=exchange_rates
+        )
+        
+        holdings = view_data['holdings']
+        cleared_holdings = view_data['cleared_holdings']
+        daily_change_metrics = view_data['daily_change']
+        comprehensive_metrics = view_data['metrics']
+        
+        # 构建返回数据 - 清仓数据与当前股价无关，不返回
+        response_data = {
+            'success': True,
+            'update_result': update_result,
+            'holdings': holdings,
+            'daily_change': daily_change_metrics,
+            'metrics': comprehensive_metrics
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        current_app.logger.error(f"异步更新股票价格失败: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': f'Failed to update stock prices: {str(e)}'
+        }), 500
 
 
 @bp.route('/api/accounts/cash-data', methods=['GET'])
@@ -3222,80 +3310,30 @@ def get_async_portfolio_prices():
         from app.services.portfolio_service import PortfolioService, TimePeriod
         portfolio_service = PortfolioService()
         portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
-        
-        # 应用与overview页面相同的合并逻辑
-        def merge_holdings_by_stock(holdings_list):
-            """合并相同股票的持仓数据 - 兼容Portfolio Service数据格式"""
-            def safe_float(value, default=0.0):
-                if value in (None, ""):
-                    return default
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    return default
 
-            def extract_shares(holding_dict):
-                return safe_float(holding_dict.get('current_shares', 0))
-
-            if len(account_ids) <= 1:
-                for holding in holdings_list:
-                    total_shares = extract_shares(holding)
-                    holding['current_shares'] = total_shares
-                    holding['shares'] = total_shares
-                return holdings_list
-
-            merged = {}
-            for holding in holdings_list:
-                key = f"{holding.get('symbol', '')}_{holding.get('currency', 'USD')}"
-                incoming_shares = extract_shares(holding)
-                
-                if key not in merged:
-                    merged_holding = holding.copy()
-                    merged_holding['current_shares'] = incoming_shares
-                    merged_holding['shares'] = incoming_shares
-                    merged_holding['total_cost'] = safe_float(holding.get('total_cost'))
-                    merged_holding['average_cost'] = safe_float(holding.get('average_cost'))
-                    merged_holding['current_value'] = safe_float(holding.get('current_value'))
-                    merged_holding['unrealized_gain'] = safe_float(holding.get('unrealized_gain'))
-                    merged_holding['realized_gain'] = safe_float(holding.get('realized_gain'))
-                    merged_holding['total_dividends'] = safe_float(holding.get('total_dividends'))
-                    merged_holding['total_interest'] = safe_float(holding.get('total_interest'))
-                    merged[key] = merged_holding
-                else:
-                    existing = merged[key]
-                    existing['current_shares'] = safe_float(existing.get('current_shares')) + incoming_shares
-                    existing['shares'] = existing['current_shares']
-                    existing['total_cost'] = safe_float(existing.get('total_cost')) + safe_float(holding.get('total_cost'))
-                    existing['current_value'] = safe_float(existing.get('current_value')) + safe_float(holding.get('current_value'))
-                    existing['unrealized_gain'] = safe_float(existing.get('unrealized_gain')) + safe_float(holding.get('unrealized_gain'))
-                    existing['realized_gain'] = safe_float(existing.get('realized_gain')) + safe_float(holding.get('realized_gain'))
-                    existing['total_dividends'] = safe_float(existing.get('total_dividends')) + safe_float(holding.get('total_dividends'))
-                    existing['total_interest'] = safe_float(existing.get('total_interest')) + safe_float(holding.get('total_interest'))
-
-            return list(merged.values())
-        
-        # 应用股票合并逻辑
-        holdings = merge_holdings_by_stock(portfolio_summary.get('current_holdings', []))
-        cleared_holdings = merge_holdings_by_stock(portfolio_summary.get('cleared_holdings', []))
-        
-        # 对于IBIT等跨账户股票，需要额外汇总已实现收益
-        ibit_holdings = [h for h in holdings if h.get('symbol') == 'IBIT']
-        ibit_cleared = [h for h in cleared_holdings if h.get('symbol') == 'IBIT']
-        
-        if ibit_holdings and ibit_cleared:
-            # 汇总IBIT的已实现收益
-            total_realized_gain = ibit_holdings[0].get('realized_gain', 0) + ibit_cleared[0].get('realized_gain', 0)
-            ibit_holdings[0]['realized_gain'] = total_realized_gain
-        
-        # 计算综合指标
+        accounts = Account.query.filter(Account.id.in_(account_ids)).all()
+        ownership_map = _build_ownership_map(member_id)
         asset_service = AssetValuationService()
-        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(account_ids)
-        
+        view_data = _build_portfolio_view_data(
+            account_ids=account_ids,
+            accounts=accounts,
+            portfolio_summary=portfolio_summary,
+            asset_service=asset_service,
+            ownership_map=ownership_map,
+            target_date=date.today(),
+            exchange_rates=currency_service.get_cad_usd_rates()
+        )
+
+        holdings = view_data['holdings']
+        cleared_holdings = view_data['cleared_holdings']
+        comprehensive_metrics = view_data['metrics']
+
         return jsonify({
             'success': True,
             'holdings': holdings,
             'cleared_holdings': cleared_holdings,
             'metrics': comprehensive_metrics,
+            'daily_change': view_data['daily_change'],
             'exchange_rates': {},
             'update_results': update_results
         })
