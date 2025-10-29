@@ -389,21 +389,22 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for holding in holdings %}
-                            <tr class="align-middle"
-                                data-symbol="{{ holding['symbol'] }}"
-                                data-currency="{{ holding['currency'] }}"
-                                data-account-id="{{ holding.get('account_id', '') }}"
-                                data-sector="{{ holding.get('sector', 'Unknown') }}"
-                                data-shares="{{ holding['shares'] or 0 }}"
-                                data-avg-cost="{{ holding.get('average_cost_display', holding.get('average_cost', 0)) or 0 }}"
-                                data-current-price="{{ holding['current_price'] or 0 }}"
-                                data-daily-change="{{ holding.get('daily_change_value', 0) }}"
-                                data-market-value="{{ holding['current_value'] or 0 }}"
-                                data-unrealized-gain="{{ holding['unrealized_gain'] or 0 }}"
-                                data-realized-gain="{{ holding['realized_gain'] or 0 }}"
-                                data-dividends="{{ (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) }}"
-                                data-return-percent="{{ holding['unrealized_gain_percent'] or 0 }}">
+                            {% if holdings %}
+                                {% for holding in holdings %}
+                                <tr class="align-middle"
+                                    data-symbol="{{ holding['symbol'] }}"
+                                    data-currency="{{ holding['currency'] }}"
+                                    data-account-id="{{ holding.get('account_id', '') }}"
+                                    data-sector="{{ holding.get('sector', 'Unknown') }}"
+                                    data-shares="{{ holding['shares'] or 0 }}"
+                                    data-avg-cost="{{ holding.get('average_cost_display', holding.get('average_cost', 0)) or 0 }}"
+                                    data-current-price="{{ holding['current_price'] or 0 }}"
+                                    data-daily-change="{{ holding.get('daily_change_value', 0) }}"
+                                    data-market-value="{{ holding['current_value'] or 0 }}"
+                                    data-unrealized-gain="{{ holding['unrealized_gain'] or 0 }}"
+                                    data-realized-gain="{{ holding['realized_gain'] or 0 }}"
+                                    data-dividends="{{ (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) }}"
+                                    data-return-percent="{{ holding['unrealized_gain_percent'] or 0 }}">
                                 <!-- Stock Symbol -->
                                 <td class="ps-3">
                                     <div class="d-flex align-items-center">
@@ -514,17 +515,28 @@
                                     </span>
                                 </td>
                             </tr>
-                            {% endfor %}
+                                {% endfor %}
+                            {% else %}
+                                <!-- 异步加载时显示空行，等待数据填充 -->
+                                <tr id="holdings-loading-row" style="display: none;">
+                                    <td colspan="8" class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p class="mt-2 text-muted">Loading holdings data...</p>
+                                    </td>
+                                </tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>
-                {% if not holdings %}
-                <div class="text-center py-5">
+                
+                <!-- 始终显示No holdings提示，JavaScript会在有数据时隐藏 -->
+                <div class="text-center py-5" id="no-holdings-message">
                     <i class="fas fa-chart-pie fa-3x text-muted mb-3"></i>
                     <h5 class="text-muted">{{ _('No holdings found') }}</h5>
                     <p class="text-muted mb-0">{{ _('Start investing to see your portfolio here') }}</p>
                 </div>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -601,18 +613,19 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for holding in cleared_holdings %}
-                            <tr data-symbol="{{ holding['symbol'] }}"
-                                data-currency="{{ holding['currency'] }}"
-                                data-sector="{{ holding.get('sector', 'Unknown') }}"
-                                data-company="{{ holding['company_name'] }}"
-                                data-bought-shares="{{ holding['total_bought_shares'] or 0 }}"
-                                data-sold-shares="{{ holding['total_sold_shares'] or 0 }}"
-                                data-total-invested="{{ holding['total_bought_value'] or 0 }}"
-                                data-total-received="{{ holding['total_sold_value'] or 0 }}"
-                                data-realized-gain="{{ holding['realized_gain'] or 0 }}"
-                                data-dividends="{{ (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) }}"
-                                data-return-percent="{{ holding.get('realized_gain_percent', 0) or 0 }}">
+                            {% if cleared_holdings %}
+                                {% for holding in cleared_holdings %}
+                                <tr data-symbol="{{ holding['symbol'] }}"
+                                    data-currency="{{ holding['currency'] }}"
+                                    data-sector="{{ holding.get('sector', 'Unknown') }}"
+                                    data-company="{{ holding['company_name'] }}"
+                                    data-bought-shares="{{ holding['total_bought_shares'] or 0 }}"
+                                    data-sold-shares="{{ holding['total_sold_shares'] or 0 }}"
+                                    data-total-invested="{{ holding['total_bought_value'] or 0 }}"
+                                    data-total-received="{{ holding['total_sold_value'] or 0 }}"
+                                    data-realized-gain="{{ holding['realized_gain'] or 0 }}"
+                                    data-dividends="{{ (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) }}"
+                                    data-return-percent="{{ holding.get('realized_gain_percent', 0) or 0 }}">
                                 <!-- Stock Symbol -->
                                 <td class="ps-3">
                                     <div class="d-flex align-items-center">
@@ -706,17 +719,28 @@
                                     </span>
                                 </td>
                             </tr>
-                            {% endfor %}
+                                {% endfor %}
+                            {% else %}
+                                <!-- 异步加载时显示空行，等待数据填充 -->
+                                <tr id="cleared-holdings-loading-row" style="display: none;">
+                                    <td colspan="7" class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p class="mt-2 text-muted">Loading cleared holdings data...</p>
+                                    </td>
+                                </tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>
-                {% if not cleared_holdings %}
-                <div class="text-center py-5">
+                
+                <!-- 始终显示No cleared holdings提示，JavaScript会在有数据时隐藏 -->
+                <div class="text-center py-5" id="no-cleared-holdings-message">
                     <i class="fas fa-history fa-3x text-muted mb-3"></i>
                     <h5 class="text-muted">{{ _('No cleared holdings found') }}</h5>
                     <p class="text-muted mb-0">{{ _('Stocks you have completely sold will appear here') }}</p>
                 </div>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -1044,35 +1068,147 @@ function updateHoldingsTable(holdings) {
     
     console.log('更新持仓表格，数据:', holdings);
     
-    // 创建持仓数据映射，按symbol+currency作为key
-    const holdingsMap = new Map();
-    holdings.forEach(holding => {
-        const key = `${holding.symbol}_${holding.currency}`;
-        holdingsMap.set(key, holding);
-    });
+    // 清空现有行（除了加载行）
+    const existingRows = tbody.querySelectorAll('tr:not(#holdings-loading-row)');
+    existingRows.forEach(row => row.remove());
     
-    // 更新现有行，而不是重新生成整个表格
-    const existingRows = tbody.querySelectorAll('tr');
-    existingRows.forEach(row => {
-        const symbol = row.getAttribute('data-symbol');
-        const currency = row.getAttribute('data-currency');
-        const key = `${symbol}_${currency}`;
-        const updatedHolding = holdingsMap.get(key);
-        
-        if (updatedHolding) {
-            // 只更新需要更新的单元格
-            updateHoldingRowData(row, updatedHolding);
-        }
+    // 隐藏加载行
+    const loadingRow = document.getElementById('holdings-loading-row');
+    if (loadingRow) {
+        loadingRow.style.display = 'none';
+    }
+    
+    // 创建新的行
+    holdings.forEach(holding => {
+        const row = createHoldingRow(holding);
+        tbody.appendChild(row);
     });
     
     // 隐藏"No holdings found"提示
-    const cardBody = document.querySelector('#holdingsTable').closest('.card-body');
-    const noHoldingsDiv = cardBody ? cardBody.querySelector('.text-center.py-5') : null;
-    if (noHoldingsDiv) {
-        noHoldingsDiv.style.display = 'none';
+    const noHoldingsMessage = document.getElementById('no-holdings-message');
+    if (noHoldingsMessage) {
+        noHoldingsMessage.style.display = 'none';
+    }
+    
+    // 更新计数
+    const countSpan = document.getElementById('holdingsCount');
+    if (countSpan) {
+        countSpan.textContent = holdings.length;
     }
 }
 
+// 创建持仓行
+function createHoldingRow(holding) {
+    const row = document.createElement('tr');
+    row.className = 'align-middle';
+    row.setAttribute('data-symbol', holding.symbol);
+    row.setAttribute('data-currency', holding.currency);
+    row.setAttribute('data-account-id', holding.account_id || '');
+    row.setAttribute('data-sector', holding.sector || 'Unknown');
+    row.setAttribute('data-shares', holding.shares || 0);
+    row.setAttribute('data-avg-cost', holding.average_cost || 0);
+    row.setAttribute('data-current-price', holding.current_price || 0);
+    row.setAttribute('data-daily-change', holding.daily_change_value || 0);
+    row.setAttribute('data-market-value', holding.current_value || 0);
+    row.setAttribute('data-unrealized-gain', holding.unrealized_gain || 0);
+    row.setAttribute('data-realized-gain', holding.realized_gain || 0);
+    row.setAttribute('data-dividends', (holding.dividends || 0) + (holding.interest || 0));
+    row.setAttribute('data-return-percent', holding.unrealized_gain_percent || 0);
+    
+    // 计算总收益率
+    const totalGain = (holding.unrealized_gain || 0) + (holding.realized_gain || 0) + (holding.dividends || 0) + (holding.interest || 0);
+    const totalCost = holding.total_cost || 0;
+    const totalReturnPercent = totalCost > 0 ? (totalGain / totalCost * 100) : 0;
+    
+    row.innerHTML = `
+        <!-- Stock Symbol -->
+        <td class="ps-3">
+            <div class="d-flex align-items-center">
+                <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar" 
+                     style="color: ${holding.currency === 'CAD' ? 'black' : 'white'}; cursor: pointer;"
+                     onclick="openAddTransactionModalForStock('${holding.symbol}', '${holding.currency}', null)"
+                     title="Click to add transaction for ${holding.symbol}">
+                    ${holding.currency === 'CAD' ? 'C$' : '$'}
+                </div>
+                <div>
+                    <a href="/stock/${holding.symbol}" class="text-decoration-none">
+                        <strong>${holding.symbol}</strong>
+                    </a>
+                    <br><small class="text-muted">${holding.sector || 'Unknown'}</small>
+                </div>
+            </div>
+        </td>
+        
+        <!-- Shares -->
+        <td class="text-end">
+            <span class="fw-medium">${parseFloat(holding.shares || 0).toFixed(2)}</span>
+        </td>
+        
+        <!-- Average Cost -->
+        <td class="text-end">
+            <span class="text-muted">$${parseFloat(holding.average_cost || 0).toFixed(2)}</span>
+            <br><small class="text-muted">${holding.currency}</small>
+        </td>
+        
+        <!-- Current Price -->
+        <td class="text-end">
+            <span class="fw-bold">$${parseFloat(holding.current_price || 0).toFixed(2)}</span>
+            <br><small class="text-muted">${holding.currency}</small>
+        </td>
+        
+        <!-- Daily Change -->
+        <td class="text-end">
+            <span class="fw-medium ${(holding.daily_change_value || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                ${(holding.daily_change_value || 0) >= 0 ? '+' : ''}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
+            </span>
+            <br><small class="${(holding.daily_change_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                ${(holding.daily_change_percent || 0) >= 0 ? '+' : ''}${(holding.daily_change_percent || 0).toFixed(2)}%
+            </small>
+        </td>
+        
+        <!-- Market Value -->
+        <td class="text-end">
+            <span class="fw-bold">$${parseFloat(holding.current_value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <br><small class="text-muted">${holding.currency}</small>
+        </td>
+        
+        <!-- Unrealized Gain/Loss -->
+        <td class="text-end">
+            <span class="fw-bold ${(holding.unrealized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                ${(holding.unrealized_gain || 0) >= 0 ? '+' : ''}
+                $${Math.abs(holding.unrealized_gain || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+            <br><small class="text-muted ${(holding.unrealized_gain_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                ${(holding.unrealized_gain_percent || 0) >= 0 ? '+' : ''}
+                ${(holding.unrealized_gain_percent || 0).toFixed(1)}%
+            </small>
+        </td>
+        
+        <!-- Realized Gains -->
+        <td class="text-end">
+            <span class="fw-medium ${(holding.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                ${(holding.realized_gain || 0) >= 0 ? '+' : ''}
+                $${Math.abs(holding.realized_gain || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+        </td>
+        
+        <!-- Dividends + Interest -->
+        <td class="text-end">
+            <span class="fw-medium text-success">
+                $${((holding.dividends || 0) + (holding.interest || 0)).toFixed(2)}
+            </span>
+        </td>
+        
+        <!-- Return Percentage -->
+        <td class="text-end pe-3">
+            <span class="badge ${totalReturnPercent >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
+                ${totalReturnPercent >= 0 ? '+' : ''}${totalReturnPercent.toFixed(1)}%
+            </span>
+        </td>
+    `;
+    
+    return row;
+}
 
 // 更新持仓行数据（只更新价格相关的单元格）
 function updateHoldingRowData(row, holding) {
