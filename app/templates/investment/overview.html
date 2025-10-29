@@ -1068,146 +1068,33 @@ function updateHoldingsTable(holdings) {
     
     console.log('更新持仓表格，数据:', holdings);
     
-    // 清空现有行（除了加载行）
-    const existingRows = tbody.querySelectorAll('tr:not(#holdings-loading-row)');
-    existingRows.forEach(row => row.remove());
-    
-    // 隐藏加载行
-    const loadingRow = document.getElementById('holdings-loading-row');
-    if (loadingRow) {
-        loadingRow.style.display = 'none';
-    }
-    
-    // 创建新的行
+    // 创建持仓数据映射，按symbol+currency作为key
+    const holdingsMap = new Map();
     holdings.forEach(holding => {
-        const row = createHoldingRow(holding);
-        tbody.appendChild(row);
+        const key = `${holding.symbol}_${holding.currency}`;
+        holdingsMap.set(key, holding);
+    });
+    
+    // 更新现有行，而不是重新生成整个表格
+    const existingRows = tbody.querySelectorAll('tr');
+    existingRows.forEach(row => {
+        const symbol = row.getAttribute('data-symbol');
+        const currency = row.getAttribute('data-currency');
+        const key = `${symbol}_${currency}`;
+        const updatedHolding = holdingsMap.get(key);
+        
+        if (updatedHolding) {
+            // 只更新需要更新的单元格
+            updateHoldingRowData(row, updatedHolding);
+        }
     });
     
     // 隐藏"No holdings found"提示
-    const noHoldingsMessage = document.getElementById('no-holdings-message');
-    if (noHoldingsMessage) {
-        noHoldingsMessage.style.display = 'none';
+    const cardBody = document.querySelector('#holdingsTable').closest('.card-body');
+    const noHoldingsDiv = cardBody ? cardBody.querySelector('.text-center.py-5') : null;
+    if (noHoldingsDiv) {
+        noHoldingsDiv.style.display = 'none';
     }
-    
-    // 更新计数
-    const countSpan = document.getElementById('holdingsCount');
-    if (countSpan) {
-        countSpan.textContent = holdings.length;
-    }
-}
-
-// 创建持仓行
-function createHoldingRow(holding) {
-    const row = document.createElement('tr');
-    row.className = 'align-middle';
-    row.setAttribute('data-symbol', holding.symbol);
-    row.setAttribute('data-currency', holding.currency);
-    row.setAttribute('data-account-id', holding.account_id || '');
-    row.setAttribute('data-sector', holding.sector || 'Unknown');
-    row.setAttribute('data-shares', holding.shares || 0);
-    row.setAttribute('data-avg-cost', holding.average_cost || 0);
-    row.setAttribute('data-current-price', holding.current_price || 0);
-    row.setAttribute('data-daily-change', holding.daily_change_value || 0);
-    row.setAttribute('data-market-value', holding.current_value || 0);
-    row.setAttribute('data-unrealized-gain', holding.unrealized_gain || 0);
-    row.setAttribute('data-realized-gain', holding.realized_gain || 0);
-    row.setAttribute('data-dividends', (holding.dividends || 0) + (holding.interest || 0));
-    row.setAttribute('data-return-percent', holding.unrealized_gain_percent || 0);
-    
-    // 计算总收益率
-    const totalGain = (holding.unrealized_gain || 0) + (holding.realized_gain || 0) + (holding.dividends || 0) + (holding.interest || 0);
-    const totalCost = holding.total_cost || 0;
-    const totalReturnPercent = totalCost > 0 ? (totalGain / totalCost * 100) : 0;
-    
-    row.innerHTML = `
-        <!-- Stock Symbol -->
-        <td class="ps-3">
-            <div class="d-flex align-items-center">
-                <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar" 
-                     style="color: ${holding.currency === 'CAD' ? 'black' : 'white'}; cursor: pointer;"
-                     onclick="openAddTransactionModalForStock('${holding.symbol}', '${holding.currency}', null)"
-                     title="Click to add transaction for ${holding.symbol}">
-                    ${holding.currency === 'CAD' ? 'C$' : '$'}
-                </div>
-                <div>
-                    <a href="/stock/${holding.symbol}" class="text-decoration-none">
-                        <strong>${holding.symbol}</strong>
-                    </a>
-                    <br><small class="text-muted">${holding.sector || 'Unknown'}</small>
-                </div>
-            </div>
-        </td>
-        
-        <!-- Shares -->
-        <td class="text-end">
-            <span class="fw-medium">${parseFloat(holding.shares || 0).toFixed(2)}</span>
-        </td>
-        
-        <!-- Average Cost -->
-        <td class="text-end">
-            <span class="text-muted">$${parseFloat(holding.average_cost || 0).toFixed(2)}</span>
-            <br><small class="text-muted">${holding.currency}</small>
-        </td>
-        
-        <!-- Current Price -->
-        <td class="text-end">
-            <span class="fw-bold">$${parseFloat(holding.current_price || 0).toFixed(2)}</span>
-            <br><small class="text-muted">${holding.currency}</small>
-        </td>
-        
-        <!-- Daily Change -->
-        <td class="text-end">
-            <span class="fw-medium ${(holding.daily_change_value || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                ${(holding.daily_change_value || 0) >= 0 ? '+' : ''}$${Math.abs(holding.daily_change_value || 0).toFixed(2)}
-            </span>
-            <br><small class="${(holding.daily_change_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                ${(holding.daily_change_percent || 0) >= 0 ? '+' : ''}${(holding.daily_change_percent || 0).toFixed(2)}%
-            </small>
-        </td>
-        
-        <!-- Market Value -->
-        <td class="text-end">
-            <span class="fw-bold">$${parseFloat(holding.current_value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-            <br><small class="text-muted">${holding.currency}</small>
-        </td>
-        
-        <!-- Unrealized Gain/Loss -->
-        <td class="text-end">
-            <span class="fw-bold ${(holding.unrealized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                ${(holding.unrealized_gain || 0) >= 0 ? '+' : ''}
-                $${Math.abs(holding.unrealized_gain || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-            <br><small class="text-muted ${(holding.unrealized_gain_percent || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                ${(holding.unrealized_gain_percent || 0) >= 0 ? '+' : ''}
-                ${(holding.unrealized_gain_percent || 0).toFixed(1)}%
-            </small>
-        </td>
-        
-        <!-- Realized Gains -->
-        <td class="text-end">
-            <span class="fw-medium ${(holding.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                ${(holding.realized_gain || 0) >= 0 ? '+' : ''}
-                $${Math.abs(holding.realized_gain || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-        </td>
-        
-        <!-- Dividends + Interest -->
-        <td class="text-end">
-            <span class="fw-medium text-success">
-                $${((holding.dividends || 0) + (holding.interest || 0)).toFixed(2)}
-            </span>
-        </td>
-        
-        <!-- Return Percentage -->
-        <td class="text-end pe-3">
-            <span class="badge ${totalReturnPercent >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
-                ${totalReturnPercent >= 0 ? '+' : ''}${totalReturnPercent.toFixed(1)}%
-            </span>
-        </td>
-    `;
-    
-    return row;
 }
 
 // 更新持仓行数据（只更新价格相关的单元格）
