@@ -26,9 +26,6 @@
         <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
             <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
         </button>
-        <a href="{{ url_for('main.fetch_history_tool') }}" class="btn btn-outline-primary">
-            <i class="fas fa-chart-line me-2"></i>获取历史数据
-        </a>
         {% if request.args.get('account_id') %}
         <a href="{{ url_for('main.import_transactions', account_id=request.args.get('account_id')) }}" class="btn btn-success">
             <i class="fas fa-file-import me-2"></i>{{ _('Import CSV') }}

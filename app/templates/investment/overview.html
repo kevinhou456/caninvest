@@ -735,12 +735,20 @@
                     </table>
                 </div>
                 
-                <!-- 始终显示No cleared holdings提示，JavaScript会在有数据时隐藏 -->
+                <!-- 只在没有清仓股票时显示提示 -->
+                {% if not cleared_holdings or cleared_holdings|length == 0 %}
                 <div class="text-center py-5" id="no-cleared-holdings-message">
                     <i class="fas fa-history fa-3x text-muted mb-3"></i>
                     <h5 class="text-muted">{{ _('No cleared holdings found') }}</h5>
                     <p class="text-muted mb-0">{{ _('Stocks you have completely sold will appear here') }}</p>
                 </div>
+                {% else %}
+                <div class="text-center py-5" id="no-cleared-holdings-message" style="display: none;">
+                    <i class="fas fa-history fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">{{ _('No cleared holdings found') }}</h5>
+                    <p class="text-muted mb-0">{{ _('Stocks you have completely sold will appear here') }}</p>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -2436,19 +2444,6 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error('Bootstrap is not available!');
     }
     
-    // Test function - add a simple test button
-    const testButton = document.createElement('button');
-    testButton.textContent = 'Test Modal';
-    testButton.className = 'btn btn-warning btn-sm';
-    testButton.style.position = 'fixed';
-    testButton.style.top = '10px';
-    testButton.style.right = '10px';
-    testButton.style.zIndex = '9999';
-    testButton.onclick = function() {
-        console.log('Test button clicked');
-        openAddTransactionModalForStock('TEST', 'USD', null);
-    };
-    document.body.appendChild(testButton);
 });
 
 // Reset form to default state
