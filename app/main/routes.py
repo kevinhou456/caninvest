@@ -47,7 +47,8 @@ def _build_portfolio_view_data(
     asset_service,
     ownership_map=None,
     target_date=None,
-    exchange_rates=None
+    exchange_rates=None,
+    account_id=None
 ):
     target_date = target_date or date.today()
     exchange_rates = exchange_rates or currency_service.get_cad_usd_rates()
@@ -78,11 +79,36 @@ def _build_portfolio_view_data(
         return account_name
 
     def merge_holdings_by_stock(holdings_list):
-        if len(account_ids) <= 1:
-            for holding in holdings_list:
-                total_shares = extract_shares(holding)
-                holding['current_shares'] = total_shares
-                holding['shares'] = total_shares
+        # 如果选择了单一账户（account_id不为None），不创建account_details
+        # 如果未选择单一账户（account_id为None），即使只有一个账户也要创建account_details
+        if account_id is not None or len(account_ids) <= 1:
+            # 未选择单一账户时，为每个holding创建account_details
+            if account_id is None and len(account_ids) <= 1:
+                for holding in holdings_list:
+                    total_shares = extract_shares(holding)
+                    holding['current_shares'] = total_shares
+                    holding['shares'] = total_shares
+                    # 创建account_details，即使只有一个账户
+                    account_name = holding.get('account_name', '')
+                    account_detail = {
+                        'account_name': format_account_name(account_name),
+                        'shares': total_shares,
+                        'cost': safe_float(holding.get('total_cost')),
+                        'realized_gain': safe_float(holding.get('realized_gain')),
+                        'unrealized_gain': safe_float(holding.get('unrealized_gain'))
+                    }
+                    # 如果是清仓持仓，添加bought_shares和sold_shares字段
+                    if 'total_bought_shares' in holding:
+                        account_detail['bought_shares'] = safe_float(holding.get('total_bought_shares', 0))
+                        account_detail['sold_shares'] = safe_float(holding.get('total_sold_shares', 0))
+                        account_detail['sold_value'] = safe_float(holding.get('total_sold_value', 0))
+                    holding['account_details'] = [account_detail]
+            else:
+                # 选择了单一账户，不创建account_details
+                for holding in holdings_list:
+                    total_shares = extract_shares(holding)
+                    holding['current_shares'] = total_shares
+                    holding['shares'] = total_shares
             return holdings_list
 
         merged = {}
@@ -104,13 +130,19 @@ def _build_portfolio_view_data(
                 merged_holding['merged_accounts'] = [holding.get('account_name', '')]
 
                 account_name = holding.get('account_name', '')
-                merged_holding['account_details'] = [{
+                account_detail = {
                     'account_name': format_account_name(account_name),
                     'shares': incoming_shares,
                     'cost': safe_float(holding.get('total_cost')),
                     'realized_gain': safe_float(holding.get('realized_gain')),
                     'unrealized_gain': safe_float(holding.get('unrealized_gain'))
-                }]
+                }
+                # 如果是清仓持仓，添加bought_shares和sold_shares字段
+                if 'total_bought_shares' in holding:
+                    account_detail['bought_shares'] = safe_float(holding.get('total_bought_shares', 0))
+                    account_detail['sold_shares'] = safe_float(holding.get('total_sold_shares', 0))
+                    account_detail['sold_value'] = safe_float(holding.get('total_sold_value', 0))
+                merged_holding['account_details'] = [account_detail]
                 merged[key] = merged_holding
             else:
                 existing = merged[key]
@@ -125,13 +157,19 @@ def _build_portfolio_view_data(
                 existing.setdefault('merged_accounts', []).append(holding.get('account_name', ''))
 
                 account_name = holding.get('account_name', '')
-                existing.setdefault('account_details', []).append({
+                account_detail = {
                     'account_name': format_account_name(account_name),
                     'shares': incoming_shares,
                     'cost': safe_float(holding.get('total_cost')),
                     'realized_gain': safe_float(holding.get('realized_gain')),
                     'unrealized_gain': safe_float(holding.get('unrealized_gain'))
-                })
+                }
+                # 如果是清仓持仓，添加bought_shares和sold_shares字段
+                if 'total_bought_shares' in holding:
+                    account_detail['bought_shares'] = safe_float(holding.get('total_bought_shares', 0))
+                    account_detail['sold_shares'] = safe_float(holding.get('total_sold_shares', 0))
+                    account_detail['sold_value'] = safe_float(holding.get('total_sold_value', 0))
+                existing.setdefault('account_details', []).append(account_detail)
 
         for merged_holding in merged.values():
             if merged_holding['current_shares'] > 0:
@@ -325,7 +363,8 @@ def overview():
             asset_service=AssetValuationService(),
             ownership_map=ownership_map,
             target_date=date.today(),
-            exchange_rates=exchange_rates
+            exchange_rates=exchange_rates,
+            account_id=account_id
         )
 
         holdings = view_data['holdings']
@@ -601,7 +640,8 @@ def update_overview_prices():
             asset_service=AssetValuationService(),
             ownership_map=ownership_map,
             target_date=date.today(),
-            exchange_rates=exchange_rates
+            exchange_rates=exchange_rates,
+            account_id=account_id
         )
         
         holdings = view_data['holdings']
@@ -3312,7 +3352,7 @@ def get_async_portfolio_prices():
         portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
 
         accounts = Account.query.filter(Account.id.in_(account_ids)).all()
-        ownership_map = _build_ownership_map(member_id)
+        ownership_map = _build_ownership_map(member_id) if member_id else None
         asset_service = AssetValuationService()
         view_data = _build_portfolio_view_data(
             account_ids=account_ids,
@@ -3321,7 +3361,8 @@ def get_async_portfolio_prices():
             asset_service=asset_service,
             ownership_map=ownership_map,
             target_date=date.today(),
-            exchange_rates=currency_service.get_cad_usd_rates()
+            exchange_rates=currency_service.get_cad_usd_rates(),
+            account_id=None
         )
 
         holdings = view_data['holdings']
