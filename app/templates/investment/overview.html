@@ -509,8 +509,8 @@
                                 <!-- Return Percentage -->
                                 <td class="text-end pe-3">
                                     {% set total_gain = (holding.get('unrealized_gain', 0) or 0) + (holding.get('realized_gain', 0) or 0) + (holding.get('dividends', 0) or 0) + (holding.get('interest', 0) or 0) %}
-                                    {% set total_cost = holding.get('total_cost', 0) or 0 %}
-                                    {% set total_return_percent = (total_gain / total_cost * 100) if total_cost > 0 else 0 %}
+                                    {% set total_bought_value = holding.get('total_bought_value', 0) or 0 %}
+                                    {% set total_return_percent = (total_gain / total_bought_value * 100) if total_bought_value > 0 else 0 %}
                                     <span class="badge {{ 'bg-success' if total_return_percent >= 0 else 'bg-danger' }} return-badge">
                                         {% if total_return_percent >= 0 %}+{% endif %}
                                         {{ "{:.1f}".format(total_return_percent) }}%

@@ -55,7 +55,8 @@ def _build_portfolio_view_data(
 
     raw_holdings = portfolio_summary.get('current_holdings', [])
     raw_cleared_holdings = portfolio_summary.get('cleared_holdings', [])
-    account_lookup = {acc.name: acc for acc in accounts} if accounts else {}
+    # 使用account_id作为key，更准确
+    account_lookup = {acc.id: acc for acc in accounts} if accounts else {}
 
     def safe_float(value, default=0.0):
         if value in (None, ""):
@@ -68,15 +69,19 @@ def _build_portfolio_view_data(
     def extract_shares(holding_dict):
         return safe_float(holding_dict.get('current_shares', 0))
 
-    def format_account_name(account_name):
-        if not account_lookup or not account_name:
-            return account_name
-        account_obj = account_lookup.get(account_name)
-        if account_obj and account_obj.account_members:
-            member_names = [am.member.name for am in account_obj.account_members]
-            if member_names:
-                return f"{account_name} - {', '.join(member_names)}"
-        return account_name
+    def format_account_name(holding_dict):
+        """根据holding数据格式化账户名称，使用account_id查找账户"""
+        account_id = holding_dict.get('account_id')
+        if not account_id or not account_lookup:
+            return holding_dict.get('account_name', 'Unknown')
+        
+        account_obj = account_lookup.get(account_id)
+        if account_obj:
+            # 使用asset_service的方法来获取带成员信息的账户名称
+            return asset_service._get_account_name_with_members(account_obj)
+        
+        # 如果找不到账户对象，返回原始名称
+        return holding_dict.get('account_name', 'Unknown')
 
     def merge_holdings_by_stock(holdings_list):
         # 如果选择了单一账户（account_id不为None），不创建account_details
@@ -89,9 +94,8 @@ def _build_portfolio_view_data(
                     holding['current_shares'] = total_shares
                     holding['shares'] = total_shares
                     # 创建account_details，即使只有一个账户
-                    account_name = holding.get('account_name', '')
                     account_detail = {
-                        'account_name': format_account_name(account_name),
+                        'account_name': format_account_name(holding),
                         'shares': total_shares,
                         'cost': safe_float(holding.get('total_cost')),
                         'realized_gain': safe_float(holding.get('realized_gain')),
@@ -120,22 +124,28 @@ def _build_portfolio_view_data(
                 merged_holding = holding.copy()
                 merged_holding['current_shares'] = incoming_shares
                 merged_holding['shares'] = incoming_shares
-                merged_holding['total_cost'] = safe_float(holding.get('total_cost'))
+                total_cost = safe_float(holding.get('total_cost'))
+                merged_holding['total_cost'] = total_cost
                 merged_holding['average_cost'] = safe_float(holding.get('average_cost'))
                 merged_holding['current_value'] = safe_float(holding.get('current_value'))
-                merged_holding['unrealized_gain'] = safe_float(holding.get('unrealized_gain'))
+                unrealized_gain = safe_float(holding.get('unrealized_gain'))
+                merged_holding['unrealized_gain'] = unrealized_gain
+                # 确保unrealized_gain_percent基于当前的数据计算
+                if total_cost > 0:
+                    merged_holding['unrealized_gain_percent'] = (unrealized_gain / total_cost) * 100
+                else:
+                    merged_holding['unrealized_gain_percent'] = 0
                 merged_holding['realized_gain'] = safe_float(holding.get('realized_gain'))
                 merged_holding['total_dividends'] = safe_float(holding.get('total_dividends'))
                 merged_holding['total_interest'] = safe_float(holding.get('total_interest'))
                 merged_holding['merged_accounts'] = [holding.get('account_name', '')]
 
-                account_name = holding.get('account_name', '')
                 account_detail = {
-                    'account_name': format_account_name(account_name),
+                    'account_name': format_account_name(holding),
                     'shares': incoming_shares,
-                    'cost': safe_float(holding.get('total_cost')),
+                    'cost': total_cost,
                     'realized_gain': safe_float(holding.get('realized_gain')),
-                    'unrealized_gain': safe_float(holding.get('unrealized_gain'))
+                    'unrealized_gain': unrealized_gain
                 }
                 # 如果是清仓持仓，添加bought_shares和sold_shares字段
                 if 'total_bought_shares' in holding:
@@ -156,9 +166,8 @@ def _build_portfolio_view_data(
                 existing['total_interest'] = safe_float(existing.get('total_interest')) + safe_float(holding.get('total_interest'))
                 existing.setdefault('merged_accounts', []).append(holding.get('account_name', ''))
 
-                account_name = holding.get('account_name', '')
                 account_detail = {
-                    'account_name': format_account_name(account_name),
+                    'account_name': format_account_name(holding),
                     'shares': incoming_shares,
                     'cost': safe_float(holding.get('total_cost')),
                     'realized_gain': safe_float(holding.get('realized_gain')),
@@ -175,9 +184,17 @@ def _build_portfolio_view_data(
             if merged_holding['current_shares'] > 0:
                 merged_holding['average_cost'] = merged_holding['total_cost'] / merged_holding['current_shares']
                 merged_holding['average_cost_display'] = merged_holding['average_cost']
+                # 重新计算未实现收益率（基于合并后的总成本和未实现收益）
+                total_cost = safe_float(merged_holding.get('total_cost', 0))
+                unrealized_gain = safe_float(merged_holding.get('unrealized_gain', 0))
+                if total_cost > 0:
+                    merged_holding['unrealized_gain_percent'] = (unrealized_gain / total_cost) * 100
+                else:
+                    merged_holding['unrealized_gain_percent'] = 0
             else:
                 merged_holding['average_cost'] = 0
                 merged_holding['average_cost_display'] = 0
+                merged_holding['unrealized_gain_percent'] = 0
 
             daily_change_value = safe_float(merged_holding.get('daily_change_value'))
             previous_value = safe_float(merged_holding.get('previous_value'))
