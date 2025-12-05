@@ -258,12 +258,13 @@ class StockPriceService:
         
         return results
     
-    def get_cached_stock_price(self, symbol: str, currency: str) -> Decimal:
+    def get_cached_stock_price(self, symbol: str, currency: str, *, auto_refresh: bool = False) -> Decimal:
         """
         获取股票当前价格 - 带15分钟缓存过期检查和自动更新
         参数:
             symbol: 股票代码
             currency: 股票货币（必需，用于联合主键查询）
+            auto_refresh: 是否在缓存过期时自动调用外部接口刷新
         返回:
             Decimal: 股票当前价格，如果无法获取则返回0
         """
@@ -289,7 +290,7 @@ class StockPriceService:
                     needs_update = True
             
             # 如果需要更新，从Yahoo Finance获取最新价格
-            if needs_update:
+            if needs_update and auto_refresh:
                 self.update_stock_price(symbol, currency)
                 # 重新查询更新后的数据 - 使用联合主键
                 stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()

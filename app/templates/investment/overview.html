@@ -904,22 +904,16 @@
     </div>
 </div>
 
-<!-- 非模态加载提示 -->
-<div id="loading-toast" class="toast-container position-fixed top-0 start-50 translate-middle-x" style="z-index: 9999; margin-top: 20px;">
-    <div class="toast show" role="alert" aria-live="assertive" aria-atomic="true" style="display: none;">
-        <div class="toast-header bg-primary text-white">
-            <div class="spinner-border spinner-border-sm me-2" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <strong class="me-auto">正在获取数据</strong>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
-        </div>
-        <div class="toast-body">
-            <div class="d-flex align-items-center">
-                <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
-                    <span class="visually-hidden">Loading...</span>
+<!-- 中央提示弹窗 -->
+<div class="modal fade" id="priceFetchModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content text-center p-4">
+            <div class="modal-body">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">{{ _('Loading...') }}</span>
                 </div>
-                <span id="loading-message">正在获取当前股票价格...</span>
+                <h5 class="mb-2">{{ _('正在获取股票价格') }}</h5>
+                <p class="mb-0 text-muted" id="price-fetch-message">{{ _('准备开始...') }}</p>
             </div>
         </div>
     </div>
@@ -929,118 +923,109 @@
 
 {% block scripts %}
 <script>
-// 加载提示函数
-function showLoadingOverlay(message) {
-    const msg = message || '正在获取当前股票价格...';
-    const loadingToast = document.getElementById('loading-toast');
-    const loadingMessage = document.getElementById('loading-message');
-    
-    if (loadingToast && loadingMessage) {
-        loadingMessage.textContent = msg;
-        loadingToast.style.display = 'block';
-        
-        // 自动隐藏toast（8秒后）
-        setTimeout(() => {
-            hideLoadingOverlay();
-        }, 8000);
-    }
-}
+let priceFetchModalInstance = null;
 
-function hideLoadingOverlay() {
-    const loadingToast = document.getElementById('loading-toast');
-    if (loadingToast) {
-        loadingToast.style.display = 'none';
+function getPriceFetchModal() {
+    if (priceFetchModalInstance) {
+        return priceFetchModalInstance;
     }
-}
-
-// 异步加载股票价格数据
-function loadStockPricesAsync(forceRefresh = false) {
-    if (forceRefresh) {
-        showLoadingOverlay('正在强制更新股票价格...');
-    } else {
-        showLoadingOverlay('正在获取股票价格...');
-    }
-    
-    // 获取当前页面的过滤参数
-    const accountId = {{ account_id if account_id else 'null' }};
-    const memberId = {{ member_id if member_id else 'null' }};
-    
-    // 调用异步API获取股票价格
-    fetch('/api/overview/update-prices', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            account_id: accountId,
-            member_id: memberId,
-            force_refresh: forceRefresh  // 添加强制刷新参数
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // 更新页面数据
-            updatePortfolioData(data);
-            hideLoadingOverlay();
-            
-            // 显示成功提示
-            if (forceRefresh) {
-                showSuccessToast('股票价格已强制更新');
-            } else {
-                showSuccessToast('股票价格已更新');
-            }
-        } else {
-            hideLoadingOverlay();
-            showErrorToast('获取股票价格失败: ' + (data.error || '未知错误'));
-        }
-    })
-    .catch(error => {
-        console.error('Error loading stock prices:', error);
-        hideLoadingOverlay();
-        showErrorToast('获取股票价格时发生错误');
+    const modalEl = document.getElementById('priceFetchModal');
+    if (!modalEl) return null;
+    priceFetchModalInstance = new bootstrap.Modal(modalEl, {
+        backdrop: 'static',
+        keyboard: false
     });
+    return priceFetchModalInstance;
 }
 
-// 更新投资组合数据
-function updatePortfolioData(data) {
-    console.log('更新投资组合数据:', data);
-    
-    // 更新持仓表格
-    if (data.holdings && data.holdings.length > 0) {
-        updateHoldingsTable(data.holdings);
+// 首次进入页面时自动提示正在获取价格（仅一次，避免无限刷新）
+document.addEventListener('DOMContentLoaded', function() {
+    const refreshFlagKey = 'overview_price_refresh_once';
+    const hasRefreshed = sessionStorage.getItem(refreshFlagKey);
+
+    if (!hasRefreshed) {
+        sessionStorage.setItem(refreshFlagKey, '1');
+        loadStockPricesAsync(false, true);
+    } else {
+        // 下次进入时再次允许自动刷新
+        sessionStorage.removeItem(refreshFlagKey);
     }
-    
-    // 已清仓表格与当前股价无关，不需要异步更新
-    // if (data.cleared_holdings && data.cleared_holdings.length > 0) {
-    //     updateClearedHoldingsTable(data.cleared_holdings);
-    // }
-    
-    // 更新指标数据
-    if (data.metrics) {
-        updateMetrics(data.metrics);
+});
+
+function showPriceFetchModal(message) {
+    const modal = getPriceFetchModal();
+    const messageEl = document.getElementById('price-fetch-message');
+    if (messageEl) {
+        messageEl.textContent = message || '正在获取股票价格...';
     }
-    
-    // 更新日变化数据
-    if (data.daily_change) {
-        updateDailyChange(data.daily_change);
+    if (modal) {
+        modal.show();
     }
-    
-    // 更新汇率数据
-    if (data.exchange_rates) {
-        updateExchangeRates(data.exchange_rates);
+}
+
+function hidePriceFetchModal() {
+    const modal = getPriceFetchModal();
+    if (modal) {
+        modal.hide();
     }
-    
-    // 显示更新结果
-    if (data.update_result) {
-        const updated = data.update_result.updated || 0;
-        const failed = data.update_result.failed || 0;
-        if (updated > 0) {
-            showSuccessToast(`成功更新 ${updated} 只股票价格`);
+}
+
+function collectUniqueStockSymbols() {
+    const rows = document.querySelectorAll('#holdingsTable tbody tr');
+    const unique = new Set();
+    const list = [];
+
+    rows.forEach(row => {
+        const symbol = row.getAttribute('data-symbol');
+        const currency = row.getAttribute('data-currency') || 'USD';
+        if (!symbol) return;
+        const key = `${symbol}_${currency}`;
+        if (!unique.has(key)) {
+            unique.add(key);
+            list.push({ symbol, currency });
         }
-        if (failed > 0) {
-            showErrorToast(`${failed} 只股票价格更新失败`);
+    });
+
+    return list;
+}
+
+// 逐只股票刷新价格并显示中央提示
+async function loadStockPricesAsync(forceRefresh = true, autoReload = true) {
+    const targets = collectUniqueStockSymbols();
+    if (!targets.length) {
+        showErrorToast('当前没有需要更新价格的持仓');
+        return;
+    }
+
+    const failed = [];
+    for (const { symbol, currency } of targets) {
+        showPriceFetchModal(`正在获取 ${symbol} (${currency}) 的价格...`);
+        try {
+            const response = await fetch('/api/stocks/refresh-price', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol, currency, force_refresh: forceRefresh })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                failed.push(symbol);
+            }
+        } catch (error) {
+            console.error('刷新股票价格失败', symbol, error);
+            failed.push(symbol);
         }
+    }
+
+    hidePriceFetchModal();
+
+    if (failed.length) {
+        showErrorToast(`以下股票价格更新失败: ${failed.join(', ')}`);
+    } else {
+        showSuccessToast('股票价格已更新');
+    }
+
+    if (autoReload) {
+        window.location.reload();
     }
 }
 
@@ -1502,41 +1487,11 @@ function showErrorToast(message) {
 
 // 刷新投资组合数据
 function refreshPortfolioData() {
-    loadStockPricesAsync(true);  // 强制更新股票价格
+    loadStockPricesAsync(true, true);
 }
-
-// 页面加载时立即显示页面，然后异步更新数据
-document.addEventListener('DOMContentLoaded', function() {
-    // 异步版本：页面立即显示，然后异步加载数据
-    console.log('页面加载完成，开始异步更新数据...');
-    
-    // 显示加载提示
-    showLoadingOverlay('正在获取最新数据...');
-    
-    // 异步加载股票价格和投资组合数据
-    loadStockPricesAsync(false);
-});
 </script>
 
 <style>
-/* 加载提示样式 */
-#loading-toast .toast {
-    min-width: 300px;
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-    border: none;
-    border-radius: 0.5rem;
-}
-
-#loading-toast .toast-header {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 0.5rem 0.5rem 0 0;
-}
-
-#loading-toast .toast-body {
-    background-color: #f8f9fa;
-    border-radius: 0 0 0.5rem 0.5rem;
-}
-
 .sortable {
     user-select: none;
     transition: background-color 0.2s ease;

@@ -20,6 +20,9 @@
         <a href="{{ url_for('main.fetch_history_tool') }}" class="btn btn-outline-primary">
             <i class="fas fa-chart-line me-2"></i>获取历史数据
         </a>
+        <button type="button" class="btn btn-outline-danger" onclick="clearPriceCache()">
+            <i class="fas fa-broom me-2"></i>{{ _('Clear Price Cache') }}
+        </button>
     </div>
 </div>
 
@@ -306,6 +309,30 @@ function deleteStock(stockId, symbol) {
             alert('{{ _("Error deleting stock. Please try again.") }}');
         });
     }
+}
+
+function clearPriceCache() {
+    if (!confirm('确认清除所有股票当前价格缓存吗？')) {
+        return;
+    }
+    fetch('/api/stocks/clear-price-cache', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`已清除 ${data.cleared || 0} 条价格缓存，刷新页面以查看效果`);
+        } else {
+            alert(data.error || '清除失败');
+        }
+    })
+    .catch(() => {
+        alert('清除失败，请重试');
+    });
 }
 
 function updateStockCategory(stockId) {

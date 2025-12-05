@@ -244,8 +244,9 @@ class HoldingsSnapshot:
 class HoldingsService:
     """持仓计算服务"""
     
-    def __init__(self):
-        pass
+    def __init__(self, *, auto_refresh_prices: bool = False):
+        # 控制是否在读取缓存价格时触发外部刷新
+        self.auto_refresh_prices = auto_refresh_prices
     
     def get_holdings_snapshot(self, 
                             target: Union[int, List[int], str] = 'all',
@@ -394,7 +395,11 @@ class HoldingsService:
             #所有股票价格都是用stock price service获取的，所以货币就是传入的货币
                  
             
-            price = price_service.get_cached_stock_price(symbol, currency)
+            price = price_service.get_cached_stock_price(
+                symbol,
+                currency,
+                auto_refresh=self.auto_refresh_prices
+            )
 
             return price if price > 0 else None
         except Exception as e:

@@ -60,7 +60,9 @@ class AssetSnapshot:
 class AssetValuationService:
     """统一资产估值服务 - 所有资产计算的单一入口"""
     
-    def __init__(self):
+    def __init__(self, *, auto_refresh_prices: bool = False):
+        # auto_refresh_prices 控制是否在读取缓存价格时触发外部刷新
+        self.auto_refresh_prices = auto_refresh_prices
         self.stock_price_service = StockPriceService()
         self.currency_service = CurrencyService()
         self.history_cache_service = StockHistoryCacheService()
@@ -171,7 +173,9 @@ class AssetValuationService:
 
                 # 获取股票基本信息
                 currency = Transaction.get_currency_by_stock_symbol(symbol)
-                current_price = self.stock_price_service.get_cached_stock_price(symbol, currency) or 0
+                current_price = self.stock_price_service.get_cached_stock_price(
+                    symbol, currency, auto_refresh=self.auto_refresh_prices
+                ) or 0
 
                 # 计算统计数据
                 bought_total, sold_total, total_bought_shares, total_sold_shares, realized_gain = self._calculate_stock_statistics(
@@ -488,7 +492,9 @@ class AssetValuationService:
                 )
                 
                 # 获取当前价格
-                current_price = self.stock_price_service.get_cached_stock_price(symbol, currency) or Decimal('0')
+                current_price = self.stock_price_service.get_cached_stock_price(
+                    symbol, currency, auto_refresh=self.auto_refresh_prices
+                ) or Decimal('0')
                 
                 if current_shares > 0:
                     # 当前持仓
@@ -808,7 +814,9 @@ class AssetValuationService:
                     
                     # 获取股票信息
                     currency = Transaction.get_currency_by_stock_symbol(symbol)
-                    current_price = self.stock_price_service.get_cached_stock_price(symbol, currency) or 0
+                    current_price = self.stock_price_service.get_cached_stock_price(
+                        symbol, currency, auto_refresh=self.auto_refresh_prices
+                    ) or 0
                     
                     if current_price > 0:
                         # 获取前一日收盘价
@@ -982,7 +990,9 @@ class AssetValuationService:
             stock_info = self._get_stock_info(symbol)
             currency = stock_info['currency']
                 
-            price = self.stock_price_service.get_cached_stock_price(symbol, currency)
+            price = self.stock_price_service.get_cached_stock_price(
+                symbol, currency, auto_refresh=self.auto_refresh_prices
+            )
             if price and price > 0:
                 market_value = current_shares * Decimal(str(price))
                 unrealized_gain = market_value - total_cost
@@ -1284,7 +1294,9 @@ class AssetValuationService:
                 price = self._get_historical_stock_price(symbol, target_date, currency)
             else:
                 # 使用当前缓存价格
-                price = self.stock_price_service.get_cached_stock_price(symbol, currency)
+                price = self.stock_price_service.get_cached_stock_price(
+                    symbol, currency, auto_refresh=self.auto_refresh_prices
+                )
             
             if price is None or price <= 0:
                 logger.warning(f"无法获取{symbol}在{target_date}的价格")
@@ -1508,7 +1520,9 @@ class AssetValuationService:
             # 获取市值
             stock_info = self._get_stock_info(symbol)
             currency = stock_info.get('currency', 'USD')
-            price = self.stock_price_service.get_cached_stock_price(symbol, currency)
+            price = self.stock_price_service.get_cached_stock_price(
+                symbol, currency, auto_refresh=self.auto_refresh_prices
+            )
 
             if price:
                 market_value = shares * Decimal(str(price))

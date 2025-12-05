@@ -368,7 +368,7 @@ def overview():
         
         # 使用Portfolio Service统一计算架构
         from app.services.portfolio_service import PortfolioService, TimePeriod
-        portfolio_service = PortfolioService()
+        portfolio_service = PortfolioService(auto_refresh_prices=False)
         
         # 使用Portfolio Service获取投资组合数据（使用缓存价格）
         portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
@@ -377,7 +377,7 @@ def overview():
             account_ids=account_ids,
             accounts=accounts,
             portfolio_summary=portfolio_summary,
-            asset_service=AssetValuationService(),
+            asset_service=AssetValuationService(auto_refresh_prices=False),
             ownership_map=ownership_map,
             target_date=date.today(),
             exchange_rates=exchange_rates,
@@ -636,7 +636,7 @@ def update_overview_prices():
         from app.services.portfolio_service import PortfolioService, TimePeriod
         from app.services.currency_service import CurrencyService
         
-        portfolio_service = PortfolioService()
+        portfolio_service = PortfolioService(auto_refresh_prices=False)
         currency_service = CurrencyService()
         
         # 获取汇率信息
@@ -654,7 +654,7 @@ def update_overview_prices():
             account_ids=account_ids,
             accounts=accounts,
             portfolio_summary=portfolio_summary,
-            asset_service=AssetValuationService(),
+            asset_service=AssetValuationService(auto_refresh_prices=False),
             ownership_map=ownership_map,
             target_date=date.today(),
             exchange_rates=exchange_rates,
@@ -683,6 +683,50 @@ def update_overview_prices():
             'success': False,
             'error': f'Failed to update stock prices: {str(e)}'
         }), 500
+
+
+@bp.route('/api/stocks/refresh-price', methods=['POST'])
+def refresh_single_stock_price():
+    """直接通过Yahoo Finance刷新单只股票价格"""
+    try:
+        data = request.get_json() or {}
+        symbol = (data.get('symbol') or '').strip().upper()
+        currency = (data.get('currency') or '').strip().upper() or 'USD'
+        force_refresh_raw = data.get('force_refresh', False)
+        force_refresh = force_refresh_raw if isinstance(force_refresh_raw, bool) else str(force_refresh_raw).lower() == 'true'
+
+        if not symbol:
+            return jsonify({'success': False, 'error': _('Stock symbol is required')}), 400
+
+        from app.services.stock_price_service import StockPriceService
+        stock_service = StockPriceService()
+
+        updated = stock_service.update_stock_price(symbol, currency, force_refresh=force_refresh)
+        if not updated:
+            return jsonify({'success': False, 'error': _('Failed to fetch price from Yahoo Finance')})
+
+        stock_info = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+        current_price = float(stock_info.current_price) if stock_info and stock_info.current_price else None
+
+        return jsonify({'success': True, 'symbol': symbol, 'currency': currency, 'current_price': current_price})
+    except Exception as exc:
+        current_app.logger.error('刷新股票价格失败: %s', exc, exc_info=True)
+        return jsonify({'success': False, 'error': _('Failed to refresh stock price')}), 500
+
+
+@bp.route('/api/stocks/clear-price-cache', methods=['POST'])
+def clear_stock_price_cache():
+    """清除所有股票的当前价格缓存"""
+    try:
+        cleared = StocksCache.query.update(
+            {StocksCache.current_price: None, StocksCache.price_updated_at: None}
+        )
+        db.session.commit()
+        return jsonify({'success': True, 'cleared': cleared})
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error('清除股票价格缓存失败: %s', exc, exc_info=True)
+        return jsonify({'success': False, 'error': _('Failed to clear price cache')}), 500
 
 
 @bp.route('/api/accounts/cash-data', methods=['GET'])
@@ -1022,7 +1066,7 @@ def api_holdings_board():
 
         # 使用与overview完全相同的服务
         from app.services.asset_valuation_service import AssetValuationService
-        asset_service = AssetValuationService()
+        asset_service = AssetValuationService(auto_refresh_prices=False)
 
         # 获取详细的投资组合数据 - 与overview使用相同方法
         portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
@@ -2624,7 +2668,7 @@ def stock_detail(stock_symbol):
         # 为每个交易记录添加格式化的账户名称
         if transactions:
             from app.services.asset_valuation_service import AssetValuationService
-            asset_service = AssetValuationService()
+            asset_service = AssetValuationService(auto_refresh_prices=False)
 
             for transaction in transactions:
                 # 使用资产服务的方法来获取格式化的账户名称
@@ -2758,7 +2802,7 @@ def stock_detail(stock_symbol):
         from app.services.portfolio_service import PortfolioService, TimePeriod
         from datetime import date
         
-        portfolio_service = PortfolioService()
+        portfolio_service = PortfolioService(auto_refresh_prices=False)
         stock_stats = {
             'current_shares': 0,
             'avg_cost': 0,
@@ -3365,12 +3409,12 @@ def get_async_portfolio_prices():
         
         # 使用Portfolio Service重新计算持仓价值
         from app.services.portfolio_service import PortfolioService, TimePeriod
-        portfolio_service = PortfolioService()
+        portfolio_service = PortfolioService(auto_refresh_prices=False)
         portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
 
         accounts = Account.query.filter(Account.id.in_(account_ids)).all()
         ownership_map = _build_ownership_map(member_id) if member_id else None
-        asset_service = AssetValuationService()
+        asset_service = AssetValuationService(auto_refresh_prices=False)
         view_data = _build_portfolio_view_data(
             account_ids=account_ids,
             accounts=accounts,

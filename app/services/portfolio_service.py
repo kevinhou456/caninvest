@@ -170,7 +170,9 @@ class PeriodStats:
 class PortfolioService:
     """统一投资组合服务"""
     
-    def __init__(self):
+    def __init__(self, *, auto_refresh_prices: bool = False):
+        # auto_refresh_prices 控制是否在读取缓存价格时触发外部刷新
+        self.auto_refresh_prices = auto_refresh_prices
         self.history_cache_service = StockHistoryCacheService()
         self._benchmark_cache: Dict[Tuple[str, date, date], List[float]] = {}
     
@@ -450,7 +452,11 @@ class PortfolioService:
           
             
             #所有股票价格都是用stock price service获取的，所以货币就是传入的货币
-            price = price_service.get_cached_stock_price(symbol, currency)
+            price = price_service.get_cached_stock_price(
+                symbol,
+                currency,
+                auto_refresh=self.auto_refresh_prices
+            )
             return price
         except Exception as e:
             logger.error(f"Failed to get stock price for {symbol} ({currency}): {e}")
