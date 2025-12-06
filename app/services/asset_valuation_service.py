@@ -1638,56 +1638,40 @@ class AssetValuationService:
         unrealized_gain_cad = Decimal('0')
         unrealized_gain_usd = Decimal('0')
 
-        # 获取持仓
+        # 收集所有涉及的股票（包含已清仓的）
+        symbols = set()
         holdings = self._get_holdings_at_date(account_id, target_date)
+        symbols.update(holdings.keys())
 
-        for symbol, shares in holdings.items():
-            if shares <= 0:
-                continue
+        txn_symbols = Transaction.query.with_entities(Transaction.stock).filter(
+            Transaction.account_id == account_id,
+            Transaction.type.in_(['BUY', 'SELL']),
+            Transaction.trade_date <= target_date,
+            Transaction.stock.isnot(None)
+        ).distinct().all()
+        symbols.update([s[0] for s in txn_symbols if s[0]])
 
-            # 获取股票信息
+        for symbol in symbols:
             stock_info = self._get_stock_info(symbol)
             currency = stock_info.get('currency', 'USD')
 
-            # 使用统一的股票统计计算方法
+            # 使用统一的股票统计计算方法（包含已实现收益）
             stock_stats = self._calculate_stock_stats(account_id, symbol, target_date)
 
-            # 按币种分类累加
+            # 按币种分类累加市值/浮盈（仅当前持仓）
+            if stock_stats['current_shares'] > 0:
+                if currency == 'CAD':
+                    stock_value_cad += stock_stats['market_value']
+                    unrealized_gain_cad += stock_stats['unrealized_gain']
+                else:
+                    stock_value_usd += stock_stats['market_value']
+                    unrealized_gain_usd += stock_stats['unrealized_gain']
+
+            # 已实现收益按币种累计（包含已清仓部分）
             if currency == 'CAD':
-                stock_value_cad += stock_stats['market_value']
-                unrealized_gain_cad += stock_stats['unrealized_gain']
+                realized_gain_cad += stock_stats['realized_gain']
             else:
-                stock_value_usd += stock_stats['market_value']
-                unrealized_gain_usd += stock_stats['unrealized_gain']
-
-        # 计算已实现收益（按币种分别计算）
-        sell_transactions = Transaction.query.filter(
-            Transaction.account_id == account_id,
-            Transaction.type == 'SELL',
-            Transaction.trade_date <= target_date
-        ).order_by(Transaction.trade_date.asc()).all()
-
-        for sell_tx in sell_transactions:
-            symbol = sell_tx.stock
-            sell_shares = Decimal(str(sell_tx.quantity or 0))
-            sell_price = Decimal(str(sell_tx.price or 0))
-            sell_fee = Decimal(str(sell_tx.fee or 0))
-            currency = sell_tx.currency or 'USD'
-
-            # 卖出净收入
-            sell_proceeds = sell_shares * sell_price - sell_fee
-
-            # 计算成本基础
-            cost_basis = self._calculate_cost_basis_for_sold_shares(
-                account_id, symbol, sell_tx.trade_date, sell_shares
-            )
-
-            # 已实现盈亏
-            realized_gain = sell_proceeds - cost_basis
-            if currency == 'CAD':
-                realized_gain_cad += realized_gain
-            else:
-                realized_gain_usd += realized_gain
+                realized_gain_usd += stock_stats['realized_gain']
 
         return stock_value_cad, stock_value_usd, realized_gain_cad, realized_gain_usd, unrealized_gain_cad, unrealized_gain_usd
     

@@ -196,7 +196,7 @@
                                     </td>
                                     <td class="text-end">
                                         {% if transaction.quantity %}
-                                            {{ "{:,.2f}".format(transaction.quantity) }}
+                                            {{ "{:,.4f}".format(transaction.quantity) }}
                                         {% else %}
                                             <span class="text-muted">-</span>
                                         {% endif %}
