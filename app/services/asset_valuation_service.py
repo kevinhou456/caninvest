@@ -990,9 +990,15 @@ class AssetValuationService:
             stock_info = self._get_stock_info(symbol)
             currency = stock_info['currency']
                 
-            price = self.stock_price_service.get_cached_stock_price(
-                symbol, currency, auto_refresh=self.auto_refresh_prices
-            )
+            price: Optional[Decimal] = None
+            # 使用目标日期的历史收盘价；若无法获取再回退到当前缓存价
+            if target_date < date.today():
+                price = self._get_historical_stock_price(symbol, target_date, currency)
+            if not price or price <= 0:
+                price = self.stock_price_service.get_cached_stock_price(
+                    symbol, currency, auto_refresh=self.auto_refresh_prices
+                )
+
             if price and price > 0:
                 market_value = current_shares * Decimal(str(price))
                 unrealized_gain = market_value - total_cost
@@ -1413,7 +1419,7 @@ class AssetValuationService:
         transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.trade_date <= target_date,
-            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
+            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
         ).order_by(Transaction.trade_date.asc()).all()
 
         # 从零开始累计计算
@@ -1445,7 +1451,7 @@ class AssetValuationService:
         transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.trade_date > target_date,
-            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
+            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
         ).order_by(Transaction.trade_date.desc()).all()  # 按时间倒序，从最近开始倒推
 
         cad_balance = current_cad
@@ -1472,7 +1478,7 @@ class AssetValuationService:
             else:
                 usd -= amount
 
-        elif transaction.type == 'WITHDRAW':
+        elif transaction.type in ['WITHDRAW', 'WITHDRAWAL']:
             # 倒推取出：增加现金
             amount = Decimal(str(transaction.amount or 0))
             if currency == 'CAD':

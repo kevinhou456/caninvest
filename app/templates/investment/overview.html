@@ -533,8 +533,7 @@
                     </table>
                 </div>
                 
-                <!-- 始终显示No holdings提示，JavaScript会在有数据时隐藏 -->
-                <div class="text-center py-5" id="no-holdings-message">
+                <div class="text-center py-5" id="no-holdings-message" style="display: {{ 'none' if holdings and holdings|length > 0 else 'block' }};">
                     <i class="fas fa-chart-pie fa-3x text-muted mb-3"></i>
                     <h5 class="text-muted">{{ _('No holdings found') }}</h5>
                     <p class="text-muted mb-0">{{ _('Start investing to see your portfolio here') }}</p>
@@ -1080,11 +1079,7 @@ function updateHoldingsTable(holdings) {
     });
     
     // 隐藏"No holdings found"提示
-    const cardBody = document.querySelector('#holdingsTable').closest('.card-body');
-    const noHoldingsDiv = cardBody ? cardBody.querySelector('.text-center.py-5') : null;
-    if (noHoldingsDiv) {
-        noHoldingsDiv.style.display = 'none';
-    }
+    toggleHoldingsEmptyState();
 }
 
 // 更新持仓行数据（只更新价格相关的单元格）
@@ -1117,8 +1112,8 @@ function updateHoldingRowData(row, holding) {
         const percentSpan = cells[4].querySelector('small');
         if (percentSpan) {
             percentSpan.textContent = percentSign + dailyPercent.toFixed(2) + '%';
-            percentSpan.className = (dailyPercent >= 0 ? 'text-success' : 'text-danger');
-        }
+        percentSpan.className = (dailyPercent >= 0 ? 'text-success' : 'text-danger');
+    }
     }
     
     // 更新当前价值（第6列，索引5）
@@ -1180,6 +1175,15 @@ function updateHoldingRowData(row, holding) {
             badge.className = 'badge ' + (totalReturnPercent >= 0 ? 'bg-success' : 'bg-danger');
         }
     }
+}
+
+// 控制“无持仓”提示显示状态
+function toggleHoldingsEmptyState() {
+    const noHoldingsDiv = document.getElementById('no-holdings-message');
+    if (!noHoldingsDiv) return;
+
+    const dataRows = document.querySelectorAll('#holdingsTable tbody tr[data-symbol]');
+    noHoldingsDiv.style.display = dataRows.length > 0 ? 'none' : 'block';
 }
 
 // 更新已清仓表格
@@ -1616,6 +1620,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 countSpan.textContent = visibleCount;
             }
         });
+
+        // 初始加载时根据实际行数更新“无持仓”提示
+        toggleHoldingsEmptyState();
     }
     
     // 添加指标卡片点击动画效果
