@@ -341,7 +341,7 @@
                                             {% endif %}
                                         </div>
                                         <small class="text-muted">
-                                            {{ "{:,.4f}".format(transaction.quantity|float) }} {{ _('shares') }}
+                                            {{ (transaction.quantity|float)|format_shares }} {{ _('shares') }}
                                         </small>
                                     </div>
                                 </div>

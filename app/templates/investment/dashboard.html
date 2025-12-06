@@ -303,7 +303,7 @@
                             </span>
                         </td>
                         <td><strong>{{ transaction.stock }}</strong></td>
-                        <td>{{ "{:,.4f}".format(transaction.quantity) }}</td>
+                        <td>{{ transaction.quantity|format_shares }}</td>
                         <td>${{ "{:.2f}".format(transaction.price) }}</td>
                         <td>${{ "{:.2f}".format(transaction.total_amount) }} <small class="text-muted">{{ transaction.currency }}</small></td>
                     </tr>

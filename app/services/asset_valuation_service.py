@@ -383,6 +383,10 @@ class AssetValuationService:
         dividend_received = sum(float(tx.amount or 0) for tx in dividend_transactions)
         interest_received = sum(float(tx.amount or 0) for tx in interest_transactions)
 
+        # 股息/利息不应为负；如遇负值（录入错误或费用），按0处理保持口径一致
+        dividend_received = max(dividend_received, 0.0)
+        interest_received = max(interest_received, 0.0)
+
         # 转换为CAD等价
         dividend_received_cad = dividend_received * float(exchange_rate) if currency == 'USD' else dividend_received
         interest_received_cad = interest_received * float(exchange_rate) if currency == 'USD' else interest_received
@@ -1042,6 +1046,11 @@ class AssetValuationService:
                     stats['interest_cad'] += amount
                 else:
                     stats['interest_usd'] += amount
+
+        # 遇到录入为负的股息/利息时，按0处理以免出现负的Div+Int
+        for key, value in list(stats.items()):
+            if value < 0:
+                stats[key] = Decimal('0')
         
         return stats
     

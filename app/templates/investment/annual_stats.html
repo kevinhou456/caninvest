@@ -18,6 +18,10 @@
             <button type="button" class="btn btn-light btn-sm me-3" id="fetchAnnualRatesBtn">
                 <i class="fas fa-sync-alt me-1"></i>{{ _('Fetch Annual Average FX') }}
             </button>
+            <div class="form-check form-switch text-white mb-0 me-3">
+                <input class="form-check-input" type="checkbox" id="toggleAccountBreakdown">
+                <label class="form-check-label" for="toggleAccountBreakdown">{{ _('Separate by Account') }}</label>
+            </div>
             <div class="form-check form-switch text-white mb-0">
                 <input class="form-check-input" type="checkbox" id="toggleCurrencyBreakdown">
                 <label class="form-check-label" for="toggleCurrencyBreakdown">{{ _('Currency Details') }}</label>
@@ -75,6 +79,71 @@
                     </tr>
                 </tfoot>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Year-end Holdings Breakdown -->
+<div class="card shadow mb-4" id="yearlyHoldingsCard" style="display: none;">
+    <div class="card-header py-3 d-flex justify-content-between align-items-center bg-secondary text-white">
+        <h6 class="m-0 font-weight-bold">{{ _('Year-end Holdings / Cleared Stocks') }}</h6>
+        <div class="d-flex align-items-center">
+            <label for="yearlyHoldingsSelect" class="me-2 mb-0">{{ _('Select Year') }}</label>
+            <select class="form-select form-select-sm" id="yearlyHoldingsSelect" style="min-width: 120px;"></select>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 holdings-table" id="yearlyHoldingsTable">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3 sortable" data-sort="symbol">
+                            <div class="d-flex align-items-center">
+                                {{ _('Stock') }}
+                                <i class="fas fa-sort ms-1 sort-icon"></i>
+                            </div>
+                        </th>
+                        <th class="text-end sortable" data-sort="shares">
+                            {{ _('Shares') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                        <th class="text-end sortable" data-sort="avg_cost">
+                            {{ _('Avg Cost') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                        <th class="text-end sortable" data-sort="price">
+                            {{ _('Year-end Price') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                        <th class="text-end sortable" data-sort="value">
+                            {{ _('Year-end Value') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                        <th class="text-end sortable" data-sort="unrealized">
+                            {{ _('Unrealized P&L') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                        <th class="text-end sortable" data-sort="realized">
+                            {{ _('Realized P&L') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                        <th class="text-end sortable" data-sort="divint">
+                            {{ _('Div+Int') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                        <th class="text-end sortable" data-sort="return_percent">
+                            {{ _('Period Return') }}
+                            <i class="fas fa-sort ms-1 sort-icon"></i>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="yearlyHoldingsTbody">
+                    <!-- populated via JS -->
+                </tbody>
+            </table>
+        </div>
+        <div id="yearlyHoldingsEmpty" class="text-center py-4 text-muted" style="display: none;">
+            <i class="fas fa-info-circle me-2"></i>{{ _('No holdings data for the selected year.') }}
         </div>
     </div>
 </div>
@@ -197,6 +266,44 @@
     content: "├─ 📊 ";
     color: #6c757d;
 }
+
+.account-row {
+    background-color: rgba(0, 123, 255, 0.05) !important;
+}
+
+.account-row td {
+    border-top: 1px dashed #0d6efd !important;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+.account-indent {
+    margin-left: 20px;
+    color: #0d6efd;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+.account-indent::before {
+    content: "🏦 ";
+    color: #0d6efd;
+}
+
+.holdings-table {
+    font-size: 0.9rem;
+}
+
+.stock-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.sort-icon {
+    font-size: 0.7rem;
+    color: #adb5bd;
+}
 </style>
 {% endblock %}
 
@@ -206,6 +313,9 @@ let annualData = [];
 let combinedAssetsChart = null;
 let enhancedReturnsChart = null;
 let showCurrencyBreakdown = false;
+let yearlyHoldings = {};
+let selectedYear = null;
+let separateByAccount = false;
 
 const familyId = {{ (current_family.id if current_family else 1) | tojson }};
 const memberId = {{ (current_member_id if current_member_id else None) | tojson }};
@@ -239,6 +349,9 @@ function loadAnnualAnalysis() {
     if (accountId) {
         params.append('account_id', accountId);
     }
+    if (separateByAccount) {
+        params.append('separate_accounts', '1');
+    }
     
     if (params.toString()) {
         apiUrl += '?' + params.toString();
@@ -259,9 +372,11 @@ function loadAnnualAnalysis() {
             console.log('Annual analysis data:', data);
             if (data.analysis) {
                 annualData = data.analysis.annual_data || [];
+                yearlyHoldings = data.analysis.yearly_holdings || {};
                 updateCombinedAssetsChart();
                 updateEnhancedReturnsChart();
                 updateAnnualTable();
+                updateYearlyHoldingsUI();
                 document.getElementById('loading-spinner').style.display = 'none';
             } else {
                 showError('No analysis data returned from API');
@@ -703,8 +818,8 @@ function updateAnnualTable() {
             return b.year - a.year;
         }
         // Within the same year, main row first, then detail/member rows
-        const aIsSubRow = a.is_detail_row || a.is_member_row || a.is_member_account_type_row;
-        const bIsSubRow = b.is_detail_row || b.is_member_row || b.is_member_account_type_row;
+        const aIsSubRow = a.is_detail_row || a.is_member_row || a.is_member_account_type_row || a.is_account_row;
+        const bIsSubRow = b.is_detail_row || b.is_member_row || b.is_member_account_type_row || b.is_account_row;
 
         if (aIsSubRow && !bIsSubRow) {
             return 1; // a comes after b
@@ -719,7 +834,7 @@ function updateAnnualTable() {
     tableData.forEach(item => {
         const row = document.createElement('tr');
 
-        // 如果是详细行或成员行，添加特殊样式
+        // 如果是详细行或成员行或账户行，添加特殊样式
         if (item.is_detail_row) {
             row.classList.add('table-secondary', 'detail-row');
             row.style.fontSize = '0.9em';
@@ -729,6 +844,9 @@ function updateAnnualTable() {
         } else if (item.is_member_account_type_row) {
             row.classList.add('table-secondary', 'member-account-type-row');
             row.style.fontSize = '0.85em';
+        } else if (item.is_account_row) {
+            row.classList.add('account-row');
+            row.style.fontSize = '0.9em';
         }
 
         const realizedClass = item.annual_realized_gain >= 0 ? 'text-success' : 'text-danger';
@@ -763,6 +881,8 @@ function updateAnnualTable() {
             displayYear = `<span class="member-name-indent">${item.member_name}</span>`;
         } else if (item.is_member_account_type_row) {
             displayYear = `<span class="member-account-type-indent">${item.account_type}</span>`;
+        } else if (item.is_account_row) {
+            displayYear = `<span class="account-indent">${item.account_name}</span>`;
         } else {
             displayYear = item.year;
         }
@@ -804,7 +924,7 @@ function updateAnnualTable() {
         tbody.appendChild(row);
         
         // Update totals (only for main rows, not detail rows or member rows)
-        if (!item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row) {
+        if (!item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row && !item.is_account_row) {
             // Use the first main row for latest assets and set current exchange rate
             if (totalAssets === 0) {
                 totalAssets = item.total_assets;
@@ -833,7 +953,7 @@ function updateAnnualTable() {
         }
 
         // Calculate totals for overall return rate (only for main rows, not detail rows or member rows)
-        if (!item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row) {
+        if (!item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row && !item.is_account_row) {
             const itemReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
             // Use total_assets as the investment base since annual_unrealized_gain is now incremental
             totalReturnsSum += itemReturns;
@@ -882,6 +1002,174 @@ function updateAnnualTable() {
     updateCurrencyBreakdownVisibility();
 }
 
+// Year-end holdings rendering
+function getAvailableYearsForHoldings() {
+    return Object.keys(yearlyHoldings || {})
+        .map(y => parseInt(y, 10))
+        .filter(y => !isNaN(y))
+        .sort((a, b) => b - a);
+}
+
+function updateYearlyHoldingsUI() {
+    const card = document.getElementById('yearlyHoldingsCard');
+    const select = document.getElementById('yearlyHoldingsSelect');
+    if (!card || !select) return;
+
+    const years = getAvailableYearsForHoldings();
+    if (!years.length) {
+        card.style.display = 'none';
+        return;
+    }
+
+    card.style.display = 'block';
+    select.innerHTML = '';
+    years.forEach(year => {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = year;
+        select.appendChild(option);
+    });
+
+    if (!selectedYear || !years.includes(selectedYear)) {
+        selectedYear = years[0];
+    }
+    select.value = selectedYear;
+    select.onchange = (e) => {
+        selectedYear = parseInt(e.target.value, 10);
+        renderYearlyHoldingsTable(selectedYear);
+    };
+
+    renderYearlyHoldingsTable(selectedYear);
+}
+
+function renderYearlyHoldingsTable(year) {
+    const tbody = document.getElementById('yearlyHoldingsTbody');
+    const emptyHint = document.getElementById('yearlyHoldingsEmpty');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const rows = (yearlyHoldings && yearlyHoldings[year]) ? yearlyHoldings[year] : [];
+    if (!rows.length) {
+        if (emptyHint) emptyHint.style.display = 'block';
+        return;
+    }
+    if (emptyHint) emptyHint.style.display = 'none';
+
+    rows.forEach(item => {
+        const unrealizedClass = (item.unrealized_gain || 0) >= 0 ? 'text-success' : 'text-danger';
+        const realizedClass = (item.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger';
+        const returnClass = (item.return_rate || 0) >= 0 ? 'bg-success' : 'bg-danger';
+        const divInt = (item.dividends || 0) + (item.interest || 0);
+        const shares = parseFloat(item.shares || 0);
+        const totalCost = parseFloat(item.total_cost || 0);
+        const avgCost = item.average_cost != null ? parseFloat(item.average_cost) : (shares > 0 ? totalCost / shares : 0);
+
+        const tr = document.createElement('tr');
+        tr.dataset.symbol = item.symbol || '';
+        tr.dataset.shares = item.shares || 0;
+        tr.dataset.avgCost = avgCost || 0;
+        tr.dataset.price = item.current_price || 0;
+        tr.dataset.value = item.current_value || 0;
+        tr.dataset.unrealized = item.unrealized_gain || 0;
+        tr.dataset.realized = item.realized_gain || 0;
+        tr.dataset.divint = divInt;
+        tr.dataset.returnPercent = item.return_rate || 0;
+        tr.innerHTML = `
+            <td>
+                <div class="d-flex align-items-center">
+                    <div class="bg-${(item.currency || 'USD') === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar" 
+                         style="color: ${(item.currency || 'USD') === 'CAD' ? 'black' : 'white'};">
+                        ${(item.currency || 'USD') === 'CAD' ? 'C$' : '$'}
+                    </div>
+                    <div>
+                        <div class="fw-bold">${item.symbol || '-'}</div>
+                        <small class="text-muted">${item.company_name || ''}</small>
+                    </div>
+                </div>
+            </td>
+            <td class="text-end">${formatShares(item.shares || 0)}</td>
+            <td class="text-end">
+                $${formatNumber(avgCost || 0, 4)}
+                <br><small class="text-muted">${item.currency || ''}</small>
+            </td>
+            <td class="text-end">$${formatNumber(item.current_price || 0, 2)}</td>
+            <td class="text-end">$${formatNumber(item.current_value || 0, 2)}</td>
+            <td class="text-end ${unrealizedClass}">$${formatNumber(item.unrealized_gain || 0, 2, true)}</td>
+            <td class="text-end ${realizedClass}">$${formatNumber(item.realized_gain || 0, 2, true)}</td>
+            <td class="text-end text-success">$${formatNumber(divInt, 2)}</td>
+            <td class="text-end"><span class="badge ${returnClass}">${formatNumber(item.return_rate || 0, 1, true)}%</span></td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    initYearlyHoldingsSorting();
+}
+
+function initYearlyHoldingsSorting() {
+    const table = document.getElementById('yearlyHoldingsTable');
+    if (!table || table.dataset.sortInit) return;
+
+    const headers = table.querySelectorAll('th.sortable');
+    let currentSort = {column: null, direction: 'asc'};
+
+    headers.forEach(header => {
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const sortType = header.dataset.sort;
+            const nextDirection = (currentSort.column === sortType && currentSort.direction === 'asc') ? 'desc' : 'asc';
+            sortYearlyHoldingsTable(table, sortType, nextDirection);
+            updateYearlySortIcons(headers, header, nextDirection);
+            currentSort = {column: sortType, direction: nextDirection};
+        });
+    });
+
+    table.dataset.sortInit = '1';
+}
+
+function sortYearlyHoldingsTable(table, sortType, direction) {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+    rows.sort((a, b) => {
+        if (['symbol'].includes(sortType)) {
+            const aVal = (a.dataset[sortType] || '').toLowerCase();
+            const bVal = (b.dataset[sortType] || '').toLowerCase();
+            return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        }
+
+        const dataAttrMap = {
+            'avg_cost': 'avgCost',
+            'price': 'price',
+            'value': 'value',
+            'unrealized': 'unrealized',
+            'realized': 'realized',
+            'divint': 'divint',
+            'return_percent': 'returnPercent'
+        };
+        const attr = dataAttrMap[sortType] || sortType;
+        const aNum = parseFloat(a.dataset[attr]) || 0;
+        const bNum = parseFloat(b.dataset[attr]) || 0;
+        return direction === 'asc' ? aNum - bNum : bNum - aNum;
+    });
+
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+function updateYearlySortIcons(headers, activeHeader, direction) {
+    headers.forEach(header => {
+        const icon = header.querySelector('.sort-icon');
+        if (icon) {
+            icon.className = 'fas fa-sort ms-1 sort-icon';
+        }
+    });
+    const icon = activeHeader.querySelector('.sort-icon');
+    if (icon) {
+        icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} ms-1 sort-icon`;
+    }
+}
+
 function updateCurrencyBreakdownVisibility() {
     const breakdownElements = document.querySelectorAll('.currency-breakdown');
     breakdownElements.forEach(el => {
@@ -907,6 +1195,12 @@ function formatNumber(num, decimals = 0, showSign = false) {
     }
     
     return formatted;
+}
+
+function formatShares(value) {
+    const num = parseFloat(value) || 0;
+    const isInt = Number.isInteger(num);
+    return formatNumber(num, isInt ? 0 : 4);
 }
 
 function showError(message) {
@@ -964,6 +1258,15 @@ document.addEventListener('DOMContentLoaded', function() {
             updateCurrencyBreakdownVisibility();
         });
         updateCurrencyBreakdownVisibility();
+    }
+
+    const accountToggle = document.getElementById('toggleAccountBreakdown');
+    if (accountToggle) {
+        accountToggle.checked = separateByAccount;
+        accountToggle.addEventListener('change', function(event) {
+            separateByAccount = event.target.checked;
+            loadAnnualAnalysis();
+        });
     }
 });
 </script>

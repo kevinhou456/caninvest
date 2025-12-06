@@ -27,6 +27,7 @@ from app.models.price_cache import StockPriceCache
 from app.services.stock_history_cache_service import StockHistoryCacheService
 from app.services.currency_service import currency_service
 from app.services.asset_valuation_service import AssetValuationService
+from app.services.account_service import AccountService
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,10 @@ class PositionSnapshot:
         realized_gain_percent = Decimal('0')
         if self.total_bought_value > 0:
             realized_gain_percent = (self.realized_gain / self.total_bought_value) * 100
+
+        # 分红和利息不应为负值，如有负值（录入错误/费用），在输出时归零避免出现负的Div+Int
+        dividends_dec = self.total_dividends if self.total_dividends >= 0 else Decimal('0')
+        interest_dec = self.total_interest if self.total_interest >= 0 else Decimal('0')
         
         return {
             'symbol': self.symbol,
@@ -123,10 +128,10 @@ class PositionSnapshot:
             'total_sold_value': float(self.total_sold_value),
             'realized_gain': float(self.realized_gain),
             'realized_gain_percent': float(realized_gain_percent),  # 添加已实现收益率
-            'dividends': float(self.total_dividends),  # 保持兼容性
-            'total_dividends': float(self.total_dividends),
-            'interest': float(self.total_interest),  # 保持兼容性
-            'total_interest': float(self.total_interest),
+            'dividends': float(dividends_dec),  # 保持兼容性
+            'total_dividends': float(dividends_dec),
+            'interest': float(interest_dec),  # 保持兼容性
+            'total_interest': float(interest_dec),
             'current_price': float(self.current_price),
             'current_value': float(self.current_value),
             'unrealized_gain': float(self.unrealized_gain),
@@ -471,7 +476,8 @@ class PortfolioService:
     def get_annual_analysis(self, account_ids: List[int],
                            years: Optional[List[int]] = None,
                            member_id: Optional[int] = None,
-                           selected_account_id: Optional[int] = None) -> Dict:
+                           selected_account_id: Optional[int] = None,
+                           include_account_breakdown: bool = False) -> Dict:
         """获取年度分析数据
         
         Args:
@@ -509,13 +515,18 @@ class PortfolioService:
         annual_exchange_rates = currency_service.get_annual_rates_for_years(years, 'USD', 'CAD') if years else {}
 
         account_type_lookup: Dict[int, str] = {}
+        account_name_lookup: Dict[int, str] = {}
         family_id = 1
         if account_ids:
-            account_info = db.session.query(Account.id, AccountType.name, Account.family_id).join(
+            account_info = db.session.query(Account.id, AccountType.name, Account.family_id, Account.name).join(
                 AccountType, Account.account_type_id == AccountType.id
             ).filter(Account.id.in_(account_ids)).all()
-            for acc_id, type_name, fam_id in account_info:
+            for acc_id, type_name, fam_id, acc_name in account_info:
                 account_type_lookup[acc_id] = type_name
+                # 使用带成员的账户名称，便于区分
+                account_obj = Account.query.get(acc_id)
+                account_name_with_members = AccountService.get_account_name_with_members(account_obj) if account_obj else acc_name
+                account_name_lookup[acc_id] = account_name_with_members
                 family_id = fam_id or family_id
 
         def metric_delta(metrics_new: Dict, metrics_old: Dict, key: str, subkey: str) -> float:
@@ -653,6 +664,62 @@ class PortfolioService:
 
         annual_data: List[Dict] = []
 
+        def aggregate_holdings(holdings_list: List[Dict]) -> Dict[str, Dict]:
+            """按symbol+currency聚合同一股票的多账户数据。"""
+            aggregated: Dict[str, Dict] = {}
+
+            def safe_float(val):
+                try:
+                    return float(val or 0)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            numeric_fields = [
+                'current_shares', 'shares', 'total_cost', 'current_value', 'unrealized_gain',
+                'realized_gain', 'total_dividends', 'total_interest', 'dividends', 'interest',
+                'daily_change_value', 'previous_value', 'total_bought_shares', 'total_sold_shares',
+                'total_bought_value', 'total_sold_value'
+            ]
+
+            for holding in holdings_list:
+                key = f"{holding.get('symbol')}__{holding.get('currency', 'USD')}"
+                if key not in aggregated:
+                    aggregated[key] = holding.copy()
+                else:
+                    target = aggregated[key]
+                    for field in numeric_fields:
+                        target[field] = safe_float(target.get(field)) + safe_float(holding.get(field))
+
+            # 填充派生字段
+            for key, value in aggregated.items():
+                shares_val = safe_float(value.get('current_shares') or value.get('shares'))
+                total_cost_val = safe_float(value.get('total_cost'))
+                current_value_val = safe_float(value.get('current_value'))
+                daily_change_val = safe_float(value.get('daily_change_value'))
+                prev_value_val = safe_float(value.get('previous_value'))
+
+                if shares_val > 0 and total_cost_val:
+                    value['average_cost'] = total_cost_val / shares_val
+                    value['average_cost_display'] = value['average_cost']
+                else:
+                    value['average_cost'] = 0
+                    value['average_cost_display'] = 0
+
+                if total_cost_val > 0:
+                    value['unrealized_gain_percent'] = (safe_float(value.get('unrealized_gain')) / total_cost_val) * 100
+                else:
+                    value['unrealized_gain_percent'] = 0
+
+                if prev_value_val:
+                    value['daily_change_percent'] = (daily_change_val / prev_value_val) * 100
+                elif current_value_val:
+                    base_val = current_value_val - daily_change_val
+                    value['daily_change_percent'] = (daily_change_val / base_val * 100) if base_val else 0
+                else:
+                    value['daily_change_percent'] = 0
+
+            return aggregated
+
         for year in years:
             year_start = date(year, 1, 1)
             year_end = date(year, 12, 31)
@@ -680,6 +747,33 @@ class PortfolioService:
 
             annual_rate = float(annual_exchange_rates.get(year)) if annual_exchange_rates.get(year) else None
             annual_data.append(build_row(year, metrics_end, metrics_prev, tx_stats, annual_rate, None))
+
+            if include_account_breakdown and account_ids:
+                for acc_id in account_ids:
+                    proportion = ownership_map.get(acc_id, Decimal('1')) if ownership_map else Decimal('1')
+                    if proportion <= 0:
+                        continue
+
+                    filtered_map = {acc_id: proportion} if ownership_map else None
+                    metrics_end_acc = asset_service.get_comprehensive_portfolio_metrics(
+                        [acc_id],
+                        target_date=year_end,
+                        ownership_map=filtered_map
+                    )
+                    metrics_prev_acc = asset_service.get_comprehensive_portfolio_metrics(
+                        [acc_id],
+                        target_date=previous_year_end,
+                        ownership_map=filtered_map
+                    )
+                    tx_stats_acc = build_tx_stats(year_transactions, ids_filter=[acc_id],
+                                                  ownership=filtered_map)
+                    extra_account = {
+                        'account_id': acc_id,
+                        'account_name': account_name_lookup.get(acc_id, f'Account {acc_id}'),
+                        'account_type': account_type_lookup.get(acc_id),
+                        'is_account_row': True
+                    }
+                    annual_data.append(build_row(year, metrics_end_acc, metrics_prev_acc, tx_stats_acc, annual_rate, extra_account))
 
             show_member_breakdown = False
             if member_id is None:
@@ -762,10 +856,71 @@ class PortfolioService:
 
         chart_data = self._prepare_annual_chart_data(annual_data)
 
+        # 构建年度末持仓/清仓明细，方便前端展示
+        yearly_holdings: Dict[int, List[Dict]] = {}
+        for year in years:
+            year_end = date(year, 12, 31)
+            previous_year_end = date(year - 1, 12, 31)
+
+            # 使用统一的组合汇总函数，确保口径一致
+            year_end_portfolio = self.get_portfolio_summary(
+                account_ids,
+                TimePeriod.CUSTOM,
+                end_date=year_end
+            )
+            prev_year_portfolio = self.get_portfolio_summary(
+                account_ids,
+                TimePeriod.CUSTOM,
+                end_date=previous_year_end
+            )
+
+            end_holdings_raw = (year_end_portfolio.get('current_holdings', []) or []) + \
+                               (year_end_portfolio.get('cleared_holdings', []) or [])
+            prev_holdings_raw = (prev_year_portfolio.get('current_holdings', []) or []) + \
+                                (prev_year_portfolio.get('cleared_holdings', []) or [])
+
+            end_holdings_map = aggregate_holdings(end_holdings_raw)
+            prev_holdings_map = aggregate_holdings(prev_holdings_raw)
+
+            holdings_rows: List[Dict] = []
+            for key, holding in end_holdings_map.items():
+                prev = prev_holdings_map.get(key, {}) or {}
+
+                # 计算年度增量
+                unrealized_delta = float(holding.get('unrealized_gain', 0) or 0) - float(prev.get('unrealized_gain', 0) or 0)
+                realized_delta = float(holding.get('realized_gain', 0) or 0) - float(prev.get('realized_gain', 0) or 0)
+                dividends_delta = float(holding.get('total_dividends', 0) or 0) - float(prev.get('total_dividends', 0) or 0)
+                interest_delta = float(holding.get('total_interest', 0) or 0) - float(prev.get('total_interest', 0) or 0)
+                period_gain = unrealized_delta + realized_delta + dividends_delta + interest_delta
+
+                # 以期末成本或总买入额作为回报率基数，避免除零
+                cost_basis = float(holding.get('total_cost', 0) or 0)
+                if cost_basis <= 0:
+                    cost_basis = float(holding.get('total_bought_value', 0) or 0)
+                return_rate = (period_gain / cost_basis * 100) if cost_basis > 0 else 0.0
+
+                holdings_rows.append({
+                    'symbol': holding.get('symbol'),
+                    'company_name': holding.get('company_name') or holding.get('symbol'),
+                    'currency': holding.get('currency'),
+                    'shares': float(holding.get('current_shares', 0) or 0),
+                    'average_cost': float(holding.get('average_cost', 0) or 0),
+                    'total_cost': float(holding.get('total_cost', 0) or 0),
+                    'current_price': float(holding.get('current_price', 0) or 0),
+                    'current_value': float(holding.get('current_value', 0) or 0),
+                    'unrealized_gain': unrealized_delta,
+                    'realized_gain': realized_delta,
+                    'dividends': dividends_delta,
+                    'interest': interest_delta,
+                    'return_rate': return_rate
+                })
+
+            yearly_holdings[year] = holdings_rows
+
         total_realized_sum = sum(
             item.get('annual_realized_gain', 0) or 0
             for item in annual_data
-            if not item.get('is_member_row') and not item.get('is_member_account_type_row')
+            if not item.get('is_member_row') and not item.get('is_member_account_type_row') and not item.get('is_account_row')
         )
 
         current_metrics = asset_service.get_comprehensive_portfolio_metrics(
@@ -777,12 +932,12 @@ class PortfolioService:
         total_income_sum = sum(
             (item.get('annual_dividends', 0) or 0) + (item.get('annual_interest', 0) or 0)
             for item in annual_data
-            if not item.get('is_member_row') and not item.get('is_member_account_type_row')
+            if not item.get('is_member_row') and not item.get('is_member_account_type_row') and not item.get('is_account_row')
         )
 
         if annual_data:
             latest_entry = max(
-                [item for item in annual_data if not item.get('is_member_row') and not item.get('is_member_account_type_row')],
+                [item for item in annual_data if not item.get('is_member_row') and not item.get('is_member_account_type_row') and not item.get('is_account_row')],
                 key=lambda x: x.get('year', 0),
                 default=None
             ) or annual_data[0]
@@ -802,6 +957,7 @@ class PortfolioService:
         return {
             'annual_data': annual_data,
             'chart_data': chart_data,
+            'yearly_holdings': yearly_holdings,
             'summary': {
                 'years_covered': len([item for item in annual_data if not item.get('is_member_row') and not item.get('is_member_account_type_row')]),
                 'total_years_gain': sum(item.get('annual_realized_gain', 0) + item.get('annual_unrealized_gain', 0)
@@ -2058,15 +2214,19 @@ class PortfolioService:
     
     def _prepare_annual_chart_data(self, annual_data: List[Dict]) -> Dict:
         """准备年度图表数据"""
+        main_rows = [
+            item for item in annual_data
+            if not item.get('is_member_row') and not item.get('is_member_account_type_row') and not item.get('is_account_row')
+        ]
         return {
-            'years': [item['year'] for item in annual_data],
-            'total_assets': [item['total_assets'] for item in annual_data],
+            'years': [item['year'] for item in main_rows],
+            'total_assets': [item['total_assets'] for item in main_rows],
             'annual_gains': [item['annual_realized_gain'] + item['annual_unrealized_gain'] 
-                           for item in annual_data],
-            'realized_gains': [item['annual_realized_gain'] for item in annual_data],
-            'unrealized_gains': [item['annual_unrealized_gain'] for item in annual_data],
-            'dividends': [item['annual_dividends'] for item in annual_data],
-            'interest': [item['annual_interest'] for item in annual_data]
+                           for item in main_rows],
+            'realized_gains': [item['annual_realized_gain'] for item in main_rows],
+            'unrealized_gains': [item['annual_unrealized_gain'] for item in main_rows],
+            'dividends': [item['annual_dividends'] for item in main_rows],
+            'interest': [item['annual_interest'] for item in main_rows]
         }
     
     def _calculate_average_annual_return(self, annual_data: List[Dict]) -> float:
@@ -2079,7 +2239,7 @@ class PortfolioService:
         
         for item in annual_data:
             # 只计算联合账户数据，跳过成员数据
-            if not item.get('is_member_row', False) and item['total_assets'] > 0:
+            if not item.get('is_member_row', False) and not item.get('is_account_row', False) and item['total_assets'] > 0:
                 annual_return = (item['annual_realized_gain'] + item['annual_unrealized_gain']) / item['total_assets'] * 100
                 total_return += annual_return
                 valid_years += 1

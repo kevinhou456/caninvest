@@ -257,6 +257,78 @@ def _build_portfolio_view_data(
 
     holdings, cleared_holdings = merge_holdings_and_cleared_cross_accounts(raw_holdings, raw_cleared_holdings)
 
+    def consolidate_by_symbol_currency(items):
+        """合并相同股票（含币种）的行，适用于多账户场景。"""
+        merged = {}
+
+        def safe_num(val):
+            try:
+                return float(val or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        for item in items:
+            key = f"{item.get('symbol')}__{item.get('currency', 'USD')}"
+            if key not in merged:
+                merged[key] = item.copy()
+                merged[key]['account_details'] = item.get('account_details', [])[:] if item.get('account_details') else []
+            else:
+                target = merged[key]
+                # 累加关键数值
+                for field in [
+                    'current_shares', 'shares', 'total_cost', 'current_value', 'unrealized_gain',
+                    'realized_gain', 'total_dividends', 'total_interest', 'dividends', 'interest',
+                    'daily_change_value', 'previous_value', 'total_bought_shares', 'total_sold_shares',
+                    'total_bought_value', 'total_sold_value'
+                ]:
+                    target[field] = safe_num(target.get(field)) + safe_num(item.get(field))
+
+                # 合并账户明细
+                if item.get('account_details'):
+                    target.setdefault('account_details', []).extend(item['account_details'])
+
+            merged[key].setdefault('currency', item.get('currency'))
+            merged[key].setdefault('symbol', item.get('symbol'))
+            merged[key].setdefault('company_name', item.get('company_name'))
+            merged[key].setdefault('sector', item.get('sector'))
+
+        # 补充派生字段
+        consolidated = []
+        for value in merged.values():
+            shares_val = safe_num(value.get('current_shares')) or safe_num(value.get('shares'))
+            total_cost_val = safe_num(value.get('total_cost'))
+            current_value_val = safe_num(value.get('current_value'))
+            daily_change_val = safe_num(value.get('daily_change_value'))
+            prev_value_val = safe_num(value.get('previous_value'))
+
+            if shares_val > 0 and total_cost_val:
+                value['average_cost'] = total_cost_val / shares_val
+                value['average_cost_display'] = value['average_cost']
+            else:
+                value['average_cost'] = 0
+                value['average_cost_display'] = 0
+
+            if total_cost_val > 0:
+                value['unrealized_gain_percent'] = (safe_num(value.get('unrealized_gain')) / total_cost_val) * 100
+            else:
+                value['unrealized_gain_percent'] = 0
+
+            if prev_value_val:
+                value['daily_change_percent'] = (daily_change_val / prev_value_val) * 100
+            elif current_value_val:
+                base_val = current_value_val - daily_change_val
+                value['daily_change_percent'] = (daily_change_val / base_val * 100) if base_val else 0
+            else:
+                value['daily_change_percent'] = 0
+
+            consolidated.append(value)
+
+        return consolidated
+
+    # 按股票+币种合并，避免跨账户重复行（单账户也安全）
+    holdings = consolidate_by_symbol_currency(holdings)
+    cleared_holdings = consolidate_by_symbol_currency(cleared_holdings)
+
     ibit_holdings = [h for h in holdings if h.get('symbol') == 'IBIT']
     ibit_cleared = [h for h in cleared_holdings if h.get('symbol') == 'IBIT']
     if ibit_holdings and ibit_cleared:

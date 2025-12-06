@@ -112,7 +112,7 @@
                     {% endif %}
                 </td>
                 <td>{{ transaction.stock or '-' }}</td>
-                <td>{{ "%.4f"|format(transaction.quantity) if transaction.quantity != 0 else '-' }}</td>
+                <td>{{ transaction.quantity|format_shares if transaction.quantity != 0 else '-' }}</td>
                 <td>{{ "%.2f"|format(transaction.price) if transaction.price != 0 else '-' }}</td>
                 <td>{{ "%.2f"|format(transaction.amount) if transaction.amount else '-' }}</td>
                 <td>{{ transaction.currency }}</td>

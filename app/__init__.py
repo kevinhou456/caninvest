@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal, InvalidOperation
 from flask import Flask, request, session, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -86,6 +87,17 @@ def create_app(config_name=None):
     @app.template_global()
     def get_current_language():
         return get_locale()
+    
+    @app.template_filter('format_shares')
+    def format_shares_filter(value):
+        """Format share quantities: no decimals for whole shares, four decimals for fractions."""
+        try:
+            num = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return "0"
+        is_integer = num == num.to_integral()
+        fmt = "{:,.0f}" if is_integer else "{:,.4f}"
+        return fmt.format(num)
     
     @app.template_global()
     def get_current_date():
