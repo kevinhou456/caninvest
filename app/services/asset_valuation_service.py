@@ -1337,10 +1337,14 @@ class AssetValuationService:
             该日期的股票价格，如果无法获取返回None
         """
         try:
+            # 未来日期改为今天，避免请求未来的价格
+            if target_date > date.today():
+                target_date = date.today()
+
             # 使用StockPriceService获取历史价格
             # 获取包含目标日期的历史数据范围
             start_date = target_date - timedelta(days=7)
-            end_date = target_date + timedelta(days=1)
+            end_date = min(target_date + timedelta(days=1), date.today())
 
             history_records = self.history_cache_service.get_cached_history(
                 symbol,
@@ -1693,7 +1697,7 @@ class AssetValuationService:
             else:
                 usd += amount
                 
-        elif transaction.type == 'WITHDRAW':
+        elif transaction.type in ['WITHDRAW', 'WITHDRAWAL']:
             # 取出：减少现金
             amount = Decimal(str(transaction.amount or 0))
             if currency == 'CAD':

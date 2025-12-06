@@ -359,6 +359,25 @@ def csv_preview():
         else:
             cfp_account_data = {'detected': False}
 
+        # 计算日期范围（若存在日期列，尝试模糊匹配）
+        date_range = None
+        date_col = None
+        for col in df.columns:
+            lower = col.lower()
+            if 'date' == lower or 'trade_date' == lower or 'trade date' == lower or lower.endswith('date'):
+                date_col = col
+                break
+        if date_col:
+            try:
+                parsed_dates = pd.to_datetime(df[date_col], errors='coerce')
+                parsed_dates = parsed_dates.dropna()
+                if not parsed_dates.empty:
+                    start_date = parsed_dates.min().date().isoformat()
+                    end_date = parsed_dates.max().date().isoformat()
+                    date_range = {'start': start_date, 'end': end_date}
+            except Exception:
+                date_range = None
+
         return jsonify({
             'success': True,
             'session_id': session_id,
@@ -366,6 +385,7 @@ def csv_preview():
             'preview_data': preview_data,
             'suggested_mapping': suggested_mapping,
             'total_rows': len(df),
+            'date_range': date_range,
             'auto_matched_format': {
                 'name': auto_matched_format.format_name,
                 'usage_count': auto_matched_format.usage_count
@@ -541,6 +561,7 @@ def import_csv_with_mapping():
     import pandas as pd
     import os
     from app.models.transaction import Transaction
+    from datetime import date
     
     # 重置日期格式检测，确保每次导入都重新检测
     reset_date_format_detection()
@@ -553,6 +574,7 @@ def import_csv_with_mapping():
     account_id = data.get('account_id')
     column_mappings = data.get('column_mappings', {})
     format_name = data.get('format_name', '').strip()
+    overwrite_range = bool(data.get('overwrite_range', False))
     
     if not session_id or not account_id or not column_mappings:
         return jsonify({'success': False, 'error': _('Missing required data')}), 400
@@ -579,6 +601,24 @@ def import_csv_with_mapping():
             if processing_errors:
                 error_msg += f". {_('Sample errors')}: " + "; ".join(processing_errors[:3])
             return jsonify({'success': False, 'error': error_msg}), 400
+
+        # 计算覆盖范围（按交易日期）
+        deleted_count = 0
+        if overwrite_range:
+            dates = [row['trade_date'] for row in transactions_data if row.get('trade_date')]
+            if dates:
+                start_date = min(dates)
+                end_date = max(dates)
+                try:
+                    deleted_count = Transaction.query.filter(
+                        Transaction.account_id == account_id,
+                        Transaction.trade_date >= start_date,
+                        Transaction.trade_date <= end_date
+                    ).delete(synchronize_session=False)
+                    db.session.flush()
+                except Exception as exc:
+                    current_app.logger.exception("Failed to overwrite transactions in range", exc_info=exc)
+                    return jsonify({'success': False, 'error': _('Failed to clear existing transactions before import')}), 500
         
         # 创建交易记录
         created_count = 0
@@ -703,6 +743,7 @@ def import_csv_with_mapping():
             'failed_count': failed_count,
             'skipped_count': skipped_count,  # 添加跳过的重复记录数量
             'corrected_count': corrected_count,  # 添加矫正的股票代码数量
+            'deleted_count': deleted_count,
             'errors': errors[:10],  # 最多返回10个错误
             'redirect_url': f'/transactions?account_id={account_id}'  # 添加重定向URL
         })
@@ -718,6 +759,7 @@ def process_csv_with_mapping(df, column_mappings):
     
     transactions = []
     processing_errors = []
+    cash_out_keywords = {'to reg. act.', 'to reg act.', 'to reg act', 'to reg. account', 'to reg account'}
     
     
     # 检测是否为描述格式的CSV
@@ -798,7 +840,14 @@ def process_csv_with_mapping(df, column_mappings):
             
             # 交易类型
             if 'type' in column_mappings and column_mappings['type']:
-                type_str = str(row[column_mappings['type']]).strip().upper()
+                raw_type_str = str(row[column_mappings['type']]).strip()
+                type_str = raw_type_str.upper()
+                # 特殊描述关键字：To Reg. Act. 视为提现
+                description_text_for_type = ''
+                if 'description' in column_mappings and column_mappings['description']:
+                    description_text_for_type = str(row[column_mappings['description']]).strip().lower()
+                if description_text_for_type in cash_out_keywords or raw_type_str.lower() in cash_out_keywords:
+                    type_str = 'WITHDRAWAL'
                 transaction_type = parse_transaction_type(type_str)
                 if not transaction_type:
                     processing_errors.append(f"Row {row_num}: Invalid transaction type '{type_str}'")
@@ -1464,7 +1513,11 @@ def parse_transaction_type(type_str):
     # 存款/转入关键词 (包括CONTRIBUTION和CONT)
     deposit_keywords = ['DEPOSIT', 'TRANSFER IN', 'CASH RECEIPT', 'CONTRIBUTION', 'CONT', '存入', '转入', 'DEPÓSITO', 'EINZAHLUNG']
     # 取款/转出关键词
-    withdrawal_keywords = ['WITHDRAWAL', 'TRANSFER OUT', 'CASH PAYMENT', '取出', '转出', 'RETIRO', 'AUSZAHLUNG']
+    withdrawal_keywords = [
+        'WITHDRAWAL', 'WITHDRAW', 'TRANSFER OUT', 'CASH PAYMENT',
+        '取出', '转出', 'RETIRO', 'AUSZAHLUNG',
+        'TO REG. ACT', 'TO REG ACT', 'TO REG. ACCOUNT', 'TO REG ACCOUNT'
+    ]
     # 费用关键词
     fee_keywords = ['FEE', 'CHARGE', 'COMMISSION', '费用', '手续费', 'GEBÜHR', 'CARGO']
     

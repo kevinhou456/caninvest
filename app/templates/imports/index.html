@@ -477,7 +477,15 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
                 </div>
 
                 <!-- CSV预览 -->
-                <h6>{{ _('CSV Preview (first 10 rows)') }}:</h6>
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <h6 class="mb-0">{{ _('CSV Preview (first 10 rows)') }}:</h6>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="overwriteRangeCheckbox" checked>
+                        <label class="form-check-label" for="overwriteRangeCheckbox">
+                            覆盖数据库中当前时间段的数据<span id="overwriteRangeLabel"></span>
+                        </label>
+                    </div>
+                </div>
                 <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
                     <table class="table table-sm table-striped" id="csvPreviewTable">
                         <thead class="table-dark sticky-top">
@@ -639,6 +647,7 @@ function showMappingModalInternal(data) {
     console.log('Data columns:', data.columns);
     console.log('Data suggested_mapping:', data.suggested_mapping);
     console.log('Data preview_data:', data.preview_data);
+    window.csvDateRange = data.date_range || null;
     
     // 直接构建列映射表格和CSV预览表格
     buildColumnMappingTable(data.columns, data.suggested_mapping);
@@ -843,6 +852,34 @@ function buildCsvPreviewTable(columns, previewData) {
         });
         tbody.appendChild(tr);
     });
+
+    // 更新覆盖范围提示（使用后端返回的首尾日期）
+    const label = document.getElementById('overwriteRangeLabel');
+    if (label) {
+        let range = window.csvDateRange;
+        // 如果后端未返回范围，尝试从预览数据推断
+        if ((!range || !range.start || !range.end) && previewData && previewData.length) {
+            const dates = [];
+            previewData.forEach(row => {
+                const dateKey = Object.keys(row).find(k => k.toLowerCase().includes('date'));
+                if (dateKey && row[dateKey]) {
+                    const d = new Date(row[dateKey]);
+                    if (!isNaN(d)) dates.push(d);
+                }
+            });
+            if (dates.length) {
+                const minDate = new Date(Math.min(...dates));
+                const maxDate = new Date(Math.max(...dates));
+                range = { start: minDate.toISOString().slice(0, 10), end: maxDate.toISOString().slice(0, 10) };
+            }
+        }
+
+        if (range && range.start && range.end) {
+            label.textContent = `（范围 ${range.start} 至 ${range.end}）`;
+        } else {
+            label.textContent = '';
+        }
+    }
 }
 
 function importWithMapping() {
@@ -898,7 +935,8 @@ function importWithMapping() {
         account_id: document.getElementById('accountSelect').value,
         format_name: document.getElementById('formatName').value,
         column_mappings: mappings,
-        session_id: csvPreviewData.session_id
+        session_id: csvPreviewData.session_id,
+        overwrite_range: document.getElementById('overwriteRangeCheckbox')?.checked ?? false
     };
     
     // 显示加载状态
