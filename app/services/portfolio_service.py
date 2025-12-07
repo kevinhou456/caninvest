@@ -698,6 +698,17 @@ class PortfolioService:
                 daily_change_val = safe_float(value.get('daily_change_value'))
                 prev_value_val = safe_float(value.get('previous_value'))
 
+                if shares_val <= 0:
+                    # 清仓：不应有浮动/当日变化
+                    value['current_value'] = 0
+                    value['unrealized_gain'] = 0
+                    value['unrealized_gain_percent'] = 0
+                    value['daily_change_value'] = 0
+                    value['daily_change_percent'] = 0
+                    value['average_cost'] = 0
+                    value['average_cost_display'] = 0
+                    continue
+
                 if shares_val > 0 and total_cost_val:
                     value['average_cost'] = total_cost_val / shares_val
                     value['average_cost_display'] = value['average_cost']
@@ -886,11 +897,26 @@ class PortfolioService:
             for key, holding in end_holdings_map.items():
                 prev = prev_holdings_map.get(key, {}) or {}
 
+                current_shares = float(holding.get('current_shares', holding.get('shares', 0)) or 0)
+                # 已清仓：不计未实现变动，浮盈应为0
+                if current_shares <= 0:
+                    holding_unrealized = 0.0
+                    prev_unrealized = 0.0  # 避免把上年的未实现拉成本年度亏损
+                else:
+                    holding_unrealized = float(holding.get('unrealized_gain', 0) or 0)
+                    prev_unrealized = float(prev.get('unrealized_gain', 0) or 0)
+
                 # 计算年度增量
-                unrealized_delta = float(holding.get('unrealized_gain', 0) or 0) - float(prev.get('unrealized_gain', 0) or 0)
+                unrealized_delta = holding_unrealized - prev_unrealized
                 realized_delta = float(holding.get('realized_gain', 0) or 0) - float(prev.get('realized_gain', 0) or 0)
                 dividends_delta = float(holding.get('total_dividends', 0) or 0) - float(prev.get('total_dividends', 0) or 0)
                 interest_delta = float(holding.get('total_interest', 0) or 0) - float(prev.get('total_interest', 0) or 0)
+
+                # 已清仓场景：不把历史未实现计入当期，period_gain只含已实现+分红+利息
+                if current_shares <= 0:
+                    unrealized_delta = 0.0
+                    holding_unrealized = 0.0
+
                 period_gain = unrealized_delta + realized_delta + dividends_delta + interest_delta
 
                 # 以期末成本或总买入额作为回报率基数，避免除零
@@ -907,7 +933,7 @@ class PortfolioService:
                     'average_cost': float(holding.get('average_cost', 0) or 0),
                     'total_cost': float(holding.get('total_cost', 0) or 0),
                     'current_price': float(holding.get('current_price', 0) or 0),
-                    'current_value': float(holding.get('current_value', 0) or 0),
+                    'current_value': float(holding.get('current_value', 0) or 0) if current_shares > 0 else 0.0,
                     'unrealized_gain': unrealized_delta,
                     'realized_gain': realized_delta,
                     'dividends': dividends_delta,

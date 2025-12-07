@@ -18,7 +18,7 @@
             <button type="button" class="btn btn-light btn-sm me-3" id="fetchAnnualRatesBtn">
                 <i class="fas fa-sync-alt me-1"></i>{{ _('Fetch Annual Average FX') }}
             </button>
-            <div class="form-check form-switch text-white mb-0 me-3">
+            <div class="form-check form-switch text-white mb-0 me-3" id="accountBreakdownWrapper">
                 <input class="form-check-input" type="checkbox" id="toggleAccountBreakdown">
                 <label class="form-check-label" for="toggleAccountBreakdown">{{ _('Separate by Account') }}</label>
             </div>
@@ -316,6 +316,7 @@ let showCurrencyBreakdown = false;
 let yearlyHoldings = {};
 let selectedYear = null;
 let separateByAccount = false;
+let filterInfo = {};
 
 const familyId = {{ (current_family.id if current_family else 1) | tojson }};
 const memberId = {{ (current_member_id if current_member_id else None) | tojson }};
@@ -373,11 +374,13 @@ function loadAnnualAnalysis() {
             if (data.analysis) {
                 annualData = data.analysis.annual_data || [];
                 yearlyHoldings = data.analysis.yearly_holdings || {};
+                filterInfo = data.filter_info || {};
                 updateCombinedAssetsChart();
                 updateEnhancedReturnsChart();
                 updateAnnualTable();
                 updateYearlyHoldingsUI();
                 document.getElementById('loading-spinner').style.display = 'none';
+                updateAccountToggleVisibility();
             } else {
                 showError('No analysis data returned from API');
             }
@@ -1260,14 +1263,30 @@ document.addEventListener('DOMContentLoaded', function() {
         updateCurrencyBreakdownVisibility();
     }
 
-    const accountToggle = document.getElementById('toggleAccountBreakdown');
-    if (accountToggle) {
-        accountToggle.checked = separateByAccount;
-        accountToggle.addEventListener('change', function(event) {
-            separateByAccount = event.target.checked;
-            loadAnnualAnalysis();
-        });
-    }
+    setupAccountToggle();
 });
+
+function setupAccountToggle() {
+    const accountToggle = document.getElementById('toggleAccountBreakdown');
+    if (!accountToggle) return;
+
+    accountToggle.checked = separateByAccount;
+    accountToggle.addEventListener('change', function(event) {
+        separateByAccount = event.target.checked;
+        loadAnnualAnalysis();
+    });
+}
+
+function updateAccountToggleVisibility() {
+    const wrapper = document.getElementById('accountBreakdownWrapper');
+    if (!wrapper) return;
+    const singleAccount = !!accountId || (filterInfo && filterInfo.account_id);
+    if (singleAccount) {
+        wrapper.style.display = 'none';
+        separateByAccount = false;
+    } else {
+        wrapper.style.display = '';
+    }
+}
 </script>
 {% endblock %}

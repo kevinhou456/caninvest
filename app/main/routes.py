@@ -257,8 +257,10 @@ def _build_portfolio_view_data(
 
     holdings, cleared_holdings = merge_holdings_and_cleared_cross_accounts(raw_holdings, raw_cleared_holdings)
 
-    def consolidate_by_symbol_currency(items):
-        """合并相同股票（含币种）的行，适用于多账户场景。"""
+    def consolidate_by_symbol_currency(items, drop_zero_holdings=True):
+        """合并相同股票（含币种）的行，适用于多账户场景。
+        drop_zero_holdings=True 时过滤零股持仓，避免清仓仍显示浮盈。
+        """
         merged = {}
 
         def safe_num(val):
@@ -301,6 +303,16 @@ def _build_portfolio_view_data(
             daily_change_val = safe_num(value.get('daily_change_value'))
             prev_value_val = safe_num(value.get('previous_value'))
 
+            if drop_zero_holdings and abs(shares_val) < 1e-9:
+                # 清仓后不在当前持仓表显示
+                continue
+
+            # 清仓行：强制未实现/当日变化为0，防止遗留显示
+            if shares_val <= 0:
+                value['unrealized_gain'] = 0
+                value['daily_change_value'] = 0
+                value['daily_change_percent'] = 0
+
             if shares_val > 0 and total_cost_val:
                 value['average_cost'] = total_cost_val / shares_val
                 value['average_cost_display'] = value['average_cost']
@@ -326,8 +338,8 @@ def _build_portfolio_view_data(
         return consolidated
 
     # 按股票+币种合并，避免跨账户重复行（单账户也安全）
-    holdings = consolidate_by_symbol_currency(holdings)
-    cleared_holdings = consolidate_by_symbol_currency(cleared_holdings)
+    holdings = consolidate_by_symbol_currency(holdings, drop_zero_holdings=True)
+    cleared_holdings = consolidate_by_symbol_currency(cleared_holdings, drop_zero_holdings=False)
 
     ibit_holdings = [h for h in holdings if h.get('symbol') == 'IBIT']
     ibit_cleared = [h for h in cleared_holdings if h.get('symbol') == 'IBIT']
