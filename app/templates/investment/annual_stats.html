@@ -1077,6 +1077,8 @@ function renderYearlyHoldingsTable(year) {
         tr.dataset.realized = item.realized_gain || 0;
         tr.dataset.divint = divInt;
         tr.dataset.returnPercent = item.return_rate || 0;
+        const stockDetailUrl = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__', member_id=member_id, account_id=account_id) }}`.replace('__SYMBOL__', item.symbol || '');
+
         tr.innerHTML = `
             <td>
                 <div class="d-flex align-items-center">
@@ -1085,8 +1087,8 @@ function renderYearlyHoldingsTable(year) {
                         ${(item.currency || 'USD') === 'CAD' ? 'C$' : '$'}
                     </div>
                     <div>
-                        <div class="fw-bold">${item.symbol || '-'}</div>
-                        <small class="text-muted">${item.company_name || ''}</small>
+                        <a href="${stockDetailUrl}" class="text-decoration-none fw-bold">${item.symbol || '-'}</a>
+                        <br><small class="text-muted">${item.company_name || ''}</small>
                     </div>
                 </div>
             </td>

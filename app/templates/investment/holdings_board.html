@@ -47,25 +47,20 @@
         position: relative;
     }
 
-    .tooltip {
-        --bs-tooltip-bg: #ffffff;
-        --bs-tooltip-border-color: #dee2e6;
-        --bs-tooltip-color: #212529;
-        --bs-tooltip-max-width: 500px;
-    }
-
-    .tooltip-inner {
-        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-        color: #212529;
-        border: 1px solid #dee2e6;
-        border-radius: 12px;
-        padding: 16px;
-        font-size: 0.85rem;
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.1);
-        text-align: left;
-        max-width: 500px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
+.hb-tooltip {
+    position: fixed;
+    background: #fffbea;
+    color: #212529;
+    border: 1px solid #f0e6b6;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    max-width: 700px;
+    white-space: nowrap;
+    z-index: 2000;
+    pointer-events: none;
+}
 
 
     /* 多选下拉框样式 */
@@ -221,6 +216,14 @@
                     {{ _('Separate by Account') }}
                 </label>
             </div>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Period selector">
+                <button type="button" class="btn btn-outline-primary period-btn active" data-period="1M">1M</button>
+                <button type="button" class="btn btn-outline-primary period-btn" data-period="3M">3M</button>
+                <button type="button" class="btn btn-outline-primary period-btn" data-period="6M">6M</button>
+                <button type="button" class="btn btn-outline-primary period-btn" data-period="YTD">YTD</button>
+                <button type="button" class="btn btn-outline-primary period-btn" data-period="1Y">1Y</button>
+                <button type="button" class="btn btn-outline-primary period-btn" data-period="ALL">ALL</button>
+            </div>
         </div>
 
         <div class="col-4 d-flex justify-content-end">
@@ -289,6 +292,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const accountCheckboxes = document.querySelectorAll('.account-checkbox');
     const selectedAccountsText = document.getElementById('selectedAccountsText');
     const separateByAccountCheckbox = document.getElementById('separateByAccount');
+
+    // 期间选择
+    const periodButtons = document.querySelectorAll('.period-btn');
+    let selectedPeriod = '1M';
+    periodButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            periodButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedPeriod = btn.dataset.period || '1M';
+            loadHoldings();
+        });
+    });
 
     // 恢复保存的选择
     restoreSavedSelections();
@@ -367,6 +382,8 @@ function loadHoldings(forceRefresh = false) {
     const checkedBoxes = Array.from(document.querySelectorAll('.account-checkbox:checked'));
     const selectedAccountIds = checkedBoxes.map(cb => cb.value);
     const separateByAccount = document.getElementById('separateByAccount').checked;
+    const activePeriodBtn = document.querySelector('.period-btn.active');
+    const selectedPeriod = activePeriodBtn ? activePeriodBtn.dataset.period : '1M';
 
     console.log('Selected accounts:', selectedAccountIds);
     console.log('Separate by account:', separateByAccount);
@@ -393,6 +410,7 @@ function loadHoldings(forceRefresh = false) {
 
     // 构建API URL
     let apiUrl = '/api/holdings-board?' + selectedAccountIds.map(id => `account_ids=${id}`).join('&');
+    apiUrl += `&period=${selectedPeriod}`;
     if (forceRefresh) {
         apiUrl += '&force_refresh=true';
     }
@@ -508,13 +526,17 @@ function renderMergedView(holdings) {
                         <tbody>
     `;
 
+    const stockDetailBase = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__') }}`;
     mergedHoldings.forEach(holding => {
         // 使用与overview完全相同的字段名
         const unrealizedGain = holding.unrealized_gain || 0;
         const returnPct = holding.unrealized_gain_percent || 0;
+        const tooltip = buildTxTooltip(holding);
+        const tooltipAttr = tooltip ? `data-tooltip-html-enc="${encodeURIComponent(tooltip)}"` : '';
+        const detailUrl = stockDetailBase.replace('__SYMBOL__', encodeURIComponent(holding.symbol || ''));
 
         html += `
-            <tr class="align-middle holdings-row" data-symbol="${holding.symbol}">
+            <tr class="align-middle holdings-row" data-symbol="${holding.symbol}" ${tooltipAttr}>
                 <!-- Stock Symbol -->
                 <td class="ps-3">
                     <div class="d-flex align-items-center">
@@ -525,7 +547,7 @@ function renderMergedView(holdings) {
                             ${holding.currency === 'CAD' ? 'C$' : '$'}
                         </div>
                         <div>
-                            <strong>${holding.symbol}</strong>
+                            <a href="${detailUrl}" class="text-decoration-none fw-bold">${holding.symbol}</a>
                             <br><small class="text-muted">${holding.sector || 'Unknown'}</small>
                         </div>
                     </div>
@@ -616,11 +638,13 @@ function renderMergedView(holdings) {
     // 添加拖拽和右键菜单事件监听器
     setupDragAndDropEvents();
     setupContextMenuEvents();
+    initHoldingsTooltips();
 }
 
 function renderSequentialView(accountsData) {
     let html = '';
 
+    const stockDetailBase = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__', account_id='__ACCOUNT__') }}`;
     accountsData.forEach(account => {
         if (!account.holdings || account.holdings.length === 0) {
             return;
@@ -658,9 +682,14 @@ function renderSequentialView(accountsData) {
         account.holdings.forEach(holding => {
             const unrealizedGain = holding.unrealized_gain || 0;
             const returnPct = holding.unrealized_gain_percent || 0;
+            const tooltip = buildTxTooltip(holding);
+            const tooltipAttr = tooltip ? `data-tooltip-html-enc="${encodeURIComponent(tooltip)}"` : '';
+            const detailUrl = stockDetailBase
+                .replace('__SYMBOL__', encodeURIComponent(holding.symbol || ''))
+                .replace('__ACCOUNT__', encodeURIComponent(account.account_id || ''));
 
             html += `
-                <tr class="align-middle holdings-row" data-symbol="${holding.symbol}">
+                <tr class="align-middle holdings-row" data-symbol="${holding.symbol}" ${tooltipAttr}>
                     <!-- Stock Symbol -->
                     <td class="ps-3">
                         <div class="d-flex align-items-center">
@@ -669,7 +698,7 @@ function renderSequentialView(accountsData) {
                                 ${holding.currency === 'CAD' ? 'C$' : '$'}
                             </div>
                             <div>
-                                <strong>${holding.symbol}</strong>
+                                <a href="${detailUrl}" class="text-decoration-none fw-bold">${holding.symbol}</a>
                                 <br><small class="text-muted">${holding.sector || 'Unknown'}</small>
                             </div>
                         </div>
@@ -766,6 +795,7 @@ function renderSequentialView(accountsData) {
     // 添加拖拽和右键菜单事件监听器
     setupDragAndDropEvents();
     setupContextMenuEvents();
+    initHoldingsTooltips();
 }
 
 function cloneHoldingsData(accountsData) {
@@ -777,6 +807,85 @@ function cloneHoldingsData(accountsData) {
 
 function filterVisibleHoldings(holdings) {
     return (holdings || []).filter(holding => holding && !hiddenSymbols.has(holding.symbol));
+}
+
+function formatShareCount(value) {
+    const num = Number(value) || 0;
+    const isInt = Number.isInteger(num);
+    return num.toLocaleString('en-US', { minimumFractionDigits: isInt ? 0 : 4, maximumFractionDigits: isInt ? 0 : 4 });
+}
+
+function initHoldingsTooltips() {
+    const tooltipElements = document.querySelectorAll('[data-tooltip-html], [data-tooltip-html-enc]');
+    let tooltipEl = null;
+
+    const showTooltip = (e, content) => {
+        if (!content) return;
+        if (!tooltipEl) {
+            tooltipEl = document.createElement('div');
+            tooltipEl.className = 'hb-tooltip';
+            document.body.appendChild(tooltipEl);
+        }
+        tooltipEl.innerHTML = content;
+        tooltipEl.style.display = 'block';
+        moveTooltip(e);
+    };
+
+    const moveTooltip = (e) => {
+        if (!tooltipEl) return;
+        const padding = 12;
+        const x = e.clientX + padding;
+        const y = e.clientY + padding;
+        tooltipEl.style.left = `${x}px`;
+        tooltipEl.style.top = `${y}px`;
+    };
+
+    const hideTooltip = () => {
+        if (tooltipEl) {
+            tooltipEl.style.display = 'none';
+        }
+    };
+
+    tooltipElements.forEach(el => {
+        const content = el.getAttribute('data-tooltip-html');
+        const encContent = el.getAttribute('data-tooltip-html-enc');
+        const finalContent = encContent ? decodeURIComponent(encContent) : content;
+        el.addEventListener('mouseenter', (e) => showTooltip(e, finalContent));
+        el.addEventListener('mousemove', moveTooltip);
+        el.addEventListener('mouseleave', hideTooltip);
+        el.addEventListener('mousedown', hideTooltip);
+        el.addEventListener('click', hideTooltip);
+    });
+}
+
+function buildTxTooltip(holding) {
+    const txs = holding.period_transactions || [];
+    if (!Array.isArray(txs) || txs.length === 0) return '';
+    const escapeHtml = (text) => (text || '').toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const currentPrice = Number(holding.current_price || 0);
+    const rows = txs.map(tx => {
+        const qty = formatShareCount(tx.quantity || 0);
+        const priceNum = Number(tx.price || 0);
+        const price = priceNum.toFixed(2);
+        const type = tx.type || '';
+        const date = tx.date || '';
+        const acc = tx.account_name ? ` (${tx.account_name})` : '';
+        const base = escapeHtml(`${date} ${type} ${qty} @ $${price}${acc}`);
+
+        if (type === 'BUY' && priceNum > 0 && currentPrice > 0) {
+            const pnlPct = ((currentPrice - priceNum) / priceNum) * 100;
+            const colorClass = pnlPct >= 0 ? 'text-success' : 'text-danger';
+            const sign = pnlPct >= 0 ? '+' : '';
+            return `${base} <span class="${colorClass}">(${sign}${pnlPct.toFixed(2)}%)</span>`;
+        }
+        return base;
+    });
+    const header = escapeHtml(holding.symbol || '');
+    return `<strong>${header}</strong><br>${rows.join('<br>')}`;
 }
 
 function mergeHoldingsBySymbol(accountsData) {
@@ -811,6 +920,7 @@ function mergeHoldingsBySymbol(accountsData) {
             const dividends = toNumber(holding.dividends ?? holding.dividend_received);
             const interest = toNumber(holding.interest ?? holding.interest_received);
             const previousValue = currentValue - dailyChangeValue;
+            const periodTx = Array.isArray(holding.period_transactions) ? holding.period_transactions : [];
 
             let entry = merged.get(key);
             if (!entry) {
@@ -840,7 +950,8 @@ function mergeHoldingsBySymbol(accountsData) {
                     _total_cost_cad: totalCostCad,
                     _previous_value: previousValue,
                     _weight_current_price: currentPrice * shares,
-                    account_details: []
+                    account_details: [],
+                    period_transactions: periodTx.slice()
                 };
                 merged.set(key, entry);
             } else {
@@ -860,6 +971,9 @@ function mergeHoldingsBySymbol(accountsData) {
                 entry.total_cost = toNumber(entry.total_cost) + totalCost;
                 entry.total_cost_native += totalCostNative;
                 entry.total_cost_cad += totalCostCad;
+                if (periodTx.length) {
+                    entry.period_transactions = (entry.period_transactions || []).concat(periodTx);
+                }
             }
 
             entry.account_details.push({
@@ -904,6 +1018,13 @@ function mergeHoldingsBySymbol(accountsData) {
         delete result._weight_current_price;
 
         return result;
+    });
+
+    // 合并后的交易按日期排序
+    mergedList.forEach(item => {
+        if (item.period_transactions) {
+            item.period_transactions.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        }
     });
 
     // 按市值降序排序，方便查看
