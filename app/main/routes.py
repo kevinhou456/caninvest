@@ -1246,6 +1246,48 @@ def api_holdings_board():
                 filtered.append(h)
             return filtered
 
+        def convert_cleared_to_holding(cleared, account_id, account_name):
+            """构造显示用的清仓持仓行，确保表格字段完整"""
+            def sf(val):
+                try:
+                    return float(val or 0)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            bought_shares = sf(cleared.get('total_bought_shares'))
+            sold_shares = sf(cleared.get('total_sold_shares'))
+            bought_value = sf(cleared.get('total_bought_value'))
+            avg_cost = bought_value / bought_shares if bought_shares else 0.0
+            realized_gain = sf(cleared.get('realized_gain'))
+
+            return {
+                'symbol': cleared.get('symbol'),
+                'currency': cleared.get('currency', 'USD'),
+                'account_id': account_id,
+                'account_name': account_name,
+                'company_name': cleared.get('company_name') or cleared.get('symbol'),
+                'sector': cleared.get('sector') or 'Unknown',
+                'shares': 0.0,
+                'current_shares': 0.0,
+                'average_cost': avg_cost,
+                'average_cost_display': avg_cost,
+                'total_cost': 0.0,
+                'current_price': 0.0,
+                'current_value': 0.0,
+                'daily_change_value': 0.0,
+                'daily_change_percent': 0.0,
+                'unrealized_gain': 0.0,
+                'unrealized_gain_percent': 0.0,
+                'realized_gain': realized_gain,
+                'dividends': sf(cleared.get('dividends')),
+                'interest': sf(cleared.get('interest')),
+                'total_bought_shares': bought_shares,
+                'total_sold_shares': sold_shares,
+                'total_bought_value': bought_value,
+                'total_sold_value': sf(cleared.get('total_sold_value')),
+                'period_transactions': cleared.get('period_transactions', []),
+            }
+
         # 按账户分组数据，按选择顺序返回，使用带成员信息的账户名
         account_name_map = {acc.id: AccountService.get_account_name_with_members(acc) for acc in accounts}
         result_data = []
@@ -1254,12 +1296,21 @@ def api_holdings_board():
             # 为每个账户单独获取数据
             account_portfolio_data = asset_service.get_detailed_portfolio_data([account_id])
             tx_map = fetch_account_transactions(account_id, symbols_in_period, account_name_map.get(account_id, '')) if symbols_in_period else {}
-            account_holdings = filter_holdings(account_portfolio_data.get('current_holdings', []), tx_map)
+            current_holdings = filter_holdings(account_portfolio_data.get('current_holdings', []), tx_map)
+            cleared_holdings = filter_holdings(account_portfolio_data.get('cleared_holdings', []), tx_map)
+
+            # 将符合时间段的清仓股票也加入显示（避免被过滤掉）
+            current_symbols = {h.get('symbol') for h in current_holdings if h.get('symbol')}
+            for cleared in cleared_holdings:
+                sym = cleared.get('symbol')
+                if not sym or sym in current_symbols:
+                    continue
+                current_holdings.append(convert_cleared_to_holding(cleared, account_id, account_name_map.get(account_id, '')))
 
             result_data.append({
                 'account_id': account_id,
                 'account_name': account_name_map[account_id],
-                'holdings': account_holdings
+                'holdings': current_holdings
             })
 
         return jsonify({'success': True, 'data': result_data})

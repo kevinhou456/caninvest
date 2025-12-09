@@ -431,7 +431,10 @@
                                               data-bs-toggle="tooltip" 
                                               data-bs-html="true"
                                               data-bs-placement="top"
-                                              title="{% if holding.get('account_details') %}{% for detail in holding['account_details'] %}{{ detail['account_name'] }}: {{ detail['shares']|format_shares }}股, ${{ '{:,.2f}'.format(detail['cost']) }}{% if detail.get('realized_gain') is not none %}, <span class='{% if detail['realized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if detail['realized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['realized_gain']) }}</span>{% endif %}{% if detail.get('unrealized_gain') is not none %}, <span class='{% if detail['unrealized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>浮动{% if detail['unrealized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['unrealized_gain']) }}</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}{{ holding.get('account_name', 'Unknown') }}: {{ holding['shares']|format_shares }}股, ${{ '{:,.2f}'.format(holding.get('total_cost', 0)) }}{% if holding.get('realized_gain') is not none %}, <span class='{% if holding.get('realized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if holding.get('realized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['realized_gain']) }}</span>{% endif %}{% if holding.get('unrealized_gain') is not none %}, <span class='{% if holding.get('unrealized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>浮动{% if holding.get('unrealized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['unrealized_gain']) }}</span>{% endif %}{% endif %}">
+                                              data-bs-container="body"
+                                              data-bs-custom-class="wide-tooltip"
+                                              data-bs-sanitize="false"
+                                              title="{% if holding.get('account_details') %}<table class='tooltip-table'><tbody>{% for detail in holding['account_details'] %}<tr><td class='text-muted pe-2 align-top'>{{ detail['account_name'] }}</td><td class='align-top'>{{ detail['shares']|format_shares }}股, ${{ '{:,.2f}'.format(detail['cost']) }}{% if detail.get('realized_gain') is not none %}, <span class='{% if detail['realized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if detail['realized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['realized_gain']) }}</span>{% endif %}{% if detail.get('unrealized_gain') is not none %}, <span class='{% if detail['unrealized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>浮动{% if detail['unrealized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['unrealized_gain']) }} ({{ '{:.1f}'.format((detail['unrealized_gain'] / detail['cost'] * 100) if detail['cost'] else 0) }}%)</span>{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}{{ holding.get('account_name', 'Unknown') }}: {{ holding['shares']|format_shares }}股, ${{ '{:,.2f}'.format(holding.get('total_cost', 0)) }}{% if holding.get('realized_gain') is not none %}, <span class='{% if holding.get('realized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if holding.get('realized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['realized_gain']) }}</span>{% endif %}{% if holding.get('unrealized_gain') is not none %}, <span class='{% if holding.get('unrealized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>浮动{% if holding.get('unrealized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['unrealized_gain']) }} ({{ '{:.1f}'.format((holding.get('unrealized_gain', 0) / holding.get('total_cost', 0) * 100) if holding.get('total_cost', 0) else 0) }}%)</span>{% endif %}{% endif %}">
                                             {{ holding['shares']|format_shares }} <i class="fas fa-info-circle text-muted ms-1" style="font-size: 0.8rem;"></i>
                                         </span>
                                     {% else %}
@@ -656,7 +659,10 @@
                                               data-bs-toggle="tooltip" 
                                               data-bs-html="true"
                                               data-bs-placement="top"
-                                              title="{% if holding.get('account_details') %}{% for detail in holding['account_details'] %}{{ detail['account_name'] }}: {{ detail.get('bought_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(detail['cost']) }}{% if detail.get('realized_gain') is not none %}, <span class='{% if detail['realized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if detail['realized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['realized_gain']) }}</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}{{ holding.get('account_name', 'Unknown') }}: {{ holding.get('total_bought_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(holding.get('total_bought_value', 0)) }}{% if holding.get('realized_gain') is not none %}, <span class='{% if holding.get('realized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if holding.get('realized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['realized_gain']) }}</span>{% endif %}{% endif %}">
+                                              data-bs-container="body"
+                                              data-bs-custom-class="wide-tooltip"
+                                              data-bs-sanitize="false"
+                                              title="{% if holding.get('account_details') %}<table class='tooltip-table'><tbody>{% for detail in holding['account_details'] %}<tr><td class='text-muted pe-2 align-top'>{{ detail['account_name'] }}</td><td class='align-top'>{{ detail.get('bought_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(detail['cost']) }}{% if detail.get('realized_gain') is not none %}, <span class='{% if detail['realized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if detail['realized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['realized_gain']) }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}{{ holding.get('account_name', 'Unknown') }}: {{ holding.get('total_bought_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(holding.get('total_bought_value', 0)) }}{% if holding.get('realized_gain') is not none %}, <span class='{% if holding.get('realized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if holding.get('realized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['realized_gain']) }}</span>{% endif %}{% endif %}">
                                             {{ holding['total_bought_shares']|format_shares }} <i class="fas fa-info-circle text-muted ms-1" style="font-size: 0.8rem;"></i>
                                         </span>
                                     {% else %}
@@ -673,7 +679,10 @@
                                               data-bs-toggle="tooltip" 
                                               data-bs-html="true"
                                               data-bs-placement="top"
-                                              title="{% if holding.get('account_details') %}{% for detail in holding['account_details'] %}{{ detail['account_name'] }}: {{ detail.get('sold_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(detail.get('sold_value', 0)) }}收入{% if detail.get('realized_gain') is not none %}, <span class='{% if detail['realized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if detail['realized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['realized_gain']) }}</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}{{ holding.get('account_name', 'Unknown') }}: {{ holding.get('total_sold_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(holding.get('total_sold_value', 0)) }}收入{% if holding.get('realized_gain') is not none %}, <span class='{% if holding.get('realized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if holding.get('realized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['realized_gain']) }}</span>{% endif %}{% endif %}">
+                                              data-bs-container="body"
+                                              data-bs-custom-class="wide-tooltip"
+                                              data-bs-sanitize="false"
+                                              title="{% if holding.get('account_details') %}<table class='tooltip-table'><tbody>{% for detail in holding['account_details'] %}<tr><td class='text-muted pe-2 align-top'>{{ detail['account_name'] }}</td><td class='align-top'>{{ detail.get('sold_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(detail.get('sold_value', 0)) }}收入{% if detail.get('realized_gain') is not none %}, <span class='{% if detail['realized_gain'] >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if detail['realized_gain'] >= 0 %}+{% endif %}${{ '{:,.2f}'.format(detail['realized_gain']) }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}{{ holding.get('account_name', 'Unknown') }}: {{ holding.get('total_sold_shares', 0)|format_shares }}股, ${{ '{:,.2f}'.format(holding.get('total_sold_value', 0)) }}收入{% if holding.get('realized_gain') is not none %}, <span class='{% if holding.get('realized_gain', 0) >= 0 %}gain-positive{% else %}gain-negative{% endif %}'>已实现{% if holding.get('realized_gain', 0) >= 0 %}+{% endif %}${{ '{:,.2f}'.format(holding['realized_gain']) }}</span>{% endif %}{% endif %}">
                                             {{ holding['total_sold_shares']|format_shares }} <i class="fas fa-info-circle text-muted ms-1" style="font-size: 0.8rem;"></i>
                                         </span>
                                     {% else %}
@@ -1529,6 +1538,30 @@ function refreshPortfolioData() {
     transition: all 0.3s ease;
 }
 
+/* Tooltip 宽度扩展，避免强制换行 */
+.tooltip.wide-tooltip .tooltip-inner {
+    max-width: none;
+    min-width: 520px;
+    white-space: normal;
+    display: inline-block;
+    word-break: break-word;
+}
+
+.tooltip-table {
+    margin: 0;
+    border-collapse: collapse;
+}
+
+.tooltip-table td {
+    padding: 4px 8px;
+    white-space: normal;
+    vertical-align: top;
+}
+
+.tooltip.wide-tooltip {
+    max-width: none !important;
+}
+
 .sort-region {
     padding: 2px 4px;
     border-radius: 3px;
@@ -1700,10 +1733,17 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // 初始化 Bootstrap 工具提示
+    // 初始化 Bootstrap 工具提示，强制允许 HTML + 关闭 sanitize，保证表格内容显示
     if (typeof bootstrap !== 'undefined') {
         const tooltips = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-        tooltips.forEach(tooltip => new bootstrap.Tooltip(tooltip));
+        tooltips.forEach(el => {
+            new bootstrap.Tooltip(el, {
+                html: true,
+                sanitize: false,
+                placement: el.getAttribute('data-bs-placement') || 'top',
+                customClass: el.getAttribute('data-bs-custom-class') || ''
+            });
+        });
     }
 });
 

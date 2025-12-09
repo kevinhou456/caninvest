@@ -229,15 +229,112 @@
         </div>
     </div>
 
-    <!-- 持仓显示区域 -->
-    <div id="holdingsContent">
-        <div class="text-center p-4">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">{{ _('Loading...') }}</span>
+<!-- 持仓显示区域 -->
+<div id="holdingsContent">
+    <div class="text-center p-4">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">{{ _('Loading...') }}</span>
+        </div>
+        <div class="mt-2">{{ _('Loading holdings data...') }}</div>
+    </div>
+</div>
+
+<!-- Add Transaction Modal (简版，默认SELL) -->
+<div class="modal fade" id="addTransactionModal" tabindex="-1" aria-labelledby="addTransactionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addTransactionModalLabel">
+                    <i class="fas fa-plus me-2"></i>{{ _('Add New Transaction') }}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
             </div>
-            <div class="mt-2">{{ _('Loading holdings data...') }}</div>
+            <form method="POST" id="addTransactionForm" action="{{ url_for('main.create_transaction') }}">
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="modal_account_id" class="form-label">{{ _('Account') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_account_id" name="account_id" required>
+                                <option value="">{{ _('Select Account') }}</option>
+                                {% for account in accounts %}
+                                <option value="{{ account.id }}">{{ account.name }} ({{ account.account_members|map(attribute='member.name')|join(', ') }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal_trade_date" class="form-label">{{ _('Transaction Date') }} <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="modal_trade_date" name="trade_date" required>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6" id="stock_symbol_section">
+                            <label for="modal_stock_symbol" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger" id="stock_required">*</span></label>
+                            <input type="text" class="form-control" id="modal_stock_symbol" name="stock_symbol" placeholder="{{ _('e.g. AAPL, SHOP.TO') }}" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="modal_currency" class="form-label">{{ _('Currency') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal_currency" name="currency" required>
+                                <option value="USD">USD</option>
+                                <option value="CAD">CAD</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="modal_transaction_type" class="form-label">{{ _('Type') }}</label>
+                            <select class="form-select" id="modal_transaction_type" name="type" required>
+                                <option value="SELL">SELL</option>
+                                <option value="BUY">BUY</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4" id="quantity_section">
+                            <label for="modal_quantity" class="form-label">{{ _('Quantity') }} <span class="text-danger" id="quantity_required">*</span></label>
+                            <input type="number" class="form-control" id="modal_quantity" name="quantity" step="0.0001" min="0.0001" required>
+                        </div>
+                        <div class="col-md-4" id="price_section">
+                            <label for="modal_price_per_share" class="form-label">{{ _('Price per Share') }} <span class="text-danger" id="price_required">*</span></label>
+                            <input type="number" class="form-control" id="modal_price_per_share" name="price" step="0.0001" min="0" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="modal_fee" class="form-label">{{ _('Fee') }}</label>
+                            <input type="number" class="form-control" id="modal_fee" name="fee" step="0.01" min="0" value="0">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3" id="amount_section" style="display: none;">
+                        <div class="col-md-6">
+                            <label for="modal_amount" class="form-label">{{ _('Amount') }}</label>
+                            <input type="number" class="form-control" id="modal_amount" name="amount" step="0.01" min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal_notes" class="form-label">{{ _('Notes') }}</label>
+                            <input type="text" class="form-control" id="modal_notes" name="notes">
+                        </div>
+                    </div>
+
+                    <input type="hidden" id="modal_stock_name" name="stock_name">
+                    <input type="hidden" id="modal_exchange" name="exchange">
+
+                    <div class="row">
+                        <div class="col-12">
+                            <div id="modal-summary-content" class="p-2 bg-light rounded">
+                                <p class="text-muted mb-0">{{ _('Fill in the form to see transaction summary') }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close') }}</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>{{ _('Create Transaction') }}
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
+</div>
 </div>
 
 <script>
@@ -535,12 +632,13 @@ function renderMergedView(holdings) {
                 <!-- Stock Symbol -->
                 <td class="ps-3">
                     <div class="d-flex align-items-center">
-                        <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar currency-symbol"
-                             style="color: ${holding.currency === 'CAD' ? 'black' : 'white'};"
-                             draggable="true"
-                             data-symbol="${holding.symbol}">
+                            <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar currency-symbol hb-sell-trigger"
+                                 style="color: ${holding.currency === 'CAD' ? 'black' : 'white'}; cursor: pointer;"
+                                 draggable="true"
+                                 data-symbol="${holding.symbol}"
+                                 data-currency="${holding.currency}">
                             ${holding.currency === 'CAD' ? 'C$' : '$'}
-                        </div>
+                            </div>
                         <div>
                             <a href="${detailUrl}" class="text-decoration-none fw-bold">${holding.symbol}</a>
                             <br><small class="text-muted">${holding.sector || 'Unknown'}</small>
@@ -639,6 +737,7 @@ function renderMergedView(holdings) {
     initHoldingsTooltips();
     initHoldingsBoardSorting();
     bindPeriodButtons();
+    bindSellModalTriggers();
 }
 
 function renderSequentialView(accountsData) {
@@ -726,12 +825,16 @@ function renderSequentialView(accountsData) {
                     data-dividends="${(holding.dividends || 0)}"
                     data-interest="${(holding.interest || 0)}"
                     data-return-percent="${totalReturnPct || 0}"
+                    data-account-id="${account.account_id}"
                     ${tooltipAttr}>
                     <!-- Stock Symbol -->
                     <td class="ps-3">
                         <div class="d-flex align-items-center">
-                            <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar"
-                                 style="color: ${holding.currency === 'CAD' ? 'black' : 'white'};">
+                            <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar hb-sell-trigger"
+                                 style="color: ${holding.currency === 'CAD' ? 'black' : 'white'}; cursor: pointer;"
+                                 data-symbol="${holding.symbol}"
+                                 data-currency="${holding.currency}"
+                                 data-account-id="${account.account_id}">
                                 ${holding.currency === 'CAD' ? 'C$' : '$'}
                             </div>
                             <div>
@@ -838,6 +941,7 @@ function renderSequentialView(accountsData) {
     initHoldingsTooltips();
     initHoldingsBoardSorting();
     bindPeriodButtons();
+    bindSellModalTriggers();
 }
 
 function cloneHoldingsData(accountsData) {
@@ -1160,6 +1264,26 @@ function bindPeriodButtons() {
     });
 }
 
+function bindSellModalTriggers() {
+    const separateChecked = document.getElementById('separateByAccount')?.checked;
+    const triggers = document.querySelectorAll('.hb-sell-trigger');
+    triggers.forEach(el => {
+        if (el.dataset.bound === '1') return;
+        el.dataset.bound = '1';
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!document.getElementById('separateByAccount')?.checked) {
+                return;
+            }
+            const symbol = el.dataset.symbol;
+            const currency = el.dataset.currency;
+            const accountId = el.dataset.accountId || el.closest('tr')?.dataset.accountId;
+            openAddTransactionModalForStock(symbol, currency, accountId);
+        });
+    });
+}
+
 function initHoldingsBoardSorting() {
     const tables = document.querySelectorAll('.hb-sortable');
     if (!tables.length) return;
@@ -1231,6 +1355,55 @@ function initHoldingsBoardSorting() {
             icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} ms-1 sort-icon`;
         }
     }
+}
+
+function resetTransactionFormHB() {
+    const form = document.getElementById('addTransactionForm');
+    if (!form) return;
+    form.reset();
+    const today = new Date().toISOString().split('T')[0];
+    const tradeDate = document.getElementById('modal_trade_date');
+    if (tradeDate) tradeDate.value = today;
+    const type = document.getElementById('modal_transaction_type');
+    if (type) type.value = 'SELL';
+    const stockRequired = document.getElementById('stock_required');
+    if (stockRequired) stockRequired.style.display = 'inline';
+}
+
+function openAddTransactionModalForStock(symbol, currency, accountId = null) {
+    const modalElement = document.getElementById('addTransactionModal');
+    if (!modalElement) return;
+    resetTransactionFormHB();
+
+    const symbolInput = document.getElementById('modal_stock_symbol');
+    const currencySelect = document.getElementById('modal_currency');
+    const typeSelect = document.getElementById('modal_transaction_type');
+    const accountSelect = document.getElementById('modal_account_id');
+    const qtyInput = document.getElementById('modal_quantity');
+    const priceInput = document.getElementById('modal_price_per_share');
+
+    if (symbolInput) symbolInput.value = symbol || '';
+    if (currencySelect) currencySelect.value = (currency || '').toUpperCase() || 'USD';
+    if (typeSelect) typeSelect.value = 'SELL';
+    if (accountSelect) {
+        if (accountId) {
+            accountSelect.value = accountId;
+        } else if (accountSelect.options.length > 1) {
+            accountSelect.selectedIndex = 1;
+        }
+    }
+
+    // Prefill quantity and current price from the row if available
+    const triggerRow = document.querySelector(`tr[data-symbol="${symbol}"][data-currency="${currency}"]`);
+    if (triggerRow) {
+        const shares = triggerRow.dataset.shares || triggerRow.getAttribute('data-shares');
+        const currentPrice = triggerRow.dataset.currentPrice || triggerRow.getAttribute('data-current-price');
+        if (qtyInput && shares) qtyInput.value = parseFloat(shares || 0);
+        if (priceInput && currentPrice) priceInput.value = parseFloat(currentPrice || 0);
+    }
+
+    const modal = new bootstrap.Modal(modalElement);
+    modal.show();
 }
 
 function escapeForSelector(value) {
