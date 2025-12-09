@@ -130,6 +130,10 @@ def _build_portfolio_view_data(
                 merged_holding['current_value'] = safe_float(holding.get('current_value'))
                 unrealized_gain = safe_float(holding.get('unrealized_gain'))
                 merged_holding['unrealized_gain'] = unrealized_gain
+                merged_holding['total_bought_shares'] = safe_float(holding.get('total_bought_shares'))
+                merged_holding['total_sold_shares'] = safe_float(holding.get('total_sold_shares'))
+                merged_holding['total_bought_value'] = safe_float(holding.get('total_bought_value'))
+                merged_holding['total_sold_value'] = safe_float(holding.get('total_sold_value'))
                 # 确保unrealized_gain_percent基于当前的数据计算
                 if total_cost > 0:
                     merged_holding['unrealized_gain_percent'] = (unrealized_gain / total_cost) * 100
@@ -162,6 +166,10 @@ def _build_portfolio_view_data(
                 existing['current_value'] = safe_float(existing.get('current_value')) + safe_float(holding.get('current_value'))
                 existing['unrealized_gain'] = safe_float(existing.get('unrealized_gain')) + safe_float(holding.get('unrealized_gain'))
                 existing['realized_gain'] = safe_float(existing.get('realized_gain')) + safe_float(holding.get('realized_gain'))
+                existing['total_bought_shares'] = safe_float(existing.get('total_bought_shares')) + safe_float(holding.get('total_bought_shares'))
+                existing['total_sold_shares'] = safe_float(existing.get('total_sold_shares')) + safe_float(holding.get('total_sold_shares'))
+                existing['total_bought_value'] = safe_float(existing.get('total_bought_value')) + safe_float(holding.get('total_bought_value'))
+                existing['total_sold_value'] = safe_float(existing.get('total_sold_value')) + safe_float(holding.get('total_sold_value'))
                 existing['total_dividends'] = safe_float(existing.get('total_dividends')) + safe_float(holding.get('total_dividends'))
                 existing['total_interest'] = safe_float(existing.get('total_interest')) + safe_float(holding.get('total_interest'))
                 existing.setdefault('merged_accounts', []).append(holding.get('account_name', ''))

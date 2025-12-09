@@ -143,94 +143,88 @@
         transform: translateX(5px);
     }
 
-    /* 右键菜单样式 */
-    .context-menu {
-        position: absolute;
-        background: white;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        padding: 8px 0;
-        z-index: 1000;
-        min-width: 150px;
-        display: none;
+    /* 期间选择按钮样式，提升对比度 */
+    .hb-period-btn-group .hb-period-btn {
+        background: #f2f7ff;
+        color: #0b5ed7;
+        border: 1px solid #99b9ff;
+        font-weight: 600;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
     }
 
-    .context-menu-item {
-        padding: 8px 16px;
-        cursor: pointer;
-        transition: background-color 0.2s;
+    .hb-period-btn-group .hb-period-btn:hover {
+        background: #e4edff;
+        color: #0b5ed7;
     }
 
-    .context-menu-item:hover {
-        background-color: #f8f9fa;
-    }
-
-    .context-menu-divider {
-        height: 1px;
-        background-color: #eee;
-        margin: 4px 0;
+    .hb-period-btn-group .hb-period-btn.active {
+        background: linear-gradient(135deg, #0b5ed7, #0a58ca);
+        color: #fff;
+        border-color: #0a58ca;
+        box-shadow: 0 0 0 2px rgba(11,94,215,0.15);
     }
 </style>
 {% endblock %}
 
 {% block content %}
 <!-- Holdings Board Header -->
-<div class="row mb-3">
-    <div class="col-12">
-        <h4>{{ _('Holdings Board') }}</h4>
+<div class="row mb-3 align-items-center">
+    <div class="col-6">
+        <h4 class="mb-0">{{ _('Holdings Board') }}</h4>
+    </div>
+    <div class="col-6 text-end">
+        <button class="btn btn-primary" onclick="loadHoldings(true)">
+            <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh') }}
+        </button>
     </div>
 </div>
 
 <div class="container-fluid">
     <!-- 控制面板 -->
     <div class="row mb-3 align-items-end">
-        <div class="col-4">
-            <label class="form-label mb-2">
-                <i class="fas fa-university me-1"></i>{{ _('Select Accounts') }}:
-            </label>
-            <div class="multiselect-dropdown">
-                <div class="dropdown-toggle" id="accountDropdownToggle">
-                    <span id="selectedAccountsText">{{ _('All Accounts') }}</span>
-                </div>
-                <div class="dropdown-menu" id="accountDropdownMenu" style="display: none;">
-                    <div class="dropdown-item">
-                        <input type="checkbox" id="selectAll" checked>
-                        <label for="selectAll"><strong>{{ _('Select All') }}</strong></label>
+        <div class="col-12">
+            <div class="d-flex flex-wrap align-items-end gap-3 justify-content-between">
+                <div class="d-flex flex-wrap align-items-end gap-3">
+                    <div>
+                        <label class="form-label mb-2">
+                            <i class="fas fa-university me-1"></i>{{ _('Select Accounts') }}:
+                        </label>
+                        <div class="multiselect-dropdown">
+                            <div class="dropdown-toggle" id="accountDropdownToggle">
+                                <span id="selectedAccountsText">{{ _('All Accounts') }}</span>
+                            </div>
+                            <div class="dropdown-menu" id="accountDropdownMenu" style="display: none;">
+                                <div class="dropdown-item">
+                                    <input type="checkbox" id="selectAll" checked>
+                                    <label for="selectAll"><strong>{{ _('Select All') }}</strong></label>
+                                </div>
+                                <div class="dropdown-divider"></div>
+                                {% for account in accounts %}
+                                <div class="dropdown-item">
+                                    <input type="checkbox" id="account{{ account.id }}" value="{{ account.id }}" class="account-checkbox" checked>
+                                    <label for="account{{ account.id }}">{{ _get_account_name_with_members(account) }}</label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
-                    <div class="dropdown-divider"></div>
-                    {% for account in accounts %}
-                    <div class="dropdown-item">
-                        <input type="checkbox" id="account{{ account.id }}" value="{{ account.id }}" class="account-checkbox" checked>
-                        <label for="account{{ account.id }}">{{ _get_account_name_with_members(account) }}</label>
+
+                    <div class="form-check" style="margin-bottom: 0;">
+                        <input class="form-check-input" type="checkbox" id="separateByAccount">
+                        <label class="form-check-label" for="separateByAccount">
+                            {{ _('Separate by Account') }}
+                        </label>
                     </div>
-                    {% endfor %}
                 </div>
-            </div>
-        </div>
 
-        <div class="col-4">
-            <div class="form-check" style="margin-bottom: 8px;">
-                <input class="form-check-input" type="checkbox" id="separateByAccount">
-                <label class="form-check-label" for="separateByAccount">
-                    {{ _('Separate by Account') }}
-                </label>
-            </div>
-            <div class="btn-group btn-group-sm" role="group" aria-label="Period selector">
-                <button type="button" class="btn btn-outline-primary period-btn active" data-period="1M">1M</button>
-                <button type="button" class="btn btn-outline-primary period-btn" data-period="3M">3M</button>
-                <button type="button" class="btn btn-outline-primary period-btn" data-period="6M">6M</button>
-                <button type="button" class="btn btn-outline-primary period-btn" data-period="YTD">YTD</button>
-                <button type="button" class="btn btn-outline-primary period-btn" data-period="1Y">1Y</button>
-                <button type="button" class="btn btn-outline-primary period-btn" data-period="ALL">ALL</button>
-            </div>
-        </div>
-
-        <div class="col-4 d-flex justify-content-end">
-            <div>
-                <button class="btn btn-primary" onclick="loadHoldings(true)">
-                    <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh') }}
-                </button>
+                <div class="btn-group btn-group-sm hb-period-btn-group ms-auto" role="group" aria-label="Period selector">
+                    <button type="button" class="btn hb-period-btn period-btn active" data-period="1M">1M</button>
+                    <button type="button" class="btn hb-period-btn period-btn" data-period="3M">3M</button>
+                    <button type="button" class="btn hb-period-btn period-btn" data-period="6M">6M</button>
+                    <button type="button" class="btn hb-period-btn period-btn" data-period="YTD">YTD</button>
+                    <button type="button" class="btn hb-period-btn period-btn" data-period="1Y">1Y</button>
+                    <button type="button" class="btn hb-period-btn period-btn" data-period="ALL">ALL</button>
+                </div>
             </div>
         </div>
     </div>
@@ -246,31 +240,6 @@
     </div>
 </div>
 
-<!-- 右键菜单 -->
-<div id="contextMenu" class="context-menu">
-    <div class="context-menu-item" data-action="moveUp">
-        <i class="fas fa-arrow-up me-2"></i>{{ _('Move Up') }}
-    </div>
-    <div class="context-menu-item" data-action="moveDown">
-        <i class="fas fa-arrow-down me-2"></i>{{ _('Move Down') }}
-    </div>
-    <div class="context-menu-divider"></div>
-    <div class="context-menu-item" data-action="moveToTop">
-        <i class="fas fa-angle-double-up me-2"></i>{{ _('Move to Top') }}
-    </div>
-    <div class="context-menu-item" data-action="moveToBottom">
-        <i class="fas fa-angle-double-down me-2"></i>{{ _('Move to Bottom') }}
-    </div>
-    <div class="context-menu-divider"></div>
-    <div class="context-menu-item" data-action="hideStock">
-        <i class="fas fa-eye-slash me-2"></i>{{ _('Hide Stock') }}
-    </div>
-    <div class="context-menu-divider"></div>
-    <div class="context-menu-item" data-action="resetOrder">
-        <i class="fas fa-undo me-2"></i>{{ _('Reset Default Order') }}
-    </div>
-</div>
-
 <script>
 // localStorage keys
 const STORAGE_KEY_ACCOUNTS = 'holdingsBoard_selectedAccounts';
@@ -279,8 +248,6 @@ const STORAGE_KEY_HIDDEN = 'holdingsBoard_hiddenSymbols';
 
 // client-side state
 let hiddenSymbols = new Set();
-let contextMenuDocumentListenerAttached = false;
-let contextMenuActionsBound = false;
 
 // 多选下拉框功能
 document.addEventListener('DOMContentLoaded', function() {
@@ -292,18 +259,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const accountCheckboxes = document.querySelectorAll('.account-checkbox');
     const selectedAccountsText = document.getElementById('selectedAccountsText');
     const separateByAccountCheckbox = document.getElementById('separateByAccount');
-
-    // 期间选择
-    const periodButtons = document.querySelectorAll('.period-btn');
-    let selectedPeriod = '1M';
-    periodButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            periodButtons.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            selectedPeriod = btn.dataset.period || '1M';
-            loadHoldings();
-        });
-    });
 
     // 恢复保存的选择
     restoreSavedSelections();
@@ -368,6 +323,9 @@ document.addEventListener('DOMContentLoaded', function() {
             selectedAccountsText.textContent = `{{ _("Selected") }} ${checkedBoxes.length} {{ _("accounts") }}`;
         }
     }
+
+    // 绑定期间按钮
+    bindPeriodButtons();
 
     // 页面加载后自动加载数据
     setTimeout(() => {
@@ -501,26 +459,48 @@ function renderMergedView(holdings) {
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
-                    <i class="fas fa-chart-pie me-2"></i>{{ _('Current Holdings') }}
+                    <i class="fas fa-chart-pie me-2"></i>{{ _('Active') }}
                 </h5>
                 <span class="badge bg-secondary" data-label-stocks="{{ _('stocks') }}">${mergedHoldings.length} {{ _('stocks') }}</span>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0 holdings-table">
+                    <table class="table table-hover mb-0 holdings-table hb-sortable" id="holdingsBoardTable">
                         <thead class="table-light">
                             <tr>
-                                <th class="ps-3">{{ _('Stock Symbol') }}</th>
-                                <th class="text-end">{{ _('Shares') }}</th>
-                                <th class="text-end">{{ _('Avg Cost') }}</th>
-                                <th class="text-end">{{ _('Current Price') }}</th>
-                                <th class="text-end">{{ _('Daily Change') }}</th>
-                                <th class="text-end">{{ _('Market Value') }}</th>
-                                <th class="text-end">{{ _('Unrealized P&L') }}</th>
-                                <th class="text-end">{{ _('Realized Gains') }}</th>
-                                <th class="text-end">{{ _('Dividends') }}</th>
-                                <th class="text-end">{{ _('Interest') }}</th>
-                                <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                                <th class="ps-3 sortable" data-sort="symbol">
+                                    {{ _('Stock Symbol') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="shares">
+                                    {{ _('Shares') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="avg_cost">
+                                    {{ _('Avg Cost') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="current_price">
+                                    {{ _('Current Price') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="daily_change">
+                                    {{ _('Daily Change') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="market_value">
+                                    {{ _('Market Value') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="unrealized_gain">
+                                    {{ _('Unrealized P&L') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="realized_gain">
+                                    {{ _('Realized Gains') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="dividends">
+                                    {{ _('Dividends') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end sortable" data-sort="interest">
+                                    {{ _('Interest') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
+                                <th class="text-end pe-3 sortable" data-sort="return_percent">
+                                    {{ _('Return Percent') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -529,14 +509,29 @@ function renderMergedView(holdings) {
     const stockDetailBase = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__') }}`;
     mergedHoldings.forEach(holding => {
         // 使用与overview完全相同的字段名
-        const unrealizedGain = holding.unrealized_gain || 0;
-        const returnPct = holding.unrealized_gain_percent || 0;
+        const unrealizedGain = toSafeNumber(holding.unrealized_gain);
+        const unrealizedGainPercent = toSafeNumber(holding.unrealized_gain_percent);
+        const totalReturnPct = calculateTotalReturnPercent(holding);
         const tooltip = buildTxTooltip(holding);
         const tooltipAttr = tooltip ? `data-tooltip-html-enc="${encodeURIComponent(tooltip)}"` : '';
         const detailUrl = stockDetailBase.replace('__SYMBOL__', encodeURIComponent(holding.symbol || ''));
 
         html += `
-            <tr class="align-middle holdings-row" data-symbol="${holding.symbol}" ${tooltipAttr}>
+            <tr class="align-middle holdings-row"
+                data-symbol="${holding.symbol}"
+                data-currency="${holding.currency}"
+                data-sector="${holding.sector || 'Unknown'}"
+                data-shares="${holding.shares || 0}"
+                data-avg-cost="${holding.average_cost || 0}"
+                data-current-price="${holding.current_price || 0}"
+                data-daily-change="${holding.daily_change_value || 0}"
+                data-market-value="${holding.current_value || 0}"
+                data-unrealized-gain="${holding.unrealized_gain || 0}"
+                data-realized-gain="${holding.realized_gain || 0}"
+                data-dividends="${(holding.dividends || 0)}"
+                data-interest="${(holding.interest || 0)}"
+                data-return-percent="${totalReturnPct || 0}"
+                ${tooltipAttr}>
                 <!-- Stock Symbol -->
                 <td class="ps-3">
                     <div class="d-flex align-items-center">
@@ -592,6 +587,10 @@ function renderMergedView(holdings) {
                     <span class="fw-bold ${unrealizedGain >= 0 ? 'text-success' : 'text-danger'}">
                         ${unrealizedGain >= 0 ? '+' : '-'}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </span>
+                    <br>
+                    <small class="fw-bold text-muted ${unrealizedGainPercent >= 0 ? 'text-success' : 'text-danger'}">
+                        ${unrealizedGainPercent >= 0 ? '+' : '-'}${Math.abs(unrealizedGainPercent).toFixed(1)}%
+                    </small>
                 </td>
 
                 <!-- Realized Gains -->
@@ -617,8 +616,8 @@ function renderMergedView(holdings) {
 
                 <!-- Return Percentage -->
                 <td class="text-end pe-3">
-                    <span class="badge ${returnPct >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
-                        ${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%
+                    <span class="badge ${totalReturnPct >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
+                        ${totalReturnPct >= 0 ? '+' : ''}${totalReturnPct.toFixed(1)}%
                     </span>
                 </td>
             </tr>
@@ -637,8 +636,9 @@ function renderMergedView(holdings) {
 
     // 添加拖拽和右键菜单事件监听器
     setupDragAndDropEvents();
-    setupContextMenuEvents();
     initHoldingsTooltips();
+    initHoldingsBoardSorting();
+    bindPeriodButtons();
 }
 
 function renderSequentialView(accountsData) {
@@ -660,28 +660,51 @@ function renderSequentialView(accountsData) {
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-hover mb-0 holdings-table">
+                        <table class="table table-hover mb-0 holdings-table hb-sortable" id="holdingsBoardTable-${account.account_id}">
                             <thead class="table-light">
                                 <tr>
-                                    <th class="ps-3">{{ _('Stock Symbol') }}</th>
-                                    <th class="text-end">{{ _('Shares') }}</th>
-                                    <th class="text-end">{{ _('Avg Cost') }}</th>
-                                    <th class="text-end">{{ _('Current Price') }}</th>
-                                    <th class="text-end">{{ _('Daily Change') }}</th>
-                                    <th class="text-end">{{ _('Market Value') }}</th>
-                                    <th class="text-end">{{ _('Unrealized P&L') }}</th>
-                                    <th class="text-end">{{ _('Realized Gains') }}</th>
-                                    <th class="text-end">{{ _('Dividends') }}</th>
-                                    <th class="text-end">{{ _('Interest') }}</th>
-                                    <th class="text-end pe-3">{{ _('Return Percent') }}</th>
+                                    <th class="ps-3 sortable" data-sort="symbol">
+                                        {{ _('Stock Symbol') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="shares">
+                                        {{ _('Shares') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="avg_cost">
+                                        {{ _('Avg Cost') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="current_price">
+                                        {{ _('Current Price') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="daily_change">
+                                        {{ _('Daily Change') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="market_value">
+                                        {{ _('Market Value') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="unrealized_gain">
+                                        {{ _('Unrealized P&L') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="realized_gain">
+                                        {{ _('Realized Gains') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="dividends">
+                                        {{ _('Dividends') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end sortable" data-sort="interest">
+                                        {{ _('Interest') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
+                                    <th class="text-end pe-3 sortable" data-sort="return_percent">
+                                        {{ _('Return Percent') }} <i class="fas fa-sort ms-1 sort-icon"></i>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
         `;
 
         account.holdings.forEach(holding => {
-            const unrealizedGain = holding.unrealized_gain || 0;
-            const returnPct = holding.unrealized_gain_percent || 0;
+            const unrealizedGain = toSafeNumber(holding.unrealized_gain);
+            const unrealizedGainPercent = toSafeNumber(holding.unrealized_gain_percent);
+            const totalReturnPct = calculateTotalReturnPercent(holding);
             const tooltip = buildTxTooltip(holding);
             const tooltipAttr = tooltip ? `data-tooltip-html-enc="${encodeURIComponent(tooltip)}"` : '';
             const detailUrl = stockDetailBase
@@ -689,7 +712,21 @@ function renderSequentialView(accountsData) {
                 .replace('__ACCOUNT__', encodeURIComponent(account.account_id || ''));
 
             html += `
-                <tr class="align-middle holdings-row" data-symbol="${holding.symbol}" ${tooltipAttr}>
+                <tr class="align-middle holdings-row"
+                    data-symbol="${holding.symbol}"
+                    data-currency="${holding.currency}"
+                    data-sector="${holding.sector || 'Unknown'}"
+                    data-shares="${holding.shares || 0}"
+                    data-avg-cost="${holding.average_cost || 0}"
+                    data-current-price="${holding.current_price || 0}"
+                    data-daily-change="${holding.daily_change_value || 0}"
+                    data-market-value="${holding.current_value || 0}"
+                    data-unrealized-gain="${holding.unrealized_gain || 0}"
+                    data-realized-gain="${holding.realized_gain || 0}"
+                    data-dividends="${(holding.dividends || 0)}"
+                    data-interest="${(holding.interest || 0)}"
+                    data-return-percent="${totalReturnPct || 0}"
+                    ${tooltipAttr}>
                     <!-- Stock Symbol -->
                     <td class="ps-3">
                         <div class="d-flex align-items-center">
@@ -743,6 +780,10 @@ function renderSequentialView(accountsData) {
                         <span class="fw-bold ${unrealizedGain >= 0 ? 'text-success' : 'text-danger'}">
                             ${unrealizedGain >= 0 ? '+' : '-'}$${Math.abs(unrealizedGain).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                         </span>
+                        <br>
+                        <small class="fw-bold text-muted ${unrealizedGainPercent >= 0 ? 'text-success' : 'text-danger'}">
+                            ${unrealizedGainPercent >= 0 ? '+' : '-'}${Math.abs(unrealizedGainPercent).toFixed(1)}%
+                        </small>
                     </td>
 
                     <!-- Realized Gains -->
@@ -768,8 +809,8 @@ function renderSequentialView(accountsData) {
 
                     <!-- Return Percentage -->
                     <td class="text-end pe-3">
-                        <span class="badge ${returnPct >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
-                            ${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%
+                        <span class="badge ${totalReturnPct >= 0 ? 'bg-success' : 'bg-danger'} return-badge">
+                            ${totalReturnPct >= 0 ? '+' : ''}${totalReturnPct.toFixed(1)}%
                         </span>
                     </td>
                 </tr>
@@ -794,8 +835,9 @@ function renderSequentialView(accountsData) {
 
     // 添加拖拽和右键菜单事件监听器
     setupDragAndDropEvents();
-    setupContextMenuEvents();
     initHoldingsTooltips();
+    initHoldingsBoardSorting();
+    bindPeriodButtons();
 }
 
 function cloneHoldingsData(accountsData) {
@@ -813,6 +855,25 @@ function formatShareCount(value) {
     const num = Number(value) || 0;
     const isInt = Number.isInteger(num);
     return num.toLocaleString('en-US', { minimumFractionDigits: isInt ? 0 : 4, maximumFractionDigits: isInt ? 0 : 4 });
+}
+
+function toSafeNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : 0;
+}
+
+function getTotalBoughtValue(holding) {
+    if (!holding) return 0;
+    return toSafeNumber(holding.total_bought_value);
+}
+
+function calculateTotalReturnPercent(holding) {
+    const totalGain = toSafeNumber(holding.unrealized_gain) +
+        toSafeNumber(holding.realized_gain) +
+        toSafeNumber(holding.dividends ?? holding.dividend_received) +
+        toSafeNumber(holding.interest ?? holding.interest_received);
+    const base = getTotalBoughtValue(holding);
+    return base ? (totalGain / base) * 100 : 0;
 }
 
 function initHoldingsTooltips() {
@@ -919,6 +980,10 @@ function mergeHoldingsBySymbol(accountsData) {
             const realizedGain = toNumber(holding.realized_gain);
             const dividends = toNumber(holding.dividends ?? holding.dividend_received);
             const interest = toNumber(holding.interest ?? holding.interest_received);
+            const totalBoughtValue = toNumber(holding.total_bought_value);
+            const totalSoldValue = toNumber(holding.total_sold_value);
+            const totalBoughtShares = toNumber(holding.total_bought_shares);
+            const totalSoldShares = toNumber(holding.total_sold_shares);
             const previousValue = currentValue - dailyChangeValue;
             const periodTx = Array.isArray(holding.period_transactions) ? holding.period_transactions : [];
 
@@ -938,6 +1003,10 @@ function mergeHoldingsBySymbol(accountsData) {
                     unrealized_gain: unrealizedGain,
                     dividends,
                     interest,
+                    total_bought_value: totalBoughtValue,
+                    total_sold_value: totalSoldValue,
+                    total_bought_shares: totalBoughtShares,
+                    total_sold_shares: totalSoldShares,
                     average_cost: averageCost,
                     average_cost_cad: averageCostCad,
                     current_price: currentPrice,
@@ -964,6 +1033,10 @@ function mergeHoldingsBySymbol(accountsData) {
                 entry.unrealized_gain += unrealizedGain;
                 entry.dividends += dividends;
                 entry.interest += interest;
+                entry.total_bought_value = toNumber(entry.total_bought_value) + totalBoughtValue;
+                entry.total_sold_value = toNumber(entry.total_sold_value) + totalSoldValue;
+                entry.total_bought_shares = toNumber(entry.total_bought_shares) + totalBoughtShares;
+                entry.total_sold_shares = toNumber(entry.total_sold_shares) + totalSoldShares;
                 entry._total_cost_native += totalCostNative;
                 entry._total_cost_cad += totalCostCad;
                 entry._previous_value += previousValue;
@@ -1010,6 +1083,11 @@ function mergeHoldingsBySymbol(accountsData) {
             const baseValue = result.current_value - result.daily_change_value;
             result.daily_change_percent = baseValue ? (result.daily_change_value / baseValue) * 100 : 0;
         }
+
+        const totalBoughtValue = toNumber(result.total_bought_value);
+        const totalGain = toNumber(result.unrealized_gain) + toNumber(result.realized_gain) +
+            toNumber(result.dividends) + toNumber(result.interest);
+        result.total_return_percent = totalBoughtValue ? (totalGain / totalBoughtValue) * 100 : 0;
 
         // 清理临时字段
         delete result._total_cost_native;
@@ -1067,6 +1145,92 @@ function showAllHiddenHoldingsMessage() {
             <i class="fas fa-eye-slash me-2"></i>{{ _('All selected holdings are hidden. Reset default order to display them again.') }}
         </div>
     `;
+}
+
+function bindPeriodButtons() {
+    const periodButtons = document.querySelectorAll('.period-btn');
+    periodButtons.forEach(btn => {
+        if (btn.dataset.bound === '1') return;
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', () => {
+            periodButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadHoldings();
+        });
+    });
+}
+
+function initHoldingsBoardSorting() {
+    const tables = document.querySelectorAll('.hb-sortable');
+    if (!tables.length) return;
+
+    tables.forEach(table => {
+        const sortableElements = table.querySelectorAll('th.sortable, .sort-region.sortable');
+        let currentSort = { column: null, direction: 'asc' };
+
+        sortableElements.forEach(el => {
+            el.style.cursor = 'pointer';
+            el.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const sortType = el.dataset.sort;
+                const sortDirection = (currentSort.column === sortType && currentSort.direction === 'asc') ? 'desc' : 'asc';
+                sortTable(table, sortType, sortDirection);
+                updateSortIcons(sortableElements, el, sortDirection);
+                currentSort = { column: sortType, direction: sortDirection };
+            });
+        });
+    });
+
+    function sortTable(table, sortType, direction) {
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        rows.sort((a, b) => {
+            let aVal;
+            let bVal;
+
+            if (['symbol', 'company', 'currency', 'sector'].includes(sortType)) {
+                aVal = (a.dataset[sortType] || '').toLowerCase();
+                bVal = (b.dataset[sortType] || '').toLowerCase();
+                return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            }
+
+            const attrMap = {
+                'avg_cost': 'avgCost',
+                'current_price': 'currentPrice',
+                'daily_change': 'dailyChange',
+                'market_value': 'marketValue',
+                'unrealized_gain': 'unrealizedGain',
+                'realized_gain': 'realizedGain',
+                'return_percent': 'returnPercent',
+                'bought_shares': 'boughtShares',
+                'sold_shares': 'soldShares',
+                'total_invested': 'totalInvested',
+                'total_received': 'totalReceived'
+            };
+
+            const dataAttr = attrMap[sortType] || sortType.replace(/_([a-z])/g, (_, p1) => p1.toUpperCase());
+            aVal = parseFloat(a.dataset[dataAttr]) || 0;
+            bVal = parseFloat(b.dataset[dataAttr]) || 0;
+            return direction === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    function updateSortIcons(headers, clickedHeader, direction) {
+        headers.forEach(header => {
+            const icon = header.querySelector('.sort-icon');
+            if (icon) {
+                icon.className = 'fas fa-sort ms-1 sort-icon';
+            }
+        });
+        const icon = clickedHeader.querySelector('.sort-icon');
+        if (icon) {
+            icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} ms-1 sort-icon`;
+        }
+    }
 }
 
 function escapeForSelector(value) {
@@ -1180,9 +1344,8 @@ function restoreSavedSelections() {
     }
 }
 
-// 拖拽和右键菜单相关变量
+// 拖拽相关变量
 let draggedElement = null;
-let currentContextRow = null;
 
 // 设置拖拽事件
 function setupDragAndDropEvents() {
@@ -1280,91 +1443,6 @@ function handleDrop(e) {
     }
 
     return false;
-}
-
-// 设置右键菜单事件
-function setupContextMenuEvents() {
-    const holdingsRows = document.querySelectorAll('.holdings-row');
-    const contextMenu = document.getElementById('contextMenu');
-
-    // 为每个持仓行添加右键事件
-    holdingsRows.forEach(row => {
-        row.removeEventListener('contextmenu', handleContextMenu);
-        row.addEventListener('contextmenu', handleContextMenu);
-    });
-
-    // 点击其他地方关闭菜单
-    if (!contextMenuDocumentListenerAttached) {
-        document.addEventListener('click', hideContextMenu);
-        contextMenuDocumentListenerAttached = true;
-    }
-
-    // 菜单项点击事件
-    if (!contextMenuActionsBound) {
-        const menuItems = document.querySelectorAll('.context-menu-item');
-        menuItems.forEach(item => {
-            item.addEventListener('click', handleContextMenuAction);
-        });
-        contextMenuActionsBound = true;
-    }
-}
-
-// 处理右键菜单
-function handleContextMenu(e) {
-    e.preventDefault();
-
-    currentContextRow = this;
-    const contextMenu = document.getElementById('contextMenu');
-
-    // 显示菜单
-    contextMenu.style.display = 'block';
-    contextMenu.style.left = e.pageX + 'px';
-    contextMenu.style.top = e.pageY + 'px';
-
-    console.log('Context menu for:', this.dataset.symbol);
-}
-
-// 隐藏右键菜单
-function hideContextMenu() {
-    const contextMenu = document.getElementById('contextMenu');
-    contextMenu.style.display = 'none';
-    currentContextRow = null;
-}
-
-// 处理右键菜单动作
-function handleContextMenuAction(e) {
-    const action = this.dataset.action;
-    const row = currentContextRow;
-    const symbol = row ? row.dataset.symbol : null;
-
-    hideContextMenu();
-
-    if (action === 'resetOrder') {
-        resetDefaultOrder();
-        return;
-    }
-
-    if (!row || !symbol) {
-        return;
-    }
-
-    switch (action) {
-        case 'moveUp':
-            moveRowUp(row);
-            break;
-        case 'moveDown':
-            moveRowDown(row);
-            break;
-        case 'moveToTop':
-            moveRowToTop(row);
-            break;
-        case 'moveToBottom':
-            moveRowToBottom(row);
-            break;
-        case 'hideStock':
-            hideStock(symbol);
-            break;
-    }
 }
 
 // 移动行到顶部
