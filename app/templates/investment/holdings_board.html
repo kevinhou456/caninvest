@@ -466,6 +466,7 @@ function loadHoldings(forceRefresh = false) {
     // 构建API URL
     let apiUrl = '/api/holdings-board?' + selectedAccountIds.map(id => `account_ids=${id}`).join('&');
     apiUrl += `&period=${selectedPeriod}`;
+    apiUrl += `&separate=${separateByAccount}`;
     if (forceRefresh) {
         apiUrl += '&force_refresh=true';
     }
@@ -749,13 +750,28 @@ function renderSequentialView(accountsData) {
             return;
         }
 
+        const cash = account.cash || {};
+        const cashCad = toSafeNumber(cash.cad);
+        const cashUsd = toSafeNumber(cash.usd);
+        const cashTotalCad = toSafeNumber(cash.total_cad);
+
         html += `
             <div class="card mb-3">
                 <div class="card-header d-flex justify-content-between align-items-center account-section-divider">
                     <h5 class="mb-0">
                         <i class="fas fa-university me-2"></i>${account.account_name}
                     </h5>
-                    <span class="badge bg-secondary" data-label-stocks="{{ _('stocks') }}">${account.holdings.length} {{ _('stocks') }}</span>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="badge bg-light text-dark border" title="{{ _('Cash in CAD') }}">
+                            CAD $${cashCad.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </span>
+                        <span class="badge bg-light text-dark border" title="{{ _('Cash in USD') }}">
+                            USD $${cashUsd.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </span>
+                        <span class="badge bg-primary" data-label-stocks="{{ _('stocks') }}">
+                            ${account.holdings.length} {{ _('stocks') }}
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">

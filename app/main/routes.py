@@ -1183,10 +1183,11 @@ def api_holdings_board():
         raw_holdings = portfolio_data.get('current_holdings', [])
 
         # 获取选定时间段内操作过的股票symbol集合
-        symbols_in_period = None
+        symbols_in_period = None  # union of symbols across all selected accounts
+        symbols_in_period_by_account = {}  # account_id -> set(symbols) for separate view
         tx_type_filter = ['BUY', 'SELL']
         if start_date:
-            symbols_query = db.session.query(Transaction.stock).filter(
+            symbols_query = db.session.query(Transaction.account_id, Transaction.stock).filter(
                 Transaction.account_id.in_(account_ids),
                 Transaction.stock.isnot(None),
                 Transaction.stock != '',
@@ -1194,16 +1195,24 @@ def api_holdings_board():
                 Transaction.trade_date >= start_date,
                 Transaction.trade_date <= end_date
             ).distinct()
-            symbols_in_period = {row[0] for row in symbols_query.all()}
         elif end_date:
-            symbols_query = db.session.query(Transaction.stock).filter(
+            symbols_query = db.session.query(Transaction.account_id, Transaction.stock).filter(
                 Transaction.account_id.in_(account_ids),
                 Transaction.stock.isnot(None),
                 Transaction.stock != '',
                 Transaction.type.in_(tx_type_filter),
                 Transaction.trade_date <= end_date
             ).distinct()
-            symbols_in_period = {row[0] for row in symbols_query.all()}
+        else:
+            symbols_query = None
+
+        if symbols_query:
+            symbols_in_period = set()
+            for acc_id, sym in symbols_query.all():
+                if not sym:
+                    continue
+                symbols_in_period.add(sym)
+                symbols_in_period_by_account.setdefault(acc_id, set()).add(sym)
 
         # 获取指定账户在时间范围内的交易（仅买卖）
         def fetch_account_transactions(acc_id, symbols_filter=None, account_name=''):
@@ -1232,13 +1241,15 @@ def api_holdings_board():
                 })
             return tx_map
 
-        def filter_holdings(holdings_list, tx_map=None):
-            if not symbols_in_period:
+        def filter_holdings(holdings_list, symbols_filter=None, tx_map=None, *, strict=False):
+            if symbols_filter is None:
                 return holdings_list
+            if not symbols_filter:
+                return [] if strict else holdings_list
             filtered = []
             for h in holdings_list:
                 symbol = h.get('symbol')
-                if not symbol or symbol not in symbols_in_period:
+                if not symbol or symbol not in symbols_filter:
                     continue
                 if tx_map and symbol in tx_map:
                     h = h.copy()
@@ -1295,9 +1306,25 @@ def api_holdings_board():
         for account_id in account_ids:
             # 为每个账户单独获取数据
             account_portfolio_data = asset_service.get_detailed_portfolio_data([account_id])
-            tx_map = fetch_account_transactions(account_id, symbols_in_period, account_name_map.get(account_id, '')) if symbols_in_period else {}
-            current_holdings = filter_holdings(account_portfolio_data.get('current_holdings', []), tx_map)
-            cleared_holdings = filter_holdings(account_portfolio_data.get('cleared_holdings', []), tx_map)
+            account_symbols_filter = (
+                symbols_in_period_by_account.get(account_id, set()) if separate else symbols_in_period
+            )
+            tx_map = fetch_account_transactions(account_id, account_symbols_filter, account_name_map.get(account_id, '')) if account_symbols_filter else {}
+            current_holdings = filter_holdings(
+                account_portfolio_data.get('current_holdings', []),
+                account_symbols_filter,
+                tx_map,
+                strict=separate
+            )
+            cleared_holdings = filter_holdings(
+                account_portfolio_data.get('cleared_holdings', []),
+                account_symbols_filter,
+                tx_map,
+                strict=separate
+            )
+
+            # 获取当前现金余额
+            cash_balance = asset_service.get_cash_balance(account_id)
 
             # 将符合时间段的清仓股票也加入显示（避免被过滤掉）
             current_symbols = {h.get('symbol') for h in current_holdings if h.get('symbol')}
@@ -1310,7 +1337,12 @@ def api_holdings_board():
             result_data.append({
                 'account_id': account_id,
                 'account_name': account_name_map[account_id],
-                'holdings': current_holdings
+                'holdings': current_holdings,
+                'cash': {
+                    'cad': float(cash_balance.get('cad', 0)),
+                    'usd': float(cash_balance.get('usd', 0)),
+                    'total_cad': float(cash_balance.get('total_cad', 0))
+                }
             })
 
         return jsonify({'success': True, 'data': result_data})
