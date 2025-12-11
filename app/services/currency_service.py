@@ -18,15 +18,24 @@ from sqlalchemy import func
 import json
 
 from app import db
+from flask import current_app
 
 logger = logging.getLogger(__name__)
 
 
 def _log_yfinance_call(api_name: str, identifier: str, **kwargs):
+    """Optional debug hook for yfinance FX calls; disabled by default to reduce noise."""
+    try:
+        enabled = bool(current_app.config.get('ENABLE_YFINANCE_DEBUG', False))
+    except Exception:
+        enabled = False
+
+    if not enabled:
+        return
+
     details = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
     message = f"[yfinance] {api_name} id={identifier} {details}".strip()
     logger.debug(message)
-    print(message)
 
 
 class ExchangeRate(db.Model):

@@ -20,10 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 def _log_yfinance_call(api_name: str, symbol: str, **kwargs):
+    """Optional debug hook for yfinance calls; disabled by default to reduce noise."""
+    try:
+        enabled = bool(current_app.config.get('ENABLE_YFINANCE_DEBUG', False))
+    except Exception:
+        enabled = False
+
+    if not enabled:
+        return
+
     details = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
     message = f"[yfinance] {api_name} symbol={symbol} {details}".strip()
     logger.debug(message)
-    print(message)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +125,6 @@ class StockPriceService:
 
         except Exception as e:
             logger.error(f"获取{symbol}价格失败: {str(e)}")
-            print(f"[yfinance][error] Ticker.info symbol={symbol} error={e}")
             return None
     
     def update_stock_price(self, symbol: str, currency: str, force_refresh: bool = False) -> bool:
@@ -338,7 +345,6 @@ class StockPriceService:
             if hist.empty:
                 message = f"yfinance 未返回 {symbol} 的历史数据 ({start_date} -> {end_date})"
                 logger.warning(message)
-                print(f"[yfinance][empty] Ticker.history symbol={symbol} start={start_date} end={end_date}")
                 info['error'] = 'empty_data'
                 
                 # 记录假期尝试 - 当yfinance返回空数据时，记录整个时间段为无数据
@@ -400,20 +406,17 @@ class StockPriceService:
                     f"end={end_date} rows={record_count} range={data_start}->{data_end}"
                 )
                 logger.info(success_message)
-                print(success_message)
             else:
                 warning_message = (
                     f"⚠️ yfinance 返回空数据 {symbol} ({start_date} -> {end_date})"
                 )
                 logger.warning(warning_message)
-                print(f"[yfinance][empty] Ticker.history symbol={symbol} start={start_date} end={end_date}")
                 info['error'] = 'empty_data'
 
             return result_data, info
 
         except Exception as e:
             logger.error(f"❌ yfinance 获取 {symbol} 历史价格失败 ({start_date} -> {end_date}): {str(e)}")
-            print(f"[yfinance][error] Ticker.history symbol={symbol} start={start_date} end={end_date} error={e}")
             info['error'] = str(e)
             return {}, info
 

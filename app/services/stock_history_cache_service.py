@@ -30,6 +30,8 @@ class StockHistoryCacheService:
 
     def __init__(self):
         self.stock_service = StockPriceService()
+        # 简单的防抖：避免短时间内重复外部请求同一标的
+        self._recent_fetch_guard: Dict[tuple[str, str], datetime] = {}
 
     def get_cached_history(self, symbol: str, start_date: date, end_date: date,
                           currency: str = 'USD', force_refresh: bool = False) -> List[Dict]:
@@ -67,6 +69,14 @@ class StockHistoryCacheService:
         gaps = self._find_missing_gaps(symbol, start_date, end_date, currency, existing_data, force_refresh)
 
         if gaps:
+            now = datetime.utcnow()
+            guard_key = (symbol, currency)
+            last_fetch = self._recent_fetch_guard.get(guard_key)
+            # 10 分钟内已尝试过，不再打外部请求，避免频繁被封
+            if not force_refresh and last_fetch and (now - last_fetch).total_seconds() < 600:
+                logger.info(f"[cache][skip] {symbol}({currency}) 最近已刷新，跳过外部请求")
+                return existing_data
+
             logger.info(f"发现 {symbol} 有 {len(gaps)} 个数据缺口，需要刷新")
             for gap_start, gap_end in gaps:
                 refresh_message = (
@@ -76,6 +86,7 @@ class StockHistoryCacheService:
                 print(refresh_message)
                 self._fetch_and_save(symbol, gap_start, gap_end, currency)
 
+            self._recent_fetch_guard[guard_key] = now
             # 重新从数据库获取完整数据
             existing_data = self._get_from_database(symbol, start_date, end_date, currency)
 
@@ -134,12 +145,22 @@ class StockHistoryCacheService:
         if start_date > end_date:
             return False
 
-        # 估算预期的交易日数量（粗略估计，一周5个交易日）
-        total_days = (end_date - start_date).days + 1
-        expected_trading_days = total_days * 5 // 7
+        # 精确预估交易日数量（排除周末 + 已知节假日）
+        market = self._get_market(symbol, currency)
+        expected_trading_days = 0
+        current = start_date
+        while current <= end_date:
+            if current.weekday() < 5 and not MarketHoliday.is_holiday(current, market):
+                expected_trading_days += 1
+            current += timedelta(days=1)
 
-        # 如果实际数据少于预期的70%，认为有缺失
-        return len(existing_data) < expected_trading_days * 0.7
+        if expected_trading_days == 0:
+            return False
+
+        # 对短区间放宽：允许缺少 1 天；长区间要求至少 85%
+        if expected_trading_days <= 10:
+            return len(existing_data) < max(0, expected_trading_days - 1)
+        return len(existing_data) < expected_trading_days * 0.85
 
     def _find_missing_gaps(self, symbol: str, start_date: date, end_date: date,
                           currency: str, existing_data: List[Dict], force_refresh: bool = False) -> List[Tuple[date, date]]:
@@ -367,9 +388,9 @@ class StockHistoryCacheService:
 
             # 缓存优化：如果缺口小于一个月（30天），自动扩大获取区间
             if gap_days <= 30:
-                # 前后各增加35天，但不超过当前日期
-                expanded_start = gap_start - timedelta(days=35)
-                expanded_end = gap_end + timedelta(days=35)
+                # 前后各增加7天，避免一次性大窗口被限流
+                expanded_start = gap_start - timedelta(days=7)
+                expanded_end = gap_end + timedelta(days=7)
                 
                 # 确保扩展范围不超过今天
                 expanded_end = min(expanded_end, today)
