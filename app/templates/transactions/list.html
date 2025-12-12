@@ -117,7 +117,13 @@
                 <td>{{ "%.2f"|format(transaction.amount) if transaction.amount else '-' }}</td>
                 <td>{{ transaction.currency }}</td>
                 <td>{{ "%.2f"|format(transaction.fee) if transaction.fee else '0.00' }}</td>
-                <td>{{ transaction.account.name if transaction.account else '-' }}</td>
+                <td>
+                    {% if transaction.account %}
+                        {{ _get_account_name_with_members(transaction.account) }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
                 <td>
                     <span class="text-truncate d-inline-block" style="max-width: 150px;" title="{{ transaction.notes or '' }}">{{ transaction.notes or '-' }}</span>
                 </td>
