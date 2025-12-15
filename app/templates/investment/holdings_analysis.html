@@ -191,6 +191,21 @@ const CASH_SLICE_COLOR = '#d6d8db';
 const familyId = {{ family.id if family else 'null' }};
 const memberId = new URLSearchParams(window.location.search).get('member_id');
 const accountId = new URLSearchParams(window.location.search).get('account_id');
+const NUMBER_FORMAT_OPTIONS = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+
+function formatCurrencyValue(value) {
+    return (value || 0).toLocaleString('en-US', NUMBER_FORMAT_OPTIONS);
+}
+
+function computePercentage(value, total) {
+    return total ? ((value / total) * 100).toFixed(1) : '0.0';
+}
+
+function buildLegendLabel(name, value, total, extraSuffix = '') {
+    const percentage = computePercentage(value, total);
+    const suffix = extraSuffix ? ` ${extraSuffix}` : '';
+    return `${name} ($${formatCurrencyValue(value)})${suffix} | ${percentage}%`;
+}
 
 // Apply current exchange rate to recalculate all distribution values
 function applyCurrentExchangeRateToDistribution(distribution) {
@@ -307,11 +322,12 @@ function updateStocksChart() {
         displayedStocks = sortedRegular.slice(0, 10);
     }
 
+    const data = displayedStocks.map(stock => stock.value);
+    const total = data.reduce((a, b) => a + b, 0);
     const labels = displayedStocks.map(stock => {
         const labelKey = stock.symbol || stock.name || 'Item';
-        return `${labelKey} ($${stock.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+        return buildLegendLabel(labelKey, stock.value, total);
     });
-    const data = displayedStocks.map(stock => stock.value);
 
     const backgroundColors = displayedStocks.map((stock, idx) => {
         if (stock.is_cash || stock.symbol === 'Cash' || stock.name === 'Cash') {
@@ -350,7 +366,9 @@ function updateStocksChart() {
                             const value = context.parsed;
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
                             const percentage = ((value / total) * 100).toFixed(1);
-                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                            const stock = displayedStocks[context.dataIndex];
+                            const labelKey = stock ? (stock.symbol || stock.name || 'Item') : context.label;
+                            return labelKey + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
                         }
                     }
                 },
@@ -415,8 +433,12 @@ function updateCategoryChart() {
     }
     const arrangedCategories = cashCategory ? categoriesData.concat([cashCategory]) : categoriesData;
 
-    const labels = arrangedCategories.map(cat => `${cat.category} ($${cat.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     const data = arrangedCategories.map(cat => cat.value);
+    const total = data.reduce((a, b) => a + b, 0);
+    const labels = arrangedCategories.map(cat => {
+        const suffix = (typeof cat.stocks_count === 'number') ? `· ${cat.stocks_count}${STOCKS_LABEL_SUFFIX}` : '';
+        return buildLegendLabel(cat.category, cat.value, total, suffix);
+    });
     const categoryBackgrounds = arrangedCategories.map((cat, idx) => {
         if (cat.is_cash || cat.category === 'Cash') {
             return CASH_SLICE_COLOR;
@@ -453,11 +475,25 @@ function updateCategoryChart() {
                         label: function(context) {
                             const value = context.parsed;
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                            const percentage = ((value / total) * 100).toFixed(1);
+                            const percentage = computePercentage(value, total);
                             const categoryEntry = arrangedCategories[context.dataIndex];
                             const stocksCount = categoryEntry ? categoryEntry.stocks_count : null;
                             const suffix = (typeof stocksCount === 'number') ? ' - ' + stocksCount + STOCKS_LABEL_SUFFIX : '';
-                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)' + suffix;
+                            const baseLabel = categoryEntry ? categoryEntry.category : context.label;
+                            return baseLabel + ': $' + value.toLocaleString() + ' (' + percentage + '%)' + suffix;
+                        },
+                        afterLabel: function(context) {
+                            const categoryEntry = arrangedCategories[context.dataIndex];
+                            if (!categoryEntry || !categoryEntry.stocks_detail || categoryEntry.stocks_detail.length === 0) {
+                                return;
+                            }
+                            const catTotal = categoryEntry.value || context.parsed || 0;
+                            if (!catTotal) return;
+                            return categoryEntry.stocks_detail.map(stock => {
+                                const pct = computePercentage(stock.value || 0, catTotal);
+                                const labelBase = stock.symbol || stock.name || 'Stock';
+                                return `${labelBase}: $${formatCurrencyValue(stock.value)} (${pct}%)`;
+                            });
                         }
                     }
                 },
@@ -514,8 +550,10 @@ function updateCurrencyChart() {
         return;
     }
     
-    const labels = distributionData.by_currency.map(curr => `${curr.currency} ($${curr.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
-    const data = distributionData.by_currency.map(curr => curr.value);
+    const currencyData = distributionData.by_currency;
+    const data = currencyData.map(curr => curr.value);
+    const total = data.reduce((a, b) => a + b, 0);
+    const labels = currencyData.map(curr => buildLegendLabel(curr.currency, curr.value, total));
     
     currencyChart = new Chart(ctx, {
         type: 'pie',
@@ -549,7 +587,9 @@ function updateCurrencyChart() {
                             const value = context.parsed;
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
                             const percentage = ((value / total) * 100).toFixed(1);
-                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                            const entry = currencyData[context.dataIndex];
+                            const labelBase = entry ? entry.currency : context.label;
+                            return labelBase + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
                         }
                     }
                 },
@@ -617,20 +657,28 @@ function updateAccountChart() {
 
     if (singleJointAccount) {
         const account = accountData[0];
-        labels = account.members.map(member => `${member.name} ($${(member.value || account.value * (member.ownership_percentage || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
         data = account.members.map(member => {
             if (typeof member.value === 'number' && !Number.isNaN(member.value)) {
                 return member.value;
             }
             return account.value * (member.ownership_percentage || 0) / 100;
         });
+        const total = data.reduce((a, b) => a + b, 0);
+        labels = account.members.map((member, idx) => {
+            const baseLabel = member.name || 'Member';
+            return buildLegendLabel(baseLabel, data[idx], total);
+        });
         tooltipSource = account.members;
         if (titleEl && defaultTitle) {
             titleEl.textContent = `${defaultTitle} - ${account.account_name}`;
         }
     } else {
-        labels = accountData.map(acc => `${acc.account_name} ($${acc.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
         data = accountData.map(acc => acc.value);
+        const total = data.reduce((a, b) => a + b, 0);
+        labels = accountData.map(acc => {
+            const holdingsSuffix = typeof acc.holdings_count === 'number' ? `· ${acc.holdings_count} holdings` : '';
+            return buildLegendLabel(acc.account_name, acc.value, total, holdingsSuffix);
+        });
         if (titleEl && defaultTitle) {
             titleEl.textContent = defaultTitle;
         }
@@ -670,10 +718,14 @@ function updateAccountChart() {
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
                             const percentage = ((value / total) * 100).toFixed(1);
                             if (singleJointAccount) {
-                                return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                                const memberEntry = tooltipSource[context.dataIndex];
+                                const labelBase = memberEntry ? (memberEntry.name || 'Member') : context.label;
+                                return labelBase + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
                             }
                             const holdingsCount = tooltipSource[context.dataIndex].holdings_count;
-                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%) - ' + holdingsCount + ' holdings';
+                            const accountEntry = tooltipSource[context.dataIndex];
+                            const labelBase = accountEntry ? accountEntry.account_name : context.label;
+                            return labelBase + ': $' + value.toLocaleString() + ' (' + percentage + '%)' + (holdingsCount ? ' - ' + holdingsCount + ' holdings' : '');
                         }
                     }
                 },
@@ -749,11 +801,12 @@ function updateMemberChart() {
     memberRow.style.display = '';
 
     const sortedMembers = membersData.sort((a, b) => b.value - a.value);
-    const labels = sortedMembers.map(member => {
-        const memberName = member.name || 'Member';
-        return `${memberName} ($${member.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
-    });
     const data = sortedMembers.map(member => member.value);
+    const total = data.reduce((a, b) => a + b, 0);
+    const labels = sortedMembers.map((member, idx) => {
+        const memberName = member.name || 'Member';
+        return buildLegendLabel(memberName, data[idx], total);
+    });
     const backgroundColors = sortedMembers.map((member, index) => BASE_CHART_COLORS[index % BASE_CHART_COLORS.length]);
 
     memberChart = new Chart(ctx, {
@@ -786,7 +839,9 @@ function updateMemberChart() {
                             const value = context.parsed;
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
                             const percentage = total ? ((value / total) * 100).toFixed(1) : '0.0';
-                            return context.label + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
+                            const memberEntry = sortedMembers[context.dataIndex];
+                            const baseLabel = memberEntry ? (memberEntry.name || 'Member') : context.label;
+                            return baseLabel + ': $' + value.toLocaleString() + ' (' + percentage + '%)';
                         }
                     }
                 },

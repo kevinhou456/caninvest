@@ -2323,7 +2323,7 @@ class PortfolioService:
             unique_stock_count = len(by_stocks)
 
             # 2. 按类别分布
-            by_category = defaultdict(lambda: {'value': 0, 'stocks': set()})
+            by_category = defaultdict(lambda: {'value': 0, 'stocks': set(), 'stocks_detail': {}})
             
             for holding in current_holdings:
                 stock_symbol = holding['symbol']
@@ -2332,16 +2332,38 @@ class PortfolioService:
                 if current_value > 0:
                     stock_cache = StocksCache.query.filter_by(symbol=stock_symbol).first()
                     category_name = stock_cache.category.name if (stock_cache and stock_cache.category) else 'Uncategorized'
+                    stock_name = stock_cache.name if stock_cache else stock_symbol
                     
                     by_category[category_name]['value'] += current_value
                     by_category[category_name]['stocks'].add(stock_symbol)
+                    stock_detail_map = by_category[category_name]['stocks_detail']
+                    if stock_symbol not in stock_detail_map:
+                        stock_detail_map[stock_symbol] = {
+                            'symbol': stock_symbol,
+                            'name': stock_name,
+                            'value': 0.0
+                        }
+                    stock_detail_map[stock_symbol]['value'] += current_value
             
             # 转换为列表格式
             by_category_list = [
                 {
                     'category': category,
                     'value': data['value'],
-                    'stocks_count': len(data['stocks'])
+                    'stocks_count': len(data['stocks']),
+                    'stocks_detail': sorted(
+                        [
+                            {
+                                'symbol': detail['symbol'],
+                                'name': detail.get('name') or detail['symbol'],
+                                'value': detail.get('value', 0.0)
+                            }
+                            for detail in data.get('stocks_detail', {}).values()
+                            if detail.get('value', 0.0) > 0
+                        ],
+                        key=lambda item: item['value'],
+                        reverse=True
+                    )
                 }
                 for category, data in by_category.items()
             ]
@@ -2482,6 +2504,7 @@ class PortfolioService:
                     'category': 'Cash',
                     'value': cash_total_cad_float,
                     'stocks_count': None,
+                    'stocks_detail': [],
                     'is_cash': True
                 })
 
