@@ -2189,7 +2189,14 @@ document.addEventListener('DOMContentLoaded', function() {
 // Function to open modal with stock pre-filled
 function openAddTransactionModalForStock(symbol, currency, accountId = null) {
     console.log('Opening transaction modal for:', symbol, currency, accountId);
-    
+    // Only allow when a single account is selected
+    if (!accountId) {
+        if (typeof showErrorToast === 'function') {
+            showErrorToast('{{ _("Please select a single account to add a transaction for this holding.") }}');
+        }
+        return;
+    }
+
     const modalElement = document.getElementById('addTransactionModal');
     if (!modalElement) {
         console.error('Modal element not found!');
@@ -2238,6 +2245,30 @@ function openAddTransactionModalForStock(symbol, currency, accountId = null) {
             }
         }
     }
+    
+    // Prefill quantity/price when launching from a single-account holdings row
+    (function prefillFromRow() {
+        if (!accountId) return; // only trust row data when a single account is selected
+        const selector = `tr[data-symbol="${symbol}"][data-currency="${currency}"][data-account-id="${accountId}"]`;
+        const triggerRow = document.querySelector(selector);
+        if (!triggerRow) return;
+
+        const qtyInput = document.getElementById('modal_quantity');
+        const priceInput = document.getElementById('modal_price_per_share');
+
+        const sharesRaw = triggerRow.getAttribute('data-shares');
+        const priceRaw = triggerRow.getAttribute('data-current-price') || triggerRow.getAttribute('data-avg-cost');
+
+        const sharesVal = parseFloat(sharesRaw);
+        const priceVal = parseFloat(priceRaw);
+
+        if (qtyInput && !Number.isNaN(sharesVal) && sharesVal > 0) {
+            qtyInput.value = sharesVal;
+        }
+        if (priceInput && !Number.isNaN(priceVal) && priceVal > 0) {
+            priceInput.value = priceVal;
+        }
+    })();
     
     // Trigger stock lookup
     handleStockSymbolChange();

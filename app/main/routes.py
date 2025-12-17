@@ -1440,7 +1440,6 @@ def save_transaction_record(transaction_id=None, account_id=None, transaction_ty
             # 对于有股票代码的交易，验证币种一致性
             if stock:
                 print(f"DEBUG: 🔍 Validating currency for stock {stock} with currency {currency}")
-                from app.models.transaction import Transaction
                 existing_currency = Transaction.get_currency_by_stock_symbol(stock)
                 print(f"DEBUG: 🔍 Existing currency for {stock}: {existing_currency}")
                 if existing_currency and existing_currency != currency:
