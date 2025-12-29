@@ -485,6 +485,12 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
                             覆盖数据库中当前时间段的数据<span id="overwriteRangeLabel"></span>
                         </label>
                     </div>
+                    <div class="form-check ms-4" id="extendToFullMonthWrapper" style="display: none;">
+                        <input class="form-check-input" type="checkbox" id="extendToFullMonthCheckbox">
+                        <label class="form-check-label" for="extendToFullMonthCheckbox" id="extendToFullMonthLabel">
+                            扩展到整个月份
+                        </label>
+                    </div>
                 </div>
                 <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
                     <table class="table table-sm table-striped" id="csvPreviewTable">
@@ -512,6 +518,88 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
 <script>
 let csvPreviewData = null;
 let savedFormats = [];
+let csvDateRange = null;
+
+function parseDateValue(value) {
+    if (!value) return null;
+    const parsed = value instanceof Date ? value : new Date(value);
+    return isNaN(parsed) ? null : parsed;
+}
+
+function formatDateString(dateObj) {
+    if (!(dateObj instanceof Date) || isNaN(dateObj)) return null;
+    return dateObj.toISOString().slice(0, 10);
+}
+
+function isSingleMonthRange(range) {
+    const startDate = parseDateValue(range?.start);
+    const endDate = parseDateValue(range?.end);
+    if (!startDate || !endDate) return false;
+    return startDate.getFullYear() === endDate.getFullYear() &&
+        startDate.getMonth() === endDate.getMonth();
+}
+
+function getMonthBounds(range) {
+    const startDate = parseDateValue(range?.start);
+    const endDate = parseDateValue(range?.end);
+    if (!startDate || !endDate) return null;
+
+    const monthStart = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+
+    return {
+        start: formatDateString(monthStart),
+        end: formatDateString(monthEnd)
+    };
+}
+
+function setCsvDateRange(range) {
+    csvDateRange = range && range.start && range.end ? range : null;
+    window.csvDateRange = csvDateRange;
+    updateOverwriteRangeUI();
+}
+
+function updateOverwriteRangeUI() {
+    const overwriteCheckbox = document.getElementById('overwriteRangeCheckbox');
+    const extendWrapper = document.getElementById('extendToFullMonthWrapper');
+    const extendCheckbox = document.getElementById('extendToFullMonthCheckbox');
+    const extendLabel = document.getElementById('extendToFullMonthLabel');
+    const label = document.getElementById('overwriteRangeLabel');
+
+    const sameMonth = isSingleMonthRange(csvDateRange);
+    const monthBounds = sameMonth ? getMonthBounds(csvDateRange) : null;
+
+    if (extendWrapper) {
+        if (sameMonth && csvDateRange) {
+            extendWrapper.style.display = 'block';
+            if (extendLabel && monthBounds) {
+                extendLabel.textContent = `扩展到整个月份（${monthBounds.start} 至 ${monthBounds.end}）`;
+            }
+        } else {
+            extendWrapper.style.display = 'none';
+            if (extendCheckbox) {
+                extendCheckbox.checked = false;
+            }
+        }
+    }
+
+    if (extendCheckbox) {
+        extendCheckbox.disabled = !(overwriteCheckbox?.checked) || !sameMonth;
+    }
+
+    let displayRange = csvDateRange;
+    if (overwriteCheckbox?.checked && extendCheckbox?.checked && sameMonth && monthBounds) {
+        displayRange = monthBounds;
+    }
+
+    if (label) {
+        if (displayRange && displayRange.start && displayRange.end) {
+            label.textContent = `（范围 ${displayRange.start} 至 ${displayRange.end}）`;
+        } else {
+            label.textContent = '';
+        }
+    }
+}
 
 function openImportModal() {
     loadSavedFormats();
@@ -647,7 +735,7 @@ function showMappingModalInternal(data) {
     console.log('Data columns:', data.columns);
     console.log('Data suggested_mapping:', data.suggested_mapping);
     console.log('Data preview_data:', data.preview_data);
-    window.csvDateRange = data.date_range || null;
+    setCsvDateRange(data.date_range || null);
     
     // 直接构建列映射表格和CSV预览表格
     buildColumnMappingTable(data.columns, data.suggested_mapping);
@@ -853,33 +941,24 @@ function buildCsvPreviewTable(columns, previewData) {
         tbody.appendChild(tr);
     });
 
-    // 更新覆盖范围提示（使用后端返回的首尾日期）
-    const label = document.getElementById('overwriteRangeLabel');
-    if (label) {
-        let range = window.csvDateRange;
-        // 如果后端未返回范围，尝试从预览数据推断
-        if ((!range || !range.start || !range.end) && previewData && previewData.length) {
-            const dates = [];
-            previewData.forEach(row => {
-                const dateKey = Object.keys(row).find(k => k.toLowerCase().includes('date'));
-                if (dateKey && row[dateKey]) {
-                    const d = new Date(row[dateKey]);
-                    if (!isNaN(d)) dates.push(d);
-                }
-            });
-            if (dates.length) {
-                const minDate = new Date(Math.min(...dates));
-                const maxDate = new Date(Math.max(...dates));
-                range = { start: minDate.toISOString().slice(0, 10), end: maxDate.toISOString().slice(0, 10) };
+    // 更新覆盖范围提示（使用后端返回的首尾日期，若缺失则根据预览推断）
+    let range = csvDateRange;
+    if ((!range || !range.start || !range.end) && previewData && previewData.length) {
+        const dates = [];
+        previewData.forEach(row => {
+            const dateKey = Object.keys(row).find(k => k.toLowerCase().includes('date'));
+            if (dateKey && row[dateKey]) {
+                const d = parseDateValue(row[dateKey]);
+                if (d) dates.push(d);
             }
-        }
-
-        if (range && range.start && range.end) {
-            label.textContent = `（范围 ${range.start} 至 ${range.end}）`;
-        } else {
-            label.textContent = '';
+        });
+        if (dates.length) {
+            const minDate = new Date(Math.min(...dates));
+            const maxDate = new Date(Math.max(...dates));
+            range = { start: formatDateString(minDate), end: formatDateString(maxDate) };
         }
     }
+    setCsvDateRange(range);
 }
 
 function importWithMapping() {
@@ -936,7 +1015,9 @@ function importWithMapping() {
         format_name: document.getElementById('formatName').value,
         column_mappings: mappings,
         session_id: csvPreviewData.session_id,
-        overwrite_range: document.getElementById('overwriteRangeCheckbox')?.checked ?? false
+        overwrite_range: document.getElementById('overwriteRangeCheckbox')?.checked ?? false,
+        extend_to_full_month: (document.getElementById('overwriteRangeCheckbox')?.checked ?? false) &&
+            (document.getElementById('extendToFullMonthCheckbox')?.checked ?? false)
     };
     
     // 显示加载状态
@@ -1210,6 +1291,11 @@ function importWithCFPAccountID() {
         }
     });
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('overwriteRangeCheckbox')?.addEventListener('change', updateOverwriteRangeUI);
+    document.getElementById('extendToFullMonthCheckbox')?.addEventListener('change', updateOverwriteRangeUI);
+});
 </script>
 
 {% endblock %}

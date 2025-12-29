@@ -562,6 +562,7 @@ def import_csv_with_mapping():
     import os
     from app.models.transaction import Transaction
     from datetime import date
+    import calendar
     
     # 重置日期格式检测，确保每次导入都重新检测
     reset_date_format_detection()
@@ -575,6 +576,7 @@ def import_csv_with_mapping():
     column_mappings = data.get('column_mappings', {})
     format_name = data.get('format_name', '').strip()
     overwrite_range = bool(data.get('overwrite_range', False))
+    extend_to_full_month = bool(data.get('extend_to_full_month', False))
     
     if not session_id or not account_id or not column_mappings:
         return jsonify({'success': False, 'error': _('Missing required data')}), 400
@@ -609,6 +611,16 @@ def import_csv_with_mapping():
             if dates:
                 start_date = min(dates)
                 end_date = max(dates)
+
+                # 可选扩展：当导入记录只在同一月份内时，扩展覆盖到整月
+                if extend_to_full_month and start_date and end_date:
+                    if start_date.year == end_date.year and start_date.month == end_date.month:
+                        start_date = date(start_date.year, start_date.month, 1)
+                        last_day = calendar.monthrange(start_date.year, start_date.month)[1]
+                        end_date = date(start_date.year, start_date.month, last_day)
+                    else:
+                        extend_to_full_month = False
+
                 try:
                     deleted_count = Transaction.query.filter(
                         Transaction.account_id == account_id,
