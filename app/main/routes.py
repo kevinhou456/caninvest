@@ -39,6 +39,17 @@ def _build_ownership_map(member_id):
     return ownership_map
 
 
+def _get_overview_target_date(base_date=None):
+    """Return the effective overview date (use Friday values on weekends)."""
+    base_date = base_date or date.today()
+    weekday = base_date.weekday()
+    if weekday == 5:
+        return base_date - timedelta(days=1)
+    if weekday == 6:
+        return base_date - timedelta(days=2)
+    return base_date
+
+
 def _build_portfolio_view_data(
     *,
     account_ids,
@@ -429,6 +440,7 @@ def overview():
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
     time_period = request.args.get('period', 'all_time')
+    overview_target_date = _get_overview_target_date()
     
     try:
         # 根据过滤条件获取账户（不涉及价格计算）
@@ -457,13 +469,18 @@ def overview():
         
         # 获取汇率信息
         exchange_rates = currency_service.get_cad_usd_rates()
+        overview_target_date = _get_overview_target_date()
         
         # 使用Portfolio Service统一计算架构
         from app.services.portfolio_service import PortfolioService, TimePeriod
         portfolio_service = PortfolioService(auto_refresh_prices=False)
         
         # 使用Portfolio Service获取投资组合数据（使用缓存价格）
-        portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
+        portfolio_summary = portfolio_service.get_portfolio_summary(
+            account_ids,
+            TimePeriod.ALL_TIME,
+            end_date=overview_target_date
+        )
 
         view_data = _build_portfolio_view_data(
             account_ids=account_ids,
@@ -471,7 +488,7 @@ def overview():
             portfolio_summary=portfolio_summary,
             asset_service=AssetValuationService(auto_refresh_prices=False),
             ownership_map=ownership_map,
-            target_date=date.today(),
+            target_date=overview_target_date,
             exchange_rates=exchange_rates,
             account_id=account_id
         )
@@ -735,7 +752,11 @@ def update_overview_prices():
         exchange_rates = currency_service.get_cad_usd_rates()
         
         # 使用Portfolio Service获取投资组合数据
-        portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
+        portfolio_summary = portfolio_service.get_portfolio_summary(
+            account_ids,
+            TimePeriod.ALL_TIME,
+            end_date=overview_target_date
+        )
         
         # 构建视图数据
         ownership_map = None
@@ -748,7 +769,7 @@ def update_overview_prices():
             portfolio_summary=portfolio_summary,
             asset_service=AssetValuationService(auto_refresh_prices=False),
             ownership_map=ownership_map,
-            target_date=date.today(),
+            target_date=overview_target_date,
             exchange_rates=exchange_rates,
             account_id=account_id
         )
