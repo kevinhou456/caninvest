@@ -471,10 +471,115 @@
             }
         });
 
-        window.addEventListener('load', function() {
-            sessionStorage.removeItem('global_loading_pending');
-            hideGlobalLoadingToast();
-        });
+        document.addEventListener('click', function(event) {
+            const link = event.target.closest('a');
+            if (!link || !link.href) {
+                return;
+            }
+            if (link.target && link.target !== '_self') {
+                return;
+            }
+            if (link.href.startsWith('javascript:') || link.href.startsWith('#')) {
+                return;
+            }
+            try {
+                const targetUrl = new URL(link.href, window.location.origin);
+                if (targetUrl.origin !== window.location.origin) {
+                    return;
+                }
+                if (targetUrl.href === window.location.href) {
+                    return;
+                }
+                setGlobalLoadingFlag();
+                showGlobalLoadingToast();
+            } catch (e) {
+                // ignore invalid url
+            }
+        }, true);
+
+        (function setupLoadingCompletionTracker() {
+            let pendingRequests = 0;
+            let lastActivityAt = Date.now();
+            let hideTimer = null;
+            let observer = null;
+            const idleMs = 800;
+
+            function markActivity() {
+                lastActivityAt = Date.now();
+                scheduleHideCheck();
+            }
+
+            function scheduleHideCheck() {
+                if (hideTimer) {
+                    clearTimeout(hideTimer);
+                }
+                hideTimer = setTimeout(checkAndHide, idleMs + 50);
+            }
+
+            function checkAndHide() {
+                const idleFor = Date.now() - lastActivityAt;
+                if (pendingRequests === 0 && idleFor >= idleMs) {
+                    hideGlobalLoadingToast();
+                    cleanup();
+                    return;
+                }
+                scheduleHideCheck();
+            }
+
+            function cleanup() {
+                if (observer) {
+                    observer.disconnect();
+                    observer = null;
+                }
+                if (hideTimer) {
+                    clearTimeout(hideTimer);
+                    hideTimer = null;
+                }
+            }
+
+            // Track fetch
+            const originalFetch = window.fetch;
+            if (originalFetch) {
+                window.fetch = function(...args) {
+                    pendingRequests += 1;
+                    markActivity();
+                    return originalFetch.apply(this, args)
+                        .finally(() => {
+                            pendingRequests = Math.max(pendingRequests - 1, 0);
+                            markActivity();
+                        });
+                };
+            }
+
+            // Track XHR
+            const OriginalXHR = window.XMLHttpRequest;
+            if (OriginalXHR) {
+                const XHRProto = OriginalXHR.prototype;
+                const originalSend = XHRProto.send;
+                XHRProto.send = function(...args) {
+                    pendingRequests += 1;
+                    markActivity();
+                    this.addEventListener('loadend', function() {
+                        pendingRequests = Math.max(pendingRequests - 1, 0);
+                        markActivity();
+                    });
+                    return originalSend.apply(this, args);
+                };
+            }
+
+            window.addEventListener('load', function() {
+                const startedAt = parseInt(sessionStorage.getItem('global_loading_pending') || '0', 10);
+                sessionStorage.removeItem('global_loading_pending');
+
+                markActivity();
+
+                // Observe DOM changes (charts/tables render after load)
+                observer = new MutationObserver(markActivity);
+                observer.observe(document.body, { childList: true, subtree: true });
+
+                scheduleHideCheck();
+            });
+        })();
 
         function triggerOverviewLoadingToast() {
             try {
