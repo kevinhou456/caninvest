@@ -41,6 +41,56 @@ class StockPriceService:
     
     def __init__(self):
         pass
+
+    def _get_price_cache_ttl_seconds(self) -> int:
+        try:
+            return int(current_app.config.get('PRICE_CACHE_TTL', 900))
+        except Exception:
+            return 900
+
+    def _get_market_timezone(self, market: str) -> ZoneInfo:
+        # US/CA equity markets use America/New_York for trading hours
+        return ZoneInfo("America/New_York")
+
+    def _is_market_open(self, now_utc: datetime, market: str) -> bool:
+        if not isinstance(now_utc, datetime):
+            now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+
+        market_tz = self._get_market_timezone(market)
+        local_time = now_utc.astimezone(market_tz)
+
+        if local_time.weekday() >= 5:
+            return False
+
+        # Regular market hours: 9:30 - 16:00 ET
+        if local_time.hour < 9 or local_time.hour > 16:
+            return False
+        if local_time.hour == 9 and local_time.minute < 30:
+            return False
+        if local_time.hour == 16 and local_time.minute > 0:
+            return False
+
+        return True
+
+    def _should_refresh_price(self, stock: Optional[StocksCache], market: str, *, force_refresh: bool = False) -> bool:
+        if force_refresh:
+            return True
+        if not stock or not stock.price_updated_at:
+            return True
+
+        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        updated_at = stock.price_updated_at
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+
+        if self._is_market_open(now_utc, market):
+            ttl_seconds = self._get_price_cache_ttl_seconds()
+            return (now_utc - updated_at).total_seconds() > ttl_seconds
+
+        # Market closed: keep the last cached price
+        return False
     
     def _extract_first_trade_date(self, info: Dict) -> Optional[date]:
         """从yfinance返回的信息中提取IPO/首个交易日期"""
@@ -146,17 +196,8 @@ class StockPriceService:
             # 使用联合主键查询
             stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
 
-            # 检查是否需要更新价格（15分钟过期机制，除非强制刷新）
-            needs_update = force_refresh
-            if not needs_update:
-                if not stock:
-                    needs_update = True
-                elif not stock.price_updated_at:
-                    needs_update = True
-                else:
-                    time_diff = datetime.utcnow() - stock.price_updated_at
-                    if time_diff.total_seconds() > 900:  # 15分钟 = 900秒
-                        needs_update = True
+            market = self._get_market(symbol, currency)
+            needs_update = self._should_refresh_price(stock, market, force_refresh=force_refresh)
 
             # 如果不需要更新，直接返回成功
             if not needs_update:
@@ -285,16 +326,8 @@ class StockPriceService:
             # 从缓存获取 - 使用联合主键(symbol, currency)
             stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
             
-            # 检查是否需要更新价格（15分钟过期机制）
-            needs_update = False
-            if not stock_cache:
-                needs_update = True
-            elif not stock_cache.price_updated_at:
-                needs_update = True
-            else:
-                time_diff = datetime.utcnow() - stock_cache.price_updated_at
-                if time_diff.total_seconds() > 900:  # 15分钟 = 900秒
-                    needs_update = True
+            market = self._get_market(symbol, currency)
+            needs_update = self._should_refresh_price(stock_cache, market, force_refresh=False)
             
             # 如果需要更新，从Yahoo Finance获取最新价格
             if needs_update and auto_refresh:
