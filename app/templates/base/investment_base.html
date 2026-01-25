@@ -441,8 +441,59 @@
     <!-- JavaScript -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        function showGlobalLoadingToast() {
+            const toast = document.getElementById('global-loading-toast');
+            if (toast) {
+                toast.classList.add('visible');
+            }
+        }
+
+        function hideGlobalLoadingToast() {
+            const toast = document.getElementById('global-loading-toast');
+            if (toast) {
+                toast.classList.remove('visible');
+            }
+        }
+
+        function setGlobalLoadingFlag() {
+            try {
+                sessionStorage.setItem('global_loading_pending', String(Date.now()));
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        // If we navigated from a selection change, show immediately
+        document.addEventListener('DOMContentLoaded', function() {
+            const ts = parseInt(sessionStorage.getItem('global_loading_pending') || '0', 10);
+            if (ts && Date.now() - ts < 15000) {
+                showGlobalLoadingToast();
+            }
+        });
+
+        window.addEventListener('load', function() {
+            sessionStorage.removeItem('global_loading_pending');
+            hideGlobalLoadingToast();
+        });
+
+        function triggerOverviewLoadingToast() {
+            try {
+                sessionStorage.setItem('overview_nav_loading_at', String(Date.now()));
+            } catch (e) {
+                // ignore
+            }
+            if (typeof window.showOverviewLoadingToast === 'function') {
+                window.showOverviewLoadingToast('{{ _("Loading data...") }}');
+                return;
+            }
+            showGlobalLoadingToast();
+        }
+
         // Navigation Selection Functions
         function selectAllMembers() {
+            setGlobalLoadingFlag();
+            showGlobalLoadingToast();
+            triggerOverviewLoadingToast();
             clearAllSelections();
             document.querySelector('.nav-all-members').classList.add('active');
             
@@ -458,6 +509,9 @@
         }
         
         function selectMember(memberId) {
+            setGlobalLoadingFlag();
+            showGlobalLoadingToast();
+            triggerOverviewLoadingToast();
             clearAllSelections();
             
             // Find and activate the clicked member
@@ -476,6 +530,9 @@
         }
         
         function selectAccount(accountId) {
+            setGlobalLoadingFlag();
+            showGlobalLoadingToast();
+            triggerOverviewLoadingToast();
             clearAllSelections();
             
             // Find and activate the clicked account

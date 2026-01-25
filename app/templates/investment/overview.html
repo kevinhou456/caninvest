@@ -78,6 +78,27 @@
     .tooltip-account-item:last-child {
         margin-bottom: 0;
     }
+
+    /* Non-modal loading toast for navigation */
+    #overviewLoadingToast {
+        position: fixed;
+        right: 1.5rem;
+        bottom: 1.5rem;
+        z-index: 1080;
+        display: none;
+        min-width: 240px;
+        max-width: 360px;
+        padding: 0.9rem 1rem;
+        background: #ffffff;
+        border: 1px solid #e9ecef;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+
+    #overviewLoadingToast .spinner-border {
+        width: 1.1rem;
+        height: 1.1rem;
+    }
     
     .tooltip-account-name {
         font-weight: 600;
@@ -929,9 +950,37 @@
 
 {% endblock %}
 
+<!-- 非模式加载提示（切换账户/成员时） -->
+<div id="overviewLoadingToast" role="status" aria-live="polite">
+    <div class="d-flex align-items-center">
+        <div class="spinner-border text-primary me-2" role="status" aria-hidden="true"></div>
+        <div>
+            <div class="fw-semibold">{{ _('Loading data...') }}</div>
+            <div class="text-muted small" id="overview-loading-message">{{ _('Switching view, please wait') }}</div>
+        </div>
+    </div>
+</div>
+
 {% block scripts %}
 <script>
 let priceFetchModalInstance = null;
+let overviewLoadingToastTimer = null;
+
+function showOverviewLoadingToast(message) {
+    const toast = document.getElementById('overviewLoadingToast');
+    const messageEl = document.getElementById('overview-loading-message');
+    if (!toast) return;
+    if (messageEl) {
+        messageEl.textContent = message || '{{ _("Switching view, please wait") }}';
+    }
+    toast.style.display = 'block';
+}
+
+function hideOverviewLoadingToast() {
+    const toast = document.getElementById('overviewLoadingToast');
+    if (!toast) return;
+    toast.style.display = 'none';
+}
 
 function getPriceFetchModal() {
     if (priceFetchModalInstance) {
@@ -992,6 +1041,47 @@ document.addEventListener('DOMContentLoaded', function() {
         sessionStorage.removeItem(refreshFlagKey);
     }
 });
+
+// Show loading toast immediately when navigating between overview filters
+(function initializeOverviewNavLoading() {
+    const flagKey = 'overview_nav_loading_at';
+    const maxAgeMs = 12000;
+    const storedAt = parseInt(sessionStorage.getItem(flagKey) || '0', 10);
+    const now = Date.now();
+    if (storedAt && now - storedAt < maxAgeMs) {
+        showOverviewLoadingToast('{{ _("Loading data...") }}');
+    } else {
+        sessionStorage.removeItem(flagKey);
+    }
+
+    document.addEventListener('click', function(event) {
+        const link = event.target.closest('a');
+        if (!link || !link.href) {
+            return;
+        }
+        if (link.target && link.target !== '_self') {
+            return;
+        }
+        if (link.hasAttribute('data-skip-loading')) {
+            return;
+        }
+        try {
+            const targetUrl = new URL(link.href, window.location.origin);
+            const isOverview = targetUrl.pathname === '/overview' || targetUrl.pathname.endsWith('/overview');
+            if (!isOverview) return;
+            if (targetUrl.href === window.location.href) return;
+            sessionStorage.setItem(flagKey, String(Date.now()));
+            showOverviewLoadingToast('{{ _("Loading data...") }}');
+        } catch (e) {
+            // Ignore invalid URLs
+        }
+    }, true);
+
+    window.addEventListener('load', function() {
+        sessionStorage.removeItem(flagKey);
+        hideOverviewLoadingToast();
+    });
+})();
 
 function showPriceFetchModal(message) {
     const modal = getPriceFetchModal();
