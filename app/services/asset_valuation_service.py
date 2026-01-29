@@ -1383,6 +1383,8 @@ class AssetValuationService:
             if record and record.get('close') is not None:
                 return Decimal(str(record['close']))
 
+            # Do not force-refresh here; let the history cache decide whether to fetch.
+
             # 如果目标日期没有数据，查找最近的前一个交易日
             current_date = target_date
             for i in range(7):  # 最多向前查找7天
