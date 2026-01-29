@@ -9,7 +9,7 @@
 5. 一致性：所有统计使用相同的计算逻辑
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from calendar import monthrange
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
@@ -462,6 +462,29 @@ class PortfolioService:
                 currency,
                 auto_refresh=self.auto_refresh_prices
             )
+            stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+            if not stock_cache or not stock_cache.price_updated_at:
+                return price
+
+            now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+            market = price_service._get_market(symbol, currency)
+            market_tz = price_service._get_market_timezone(market)
+            now_local = now_utc.astimezone(market_tz)
+            updated_at = stock_cache.price_updated_at
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            updated_local = updated_at.astimezone(market_tz)
+
+            if not price_service._is_market_open(now_utc, market):
+                market_close = now_local.replace(hour=16, minute=0, second=0, microsecond=0)
+                updated_after_close = (
+                    updated_local.date() == now_local.date() and updated_local >= market_close
+                )
+                if not updated_after_close:
+                    last_close = self._get_last_trading_price(symbol, currency, now_local.date())
+                    if last_close is not None:
+                        return last_close
+
             return price
         except Exception as e:
             logger.error(f"Failed to get stock price for {symbol} ({currency}): {e}")

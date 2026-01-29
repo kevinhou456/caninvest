@@ -135,11 +135,30 @@
             margin-left: 15px;
         }
         
-        .nav-account {
+        .nav-account-type {
             padding: 10px 20px;
             margin-left: 30px;
             font-size: 0.9em;
+            color: #495057;
+            font-weight: 600;
+            background: #f8f9fc;
+        }
+        
+        .nav-account-type.active {
+            background: #e7f1ff;
+            color: #0d6efd;
+            border-left-color: #0d6efd;
+        }
+        
+        .nav-account {
+            padding: 10px 20px;
+            margin-left: 45px;
+            font-size: 0.9em;
             color: #6c757d;
+        }
+
+        .nav-account-flat {
+            margin-left: 30px;
         }
         
         .nav-account.active {
@@ -327,7 +346,7 @@
         
         <div class="sidebar-nav">
             <!-- All Members Summary -->
-            <div class="nav-item nav-all-members {{ 'active' if not current_member_id and not current_account_id }}"
+            <div class="nav-item nav-all-members {{ 'active' if not current_member_id and not current_account_id and not current_account_type }}"
                  onclick="selectAllMembers()">
                 <i class="fas fa-users me-2"></i>{{ _('All Members') }}
                 {% if total_accounts_count %}
@@ -338,24 +357,39 @@
             <!-- Individual Members and Accounts -->
             {% if family_structure %}
                 {% for member in family_structure %}
-                <div class="nav-item nav-member {{ 'active' if current_member_id == member.id and not current_account_id }}" 
+                <div class="nav-item nav-member {{ 'active' if current_member_id == member.id and not current_account_id and not current_account_type }}" 
                      onclick="selectMember({{ member.id }})">
                     <i class="fas fa-user me-2"></i>{{ member.name }}
                     <small class="text-muted ms-1">({{ member.accounts|length }} {{ _('accounts') }})</small>
                 </div>
                 
                 <!-- Member's Accounts -->
-                {% for account in member.accounts %}
-                <div class="nav-item nav-account {{ 'active' if current_account_id == account.id }}"
-                     onclick="selectAccount({{ account.id }})">
-                    <i class="fas fa-university me-2 account-type-{{ account.account_type.lower() if account.account_type else 'regular' }}"></i>
-                    {% if account.is_joint %}
-                        {% set current_member_percent = account.ownership_percentage %}
-                        <i class="fas fa-users me-1 text-warning" title="联名账户"></i>{{ account.name }} ({{ "%.1f"|format(current_member_percent|float) }}%)
-                    {% else %}
-                        {{ account.name }}
+                {% for group in member.account_groups %}
+                    {% if group.show_header %}
+                    <div class="nav-item nav-account-type {{ 'active' if current_member_id == member.id and current_account_type == group.type and not current_account_id }}"
+                         data-member-id="{{ member.id }}"
+                         data-account-type="{{ group.type }}"
+                         onclick="selectAccountType({{ member.id }}, '{{ group.type }}')">
+                        <i class="fas fa-layer-group me-2 account-type-{{ group.type.lower() }}"></i>
+                        {{ group.type }}
+                        <small class="text-muted ms-1">({{ group.accounts|length }} {{ _('accounts') }})</small>
+                    </div>
                     {% endif %}
-                </div>
+
+                    {% for account in group.accounts %}
+                    <div class="nav-item nav-account {% if not group.show_header %}nav-account-flat{% endif %} {{ 'active' if current_account_id == account.id }}"
+                         data-account-id="{{ account.id }}"
+                         data-member-id="{{ member.id }}"
+                         onclick="selectAccount({{ account.id }})">
+                        <i class="fas fa-university me-2 account-type-{{ group.type.lower() }}"></i>
+                        {% if account.is_joint %}
+                            {% set current_member_percent = account.ownership_percentage %}
+                            <i class="fas fa-users me-1 text-warning" title="Joint account"></i>{{ account.name }} ({{ "%.1f"|format(current_member_percent|float) }}%)
+                        {% else %}
+                            {{ account.name }}
+                        {% endif %}
+                    </div>
+                    {% endfor %}
                 {% endfor %}
                 {% endfor %}
             {% else %}
@@ -367,21 +401,26 @@
                     </a>
                 </div>
             {% endif %}
-            
-            <!-- Management Links -->
+<!-- Management Links -->
             <div class="border-top mt-3">
                 <div class="nav-item nav-management-header p-3">
                     <h6 class="mb-2 text-muted">
                         <i class="fas fa-cog me-2"></i>{{ _('Management') }}
                     </h6>
                 </div>
-                <div class="nav-item nav-management" onclick="window.location.href='{{ url_for('main.family_members') }}'">
+                <div class="nav-item nav-management {{ 'active' if current_view == 'family_members' }}"
+                     data-management-view="family_members"
+                     onclick="window.location.href='{{ url_for('main.family_members') }}'">
                     <i class="fas fa-users me-2 text-primary"></i>{{ _('Manage Members') }}
                 </div>
-                <div class="nav-item nav-management" onclick="window.location.href='{{ url_for('main.accounts') }}'">
+                <div class="nav-item nav-management {{ 'active' if current_view == 'accounts' }}"
+                     data-management-view="accounts"
+                     onclick="window.location.href='{{ url_for('main.accounts') }}'">
                     <i class="fas fa-university me-2 text-success"></i>{{ _('Manage Accounts') }}
                 </div>
-                <div class="nav-item nav-management" onclick="window.location.href='{{ url_for('main.stock_categories') }}'">
+                <div class="nav-item nav-management {{ 'active' if current_view == 'stock_categories' }}"
+                     data-management-view="stock_categories"
+                     onclick="window.location.href='{{ url_for('main.stock_categories') }}'">
                     <i class="fas fa-chart-bar me-2 text-info"></i>{{ _('Manage Stock Category') }}
                 </div>
             </div>
@@ -394,7 +433,7 @@
         <nav class="top-nav">
             <div class="nav nav-tabs border-0" role="tablist">
                 <a class="nav-link {{ 'active' if current_view == 'overview' }}"
-                   href="{{ url_for('main.overview', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.overview', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-eye me-2"></i>{{ _('Overview') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'holdings_board' }}"
@@ -402,31 +441,31 @@
                     <i class="fas fa-th-large me-2"></i>{{ _('Holdings Board') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'transactions' }}"
-                   href="{{ url_for('main.transactions', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.transactions', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-exchange-alt me-2"></i>{{ _('Transactions') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'annual' }}" 
-                   href="{{ url_for('main.annual_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.annual_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-calendar-alt me-2"></i>{{ _('Annual Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'quarterly' }}" 
-                   href="{{ url_for('main.quarterly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.quarterly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-calendar-week me-2"></i>{{ _('Quarterly Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'monthly' }}" 
-                   href="{{ url_for('main.monthly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.monthly_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-calendar me-2"></i>{{ _('Monthly Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'daily' }}" 
-                   href="{{ url_for('main.daily_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.daily_stats', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-calendar-day me-2"></i>{{ _('Daily Stats') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'comparison' }}" 
-                   href="{{ url_for('main.performance_comparison', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.performance_comparison', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-clock me-2"></i>{{ _('Performance Comparison') }}
                 </a>
                 <a class="nav-link {{ 'active' if current_view == 'holdings' }}" 
-                   href="{{ url_for('main.holdings_analysis', member_id=request.args.get('member_id'), account_id=request.args.get('account_id')) }}">
+                   href="{{ url_for('main.holdings_analysis', member_id=request.args.get('member_id'), account_id=request.args.get('account_id'), account_type=request.args.get('account_type')) }}">
                     <i class="fas fa-chart-pie me-2"></i>{{ _('Holdings Analysis') }}
                 </a>
             </div>
@@ -599,6 +638,7 @@
             setGlobalLoadingFlag();
             showGlobalLoadingToast();
             triggerOverviewLoadingToast();
+            storeSidebarScrollTop();
             clearAllSelections();
             document.querySelector('.nav-all-members').classList.add('active');
             
@@ -610,6 +650,7 @@
             const currentUrl = new URL(window.location);
             currentUrl.searchParams.delete('member_id');
             currentUrl.searchParams.delete('account_id');
+            currentUrl.searchParams.delete('account_type');
             window.location.href = currentUrl.toString();
         }
         
@@ -617,6 +658,7 @@
             setGlobalLoadingFlag();
             showGlobalLoadingToast();
             triggerOverviewLoadingToast();
+            storeSidebarScrollTop();
             clearAllSelections();
             
             // Find and activate the clicked member
@@ -631,18 +673,20 @@
             const currentUrl = new URL(window.location);
             currentUrl.searchParams.set('member_id', memberId);
             currentUrl.searchParams.delete('account_id');
+            currentUrl.searchParams.delete('account_type');
             window.location.href = currentUrl.toString();
         }
-        
+
         function selectAccount(accountId) {
             setGlobalLoadingFlag();
             showGlobalLoadingToast();
             triggerOverviewLoadingToast();
+            storeSidebarScrollTop();
             clearAllSelections();
             
             // Find and activate the clicked account
-            const accountEl = document.querySelector(`[onclick="selectAccount(${accountId})"]`);
-            if (accountEl) accountEl.classList.add('active');
+            document.querySelectorAll(`.nav-account[data-account-id="${accountId}"]`)
+                .forEach(el => el.classList.add('active'));
             
             // Store account selection, clear member selection
             sessionStorage.setItem('currentAccountId', accountId);
@@ -652,6 +696,26 @@
             const currentUrl = new URL(window.location);
             currentUrl.searchParams.set('account_id', accountId);
             currentUrl.searchParams.delete('member_id');
+            currentUrl.searchParams.delete('account_type');
+            window.location.href = currentUrl.toString();
+        }
+
+        function selectAccountType(memberId, accountType) {
+            setGlobalLoadingFlag();
+            showGlobalLoadingToast();
+            triggerOverviewLoadingToast();
+            storeSidebarScrollTop();
+            clearAllSelections();
+
+            sessionStorage.setItem('currentMemberId', memberId);
+            sessionStorage.removeItem('currentAccountId');
+
+            const currentUrl = new URL(window.location);
+            currentUrl.searchParams.set('member_id', memberId);
+            currentUrl.searchParams.set('account_type', accountType);
+            currentUrl.searchParams.delete('account_id');
+            // Route to overview for merged account-type view
+            currentUrl.pathname = "{{ url_for('main.overview') }}";
             window.location.href = currentUrl.toString();
         }
         
@@ -659,22 +723,62 @@
             // Remove active class from all navigation items
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         }
+
+        function storeSidebarScrollTop() {
+            const sidebar = document.querySelector('.sidebar');
+            if (sidebar) {
+                const top = String(sidebar.scrollTop);
+                // Only restore when navigation triggered it, to avoid random jumps
+                sessionStorage.setItem('sidebarScrollTopPending', top);
+                sessionStorage.setItem('sidebarScrollTopLast', top);
+            }
+        }
         
         // Initialize navigation state on page load
         document.addEventListener('DOMContentLoaded', function() {
             const urlParams = new URLSearchParams(window.location.search);
             const memberId = urlParams.get('member_id');
             const accountId = urlParams.get('account_id');
+            const accountType = urlParams.get('account_type');
+            const currentView = "{{ current_view }}";
+            const managementViews = new Set(['family_members', 'accounts', 'stock_categories']);
+            const sidebar = document.querySelector('.sidebar');
+
+            clearAllSelections();
+
+            if (sidebar) {
+                const pendingScrollTop = sessionStorage.getItem('sidebarScrollTopPending');
+                if (pendingScrollTop !== null) {
+                    const top = parseInt(pendingScrollTop, 10);
+                    if (!Number.isNaN(top)) {
+                        sidebar.scrollTop = top;
+                    }
+                    sessionStorage.removeItem('sidebarScrollTopPending');
+                }
+            }
+
+            document.querySelectorAll('.nav-management')
+                .forEach(el => el.addEventListener('click', storeSidebarScrollTop));
+
+            if (managementViews.has(currentView)) {
+                document.querySelectorAll(`.nav-management[data-management-view="${currentView}"]`)
+                    .forEach(el => el.classList.add('active'));
+                return;
+            }
             
             if (accountId) {
-                const accountEl = document.querySelector(`[onclick="selectAccount(${accountId})"]`);
-                if (accountEl) accountEl.classList.add('active');
+                document.querySelectorAll(`.nav-account[data-account-id="${accountId}"]`)
+                    .forEach(el => el.classList.add('active'));
+            } else if (memberId && accountType) {
+                const accountTypeEl = document.querySelector(`.nav-account-type[data-member-id="${memberId}"][data-account-type="${accountType}"]`);
+                if (accountTypeEl) accountTypeEl.classList.add('active');
             } else if (memberId) {
                 const memberEl = document.querySelector(`[onclick="selectMember(${memberId})"]`);
                 if (memberEl) memberEl.classList.add('active');
             } else {
                 // Default to "All Members" if no specific selection
-                document.querySelector('.nav-all-members').classList.add('active');
+                const allMembersEl = document.querySelector('.nav-all-members');
+                if (allMembersEl) allMembersEl.classList.add('active');
             }
         });
     </script>

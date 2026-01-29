@@ -5,7 +5,7 @@
 from flask import render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_babel import _
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from bisect import bisect_left
 from app.main import bp
 from app import db
@@ -23,6 +23,7 @@ from app.services.holdings_service import holdings_service
 from app.services.asset_valuation_service import AssetValuationService
 from app.services.report_service import ReportService
 from app.services.account_service import AccountService
+from app.services.portfolio_service import PortfolioService, TimePeriod
 
 
 def _build_ownership_map(member_id):
@@ -40,14 +41,38 @@ def _build_ownership_map(member_id):
 
 
 def _get_overview_target_date(base_date=None):
-    """Return the effective overview date (use Friday values on weekends)."""
-    base_date = base_date or date.today()
-    weekday = base_date.weekday()
-    if weekday == 5:
-        return base_date - timedelta(days=1)
-    if weekday == 6:
-        return base_date - timedelta(days=2)
-    return base_date
+    """Return the effective overview date based on market session timing (ET)."""
+    try:
+        from app.services.stock_price_service import StockPriceService
+        service = StockPriceService()
+        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        market = 'US'
+        market_tz = service._get_market_timezone(market)
+        local_now = now_utc.astimezone(market_tz)
+
+        # If market is open, use today's local date.
+        if service._is_market_open(now_utc, market):
+            return local_now.date()
+
+        # Market closed: use last trading day (skip weekends).
+        target = local_now.date()
+        while target.weekday() >= 5:
+            target -= timedelta(days=1)
+        # If before market open on a weekday, use previous trading day.
+        market_open = local_now.replace(hour=9, minute=30, second=0, microsecond=0)
+        if local_now < market_open:
+            target -= timedelta(days=1)
+            while target.weekday() >= 5:
+                target -= timedelta(days=1)
+        return target
+    except Exception:
+        base_date = base_date or date.today()
+        weekday = base_date.weekday()
+        if weekday == 5:
+            return base_date - timedelta(days=1)
+        if weekday == 6:
+            return base_date - timedelta(days=2)
+        return base_date
 
 
 def _build_portfolio_view_data(
@@ -439,8 +464,10 @@ def overview():
     # 获取过滤参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
     time_period = request.args.get('period', 'all_time')
     overview_target_date = _get_overview_target_date()
+    exchange_rates = currency_service.get_cad_usd_rates()
     
     try:
         # 根据过滤条件获取账户（不涉及价格计算）
@@ -448,31 +475,36 @@ def overview():
 
         if account_id:
             accounts = Account.query.filter_by(id=account_id, family_id=family.id).all()
-            filter_description = f"账户: {accounts[0].name}" if accounts else "未找到账户"
+            account_ids = [acc.id for acc in accounts] if accounts else []
+            filter_description = f"??: {accounts[0].name}" if accounts else "?????"
         elif member_id:
             from app.models.account import AccountMember
             member_accounts = AccountMember.query.filter_by(member_id=member_id).all()
-            account_ids = [am.account_id for am in member_accounts]
-            accounts = Account.query.filter(Account.id.in_(account_ids), Account.family_id == family.id).all()
+            member_account_ids = [am.account_id for am in member_accounts]
+            accounts_query = Account.query.filter(Account.id.in_(member_account_ids), Account.family_id == family.id)
+            if account_type:
+                accounts_query = accounts_query.join(AccountType).filter(AccountType.name == account_type)
+            accounts = accounts_query.all()
+            account_ids = [acc.id for acc in accounts] if accounts else []
 
             from app.models.member import Member
             member = Member.query.get(member_id)
-            filter_description = f"成员: {member.name}" if member else "未找到成员"
+            if member:
+                filter_description = f"??: {member.name}"
+                if account_type:
+                    filter_description += f" ({account_type})"
+            else:
+                filter_description = "?????"
 
             ownership_map = _build_ownership_map(member_id)
         else:
-            accounts = Account.query.filter_by(family_id=family.id).all()
-            filter_description = "All Members"
+            accounts_query = Account.query.filter_by(family_id=family.id)
+            if account_type:
+                accounts_query = accounts_query.join(AccountType).filter(AccountType.name == account_type)
+            accounts = accounts_query.all()
+            account_ids = [acc.id for acc in accounts] if accounts else []
+            filter_description = "All Members" + (f" ({account_type})" if account_type else "")
 
-        # 获取投资组合数据（使用缓存的价格，不强制更新）
-        account_ids = [acc.id for acc in accounts]
-        
-        # 获取汇率信息
-        exchange_rates = currency_service.get_cad_usd_rates()
-        overview_target_date = _get_overview_target_date()
-        
-        # 使用Portfolio Service统一计算架构
-        from app.services.portfolio_service import PortfolioService, TimePeriod
         portfolio_service = PortfolioService(auto_refresh_prices=False)
         
         # 使用Portfolio Service获取投资组合数据（使用缓存价格）
@@ -1195,12 +1227,14 @@ def api_holdings_board():
                 update_result = stock_service.update_prices_for_symbols(symbol_currency_pairs, force_refresh=True)
                 current_app.logger.info(f"Force refresh result: {update_result['updated']} updated, {update_result['failed']} failed")
 
+        overview_target_date = _get_overview_target_date()
+
         # 使用与overview完全相同的服务
         from app.services.asset_valuation_service import AssetValuationService
         asset_service = AssetValuationService(auto_refresh_prices=False)
 
         # 获取详细的投资组合数据 - 与overview使用相同方法
-        portfolio_data = asset_service.get_detailed_portfolio_data(account_ids)
+        portfolio_data = asset_service.get_detailed_portfolio_data(account_ids, target_date=overview_target_date)
         raw_holdings = portfolio_data.get('current_holdings', [])
 
         # 获取选定时间段内操作过的股票symbol集合
@@ -1326,7 +1360,7 @@ def api_holdings_board():
 
         for account_id in account_ids:
             # 为每个账户单独获取数据
-            account_portfolio_data = asset_service.get_detailed_portfolio_data([account_id])
+            account_portfolio_data = asset_service.get_detailed_portfolio_data([account_id], target_date=overview_target_date)
             account_symbols_filter = (
                 symbols_in_period_by_account.get(account_id, set()) if separate else symbols_in_period
             )

@@ -130,6 +130,15 @@
         transition: all 0.3s ease;
     }
 
+    .holdings-row.zero-shares {
+        background-color: #f4f5f7;
+    }
+
+    .stock-avatar.zero-shares {
+        background-color: #d1d5db !important;
+        color: #6b7280 !important;
+    }
+
     .holdings-row.dragging {
         opacity: 0.7;
         background-color: #e3f2fd;
@@ -615,7 +624,7 @@ function renderMergedView(holdings) {
         const detailUrl = stockDetailBase.replace('__SYMBOL__', encodeURIComponent(holding.symbol || ''));
 
         html += `
-            <tr class="align-middle holdings-row"
+            <tr class="align-middle holdings-row ${toSafeNumber(holding.shares) <= 0 ? 'zero-shares' : ''}"
                 data-symbol="${holding.symbol}"
                 data-currency="${holding.currency}"
                 data-sector="${holding.sector || 'Unknown'}"
@@ -633,7 +642,7 @@ function renderMergedView(holdings) {
                 <!-- Stock Symbol -->
                 <td class="ps-3">
                     <div class="d-flex align-items-center">
-                            <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar currency-symbol hb-sell-trigger"
+                        <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar currency-symbol hb-sell-trigger ${toSafeNumber(holding.shares) <= 0 ? 'zero-shares' : ''}"
                                  style="color: ${holding.currency === 'CAD' ? 'black' : 'white'}; cursor: pointer;"
                                  draggable="true"
                                  data-symbol="${holding.symbol}"
@@ -827,7 +836,7 @@ function renderSequentialView(accountsData) {
                 .replace('__ACCOUNT__', encodeURIComponent(account.account_id || ''));
 
             html += `
-                <tr class="align-middle holdings-row"
+                <tr class="align-middle holdings-row ${toSafeNumber(holding.shares) <= 0 ? 'zero-shares' : ''}"
                     data-symbol="${holding.symbol}"
                     data-currency="${holding.currency}"
                     data-sector="${holding.sector || 'Unknown'}"
@@ -846,7 +855,7 @@ function renderSequentialView(accountsData) {
                     <!-- Stock Symbol -->
                     <td class="ps-3">
                         <div class="d-flex align-items-center">
-                            <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar hb-sell-trigger"
+                            <div class="bg-${holding.currency === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar hb-sell-trigger ${toSafeNumber(holding.shares) <= 0 ? 'zero-shares' : ''}"
                                  style="color: ${holding.currency === 'CAD' ? 'black' : 'white'}; cursor: pointer;"
                                  data-symbol="${holding.symbol}"
                                  data-currency="${holding.currency}"

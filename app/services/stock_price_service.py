@@ -77,20 +77,40 @@ class StockPriceService:
     def _should_refresh_price(self, stock: Optional[StocksCache], market: str, *, force_refresh: bool = False) -> bool:
         if force_refresh:
             return True
-        if not stock or not stock.price_updated_at:
+        if not stock:
             return True
+        # Allow a one-time refresh for new symbols even outside trading hours.
+        if not stock.price_updated_at:
+            return stock.current_price is None
 
         now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
         updated_at = stock.price_updated_at
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=timezone.utc)
 
+        market_tz = self._get_market_timezone(market)
+        now_local = now_utc.astimezone(market_tz)
+        updated_local = updated_at.astimezone(market_tz)
+
         if self._is_market_open(now_utc, market):
             ttl_seconds = self._get_price_cache_ttl_seconds()
             return (now_utc - updated_at).total_seconds() > ttl_seconds
 
-        # Market closed: keep the last cached price
-        return False
+        # Market closed:
+        # - Never auto-refresh on weekends.
+        # - On weekdays, allow a single refresh after the market close (>= 16:00 ET)
+        #   unless we've already refreshed today after close.
+        if now_local.weekday() >= 5:
+            return False
+
+        market_close_time = now_local.replace(hour=16, minute=0, second=0, microsecond=0)
+        if now_local < market_close_time:
+            return False
+
+        updated_after_close_today = (
+            updated_local.date() == now_local.date() and updated_local >= market_close_time
+        )
+        return not updated_after_close_today
     
     def _extract_first_trade_date(self, info: Dict) -> Optional[date]:
         """从yfinance返回的信息中提取IPO/首个交易日期"""
@@ -361,14 +381,21 @@ class StockPriceService:
         }
 
         try:
+            effective_end = min(end_date, date.today())
+            effective_start = start_date
+
+            if effective_start > effective_end:
+                info['error'] = 'invalid_range'
+                return {}, info
+
             # 使用 yfinance 获取历史数据
-            _log_yfinance_call('Ticker.history', symbol, start=start_date, end=end_date)
+            _log_yfinance_call('Ticker.history', symbol, start=effective_start, end=effective_end)
             ticker = yf.Ticker(symbol)
 
             # 获取历史数据，加1天确保包含结束日期
             hist = ticker.history(
-                start=start_date,
-                end=end_date + timedelta(days=1),
+                start=effective_start,
+                end=effective_end + timedelta(days=1),
                 interval='1d',
                 actions=False,
                 auto_adjust=False,
@@ -376,12 +403,30 @@ class StockPriceService:
             )
 
             if hist.empty:
-                message = f"yfinance 未返回 {symbol} 的历史数据 ({start_date} -> {end_date})"
+                # Fallback: use yf.download which is sometimes more reliable
+                try:
+                    _log_yfinance_call('yf.download', symbol, start=effective_start, end=effective_end)
+                    hist = yf.download(
+                        symbol,
+                        start=effective_start,
+                        end=effective_end + timedelta(days=1),
+                        interval='1d',
+                        progress=False,
+                        auto_adjust=False
+                    )
+                    if not hist.empty and isinstance(hist.columns, pd.MultiIndex):
+                        hist = hist.copy()
+                        hist.columns = hist.columns.get_level_values(0)
+                except Exception:
+                    hist = pd.DataFrame()
+
+            if hist.empty:
+                message = f"yfinance 未返回 {symbol} 的历史数据 ({effective_start} -> {effective_end})"
                 logger.warning(message)
                 info['error'] = 'empty_data'
                 
                 # 记录假期尝试 - 当yfinance返回空数据时，记录整个时间段为无数据
-                self._record_holiday_attempts_for_empty_data(symbol, start_date, end_date, currency)
+                self._record_holiday_attempts_for_empty_data(symbol, effective_start, effective_end, currency)
                 
                 return {}, info
 

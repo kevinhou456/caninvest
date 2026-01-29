@@ -301,11 +301,41 @@ def create_app(config_name=None):
                                     'ownership_percentage': float(am.ownership_percentage)
                                 } for am in full_account.account_members]
                     
+                    
+                    # Group accounts by type (joint -> Regular)
+                    account_groups = []
+                    type_groups = {}
+                    type_order = []
+                    for account in sorted_accounts:
+                        type_key = account.get('account_type') or 'Regular'
+                        if account.get('is_joint'):
+                            type_key = 'Regular'
+                        if type_key not in type_groups:
+                            type_groups[type_key] = []
+                            type_order.append(type_key)
+                        type_groups[type_key].append(account)
+
+                    # Place Regular group last
+                    if 'Regular' in type_order:
+                        type_order = [t for t in type_order if t != 'Regular'] + ['Regular']
+
+                    for type_key in type_order:
+                        accounts_in_type = type_groups.get(type_key, [])
+                        has_joint = any(acc.get('is_joint') for acc in accounts_in_type)
+                        show_header = len(accounts_in_type) > 1 or (type_key == 'Regular' and has_joint)
+                        account_groups.append({
+                            'type': type_key,
+                            'accounts': accounts_in_type,
+                            'show_header': show_header
+                        })
+
                     member_data = {
                         'id': member.id,
                         'name': member.name,
-                        'accounts': sorted_accounts
+                        'accounts': sorted_accounts,
+                        'account_groups': account_groups
                     }
+
                     family_structure.append(member_data)
                     
                     # 统计唯一账户数量（避免联名账户重复计算）
@@ -320,6 +350,7 @@ def create_app(config_name=None):
                 'total_accounts_count': total_accounts_count,
                 'current_member_id': request.args.get('member_id', type=int),
                 'current_account_id': request.args.get('account_id', type=int),
+                'current_account_type': request.args.get('account_type'),
                 'current_view': request.endpoint.split('.')[-1] if request.endpoint else 'dashboard'
             }
         return {}
