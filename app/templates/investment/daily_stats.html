@@ -64,14 +64,6 @@
     color: #e74a3b !important;
 }
 
-/* Trading day and transaction indicators */
-.fc-daygrid-day.trading-day {
-    border-left: 3px solid #1cc88a !important;
-}
-
-.fc-daygrid-day.has-transactions {
-    border-top: 3px solid #f6c23e !important;
-}
 
 .fc-daygrid-day.positive-change {
     background-color: #d4edda !important;
@@ -194,13 +186,6 @@
     line-height: 16px;
 }
 
-.pnl-amount.has-transactions::after {
-    content: '*';
-    color: #f6c23e;
-    font-weight: 700;
-    margin-left: 4px;
-    font-size: 0.75rem;
-}
 
 @media (max-width: 768px) {
     .calendar-legend {
@@ -328,14 +313,6 @@
 
                 <!-- Legend -->
                 <div class="calendar-legend d-flex flex-nowrap align-items-center justify-content-center" style="display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 25px; white-space: nowrap;">
-                    <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
-                        <div class="legend-color trading" style="display: inline-block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin-right: 6px; background-color: #1cc88a; border: 3px solid #1cc88a;"></div>
-                        <span>{{ _('Trading Day') }}</span>
-                    </div>
-                    <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
-                        <div class="legend-color transaction" style="display: inline-block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin-right: 6px; background-color: #f6c23e; border: 3px solid #f6c23e;"></div>
-                        <span>{{ _('Has Transactions') }}</span>
-                    </div>
                     <div class="legend-item" style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;">
                         <div class="legend-color positive" style="display: inline-block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin-right: 6px; background-color: #d4edda; border: 1px solid #1cc88a;"></div>
                         <span>{{ _('Positive P&L') }}</span>
@@ -467,7 +444,7 @@ function applyCalendarDataToView() {
 
         const dayData = hasData ? calendarData.daily_stats[dateStr] : null;
 
-        dayEl.classList.remove('positive-change', 'negative-change', 'significant-change', 'trading-day', 'has-transactions');
+        dayEl.classList.remove('positive-change', 'negative-change', 'significant-change');
 
         if (dateStr && dateStr <= today && dayData && dayData.is_trading_day) {
             updateDayCell(dayEl, dateStr, dayData);
@@ -602,11 +579,7 @@ function updateDayCell(dayEl, dateStr, dayData) {
     console.log(`Manual update ${dateStr}: change=${dailyChange.toFixed(2)}, return=${dailyReturnPct.toFixed(2)}%`);
 
     // Add CSS classes for styling
-    dayEl.classList.remove('positive-change', 'negative-change', 'significant-change', 'trading-day', 'has-transactions');
-    dayEl.classList.add('trading-day');
-    if (dayData.has_transactions) {
-        dayEl.classList.add('has-transactions');
-    }
+    dayEl.classList.remove('positive-change', 'negative-change', 'significant-change');
 
     if (Math.abs(dailyChange) > 0) {
         if (dailyChange > 0) {
@@ -622,20 +595,17 @@ function updateDayCell(dayEl, dateStr, dayData) {
     // Add P&L data display
     const pnlContainer = document.createElement('div');
     pnlContainer.className = 'pnl-data';
-    
+
+    const pnlDiv = document.createElement('div');
+    pnlDiv.className = `pnl-amount ${dailyChange >= 0 ? 'positive' : 'negative'}`;
+
     const formattedAmount = `${dailyChange >= 0 ? '+' : ''}$${Math.abs(dailyChange).toLocaleString('en-US', { 
         minimumFractionDigits: 2, 
         maximumFractionDigits: 2 
     })}`;
     const formattedPercent = `${dailyReturnPct >= 0 ? '+' : ''}${dailyReturnPct.toFixed(2)}%`;
-    
-    const pnlDiv = document.createElement('div');
-    pnlDiv.className = `pnl-amount ${dailyChange >= 0 ? 'positive' : 'negative'}`;
     pnlDiv.textContent = `${formattedAmount}(${formattedPercent})`;
-    if (dayData.has_transactions) {
-        pnlDiv.classList.add('has-transactions');
-    }
-    
+
     if (dailyChange >= 0) {
         pnlDiv.style.color = '#1cc88a';
         pnlDiv.style.fontWeight = 'bold';
@@ -643,9 +613,9 @@ function updateDayCell(dayEl, dateStr, dayData) {
         pnlDiv.style.color = '#e74a3b';
         pnlDiv.style.fontWeight = 'bold';
     }
-    
+
     pnlContainer.appendChild(pnlDiv);
-    
+
     const dayFrame = dayEl.querySelector('.fc-daygrid-day-frame');
     if (dayFrame) {
         dayFrame.appendChild(pnlContainer);
@@ -657,7 +627,7 @@ function clearDayIndicators(dayEl) {
     if (existing) {
         existing.remove();
     }
-    dayEl.classList.remove('positive-change', 'negative-change', 'significant-change', 'trading-day', 'has-transactions');
+    dayEl.classList.remove('positive-change', 'negative-change', 'significant-change');
 }
 
 function renderDailyPnlChart(dailyStats) {
@@ -692,6 +662,13 @@ function renderDailyPnlChart(dailyStats) {
         dailyPnlChart.destroy();
     }
 
+    const cumulativeValues = [];
+    let runningTotal = 0;
+    values.forEach(v => {
+        runningTotal += v;
+        cumulativeValues.push(runningTotal);
+    });
+
     dailyPnlChart = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -702,6 +679,17 @@ function renderDailyPnlChart(dailyStats) {
                 backgroundColor: values.map(v => v >= 0 ? 'rgba(28, 200, 138, 0.8)' : 'rgba(231, 74, 59, 0.8)'),
                 borderRadius: 4,
                 borderSkipped: false,
+            }, {
+                type: 'line',
+                label: '{{ _('Monthly Cumulative') }}',
+                data: cumulativeValues,
+                borderColor: '#4e73df',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                tension: 0.25,
+                pointRadius: 0,
+                pointHoverRadius: 3,
+                yAxisID: 'y'
             }]
         },
         options: {
@@ -731,7 +719,7 @@ function renderDailyPnlChart(dailyStats) {
             },
             plugins: {
                 legend: {
-                    display: false
+                    display: true
                 },
                 tooltip: {
                     callbacks: {
