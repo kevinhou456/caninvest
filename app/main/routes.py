@@ -460,6 +460,13 @@ def overview():
         from app import db
         db.session.add(family)
         db.session.commit()
+
+    # Render lightweight shell first; load full data asynchronously.
+    if request.args.get('full') != '1':
+        return render_template('investment/overview_shell.html',
+                             title=_('Overview'),
+                             family=family,
+                             current_view='overview')
     
     # 获取过滤参数
     member_id = request.args.get('member_id', type=int)

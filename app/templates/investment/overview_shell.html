@@ -1,0 +1,56 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h4>{{ _('Portfolio Overview') }}</h4>
+        <p class="text-muted mb-0">{{ _('Loading overview data...') }}</p>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="sr-only">{{ _('Loading...') }}</span>
+        </div>
+        <div class="mt-3 text-muted">{{ _('Fetching portfolio data, please wait.') }}</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('full')) {
+        params.set('full', '1');
+    }
+    const targetUrl = `/overview?${params.toString()}`;
+    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
+        GlobalLoading.manualShow('{{ _('Loading data...') }}');
+    }
+
+    fetch(targetUrl, { headers: { 'X-Overview-Full': '1' } })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.text();
+        })
+        .then((html) => {
+            document.open();
+            document.write(html);
+            document.close();
+        })
+        .catch((err) => {
+            const message = document.createElement('div');
+            message.className = 'alert alert-danger mt-4';
+            message.textContent = `{{ _('Failed to load overview data') }}: ${err.message}`;
+            document.querySelector('.card-body')?.appendChild(message);
+            if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
+                GlobalLoading.manualHide(300);
+            }
+        });
+})();
+</script>
+{% endblock %}
