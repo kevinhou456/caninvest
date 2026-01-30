@@ -2,11 +2,14 @@
 主要路由 - 页面视图
 """
 
+import hashlib
+import json
 from flask import render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_babel import _
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta, timezone
 from bisect import bisect_left
+from sqlalchemy import func, tuple_
 from app.main import bp
 from app import db
 from app.models.family import Family
@@ -17,6 +20,9 @@ from app.models.transaction import Transaction
 from app.models.stocks_cache import StocksCache
 from app.models.import_task import ImportTask, OCRTask
 from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
+from app.models.stock_price_history import StockPriceHistory
+from app.models.cash import Cash
+from app.models.overview_snapshot import OverviewSnapshot
 # from app.services.analytics_service import analytics_service, TimePeriod  # 旧架构已废弃
 from app.services.currency_service import currency_service
 from app.services.holdings_service import holdings_service
@@ -38,6 +44,195 @@ def _build_ownership_map(member_id):
         except Exception:
             ownership_map[membership.account_id] = Decimal('0')
     return ownership_map
+
+
+def _normalize_ownership_map(ownership_map):
+    if not ownership_map:
+        return []
+    normalized = []
+    for account_id, proportion in ownership_map.items():
+        try:
+            normalized.append((int(account_id), str(Decimal(str(proportion)))))
+        except Exception:
+            normalized.append((int(account_id), str(proportion)))
+    return sorted(normalized, key=lambda item: item[0])
+
+
+def _build_overview_snapshot_key(account_ids, ownership_map, selected_account_id):
+    payload = {
+        'account_ids': sorted(set(account_ids or [])),
+        'ownership': _normalize_ownership_map(ownership_map),
+        'selected_account_id': selected_account_id
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha1(raw.encode('utf-8')).hexdigest(), payload
+
+
+def _json_default(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
+
+
+def _dump_snapshot_payload(payload):
+    return json.dumps(payload, ensure_ascii=False, default=_json_default)
+
+
+def _extract_snapshot_symbols(snapshot_payload):
+    symbols = []
+    seen = set()
+    for holding in snapshot_payload.get('holdings') or []:
+        symbol = holding.get('symbol')
+        if not symbol:
+            continue
+        currency = (holding.get('currency') or 'USD').upper()
+        key = (symbol, currency)
+        if key in seen:
+            continue
+        seen.add(key)
+        symbols.append({'symbol': symbol, 'currency': currency})
+    return symbols
+
+
+def _get_latest_price_update(symbols):
+    if not symbols:
+        return None
+    pairs = []
+    for item in symbols:
+        symbol = item.get('symbol')
+        if not symbol:
+            continue
+        currency = (item.get('currency') or 'USD').upper()
+        pairs.append((symbol, currency))
+    if not pairs:
+        return None
+    return db.session.query(func.max(StocksCache.price_updated_at)).filter(
+        tuple_(StocksCache.symbol, StocksCache.currency).in_(pairs)
+    ).scalar()
+
+
+def _get_latest_history_update(symbols):
+    if not symbols:
+        return None
+    pairs = []
+    for item in symbols:
+        symbol = item.get('symbol')
+        if not symbol:
+            continue
+        currency = (item.get('currency') or 'USD').upper()
+        pairs.append((symbol, currency))
+    if not pairs:
+        return None
+    return db.session.query(func.max(StockPriceHistory.updated_at)).filter(
+        tuple_(StockPriceHistory.symbol, StockPriceHistory.currency).in_(pairs)
+    ).scalar()
+
+
+def _is_overview_snapshot_fresh(snapshot, account_ids):
+    if not snapshot:
+        return False
+    snapshot_time = snapshot.updated_at or snapshot.created_at
+    if not snapshot_time:
+        return False
+
+    max_tx = db.session.query(func.max(Transaction.updated_at)).filter(
+        Transaction.account_id.in_(account_ids)
+    ).scalar()
+    if max_tx and max_tx > snapshot_time:
+        return False
+
+    max_cash = db.session.query(func.max(Cash.updated_at)).filter(
+        Cash.account_id.in_(account_ids)
+    ).scalar()
+    if max_cash and max_cash > snapshot_time:
+        return False
+
+    symbols = json.loads(snapshot.symbols_json) if snapshot.symbols_json else []
+    max_price = _get_latest_price_update(symbols)
+    if max_price and max_price > snapshot_time:
+        return False
+
+    max_history = _get_latest_history_update(symbols)
+    if max_history and max_history > snapshot_time:
+        return False
+
+    return True
+
+
+def _get_or_build_overview_snapshot(*, account_ids, accounts, ownership_map, target_date, exchange_rates, account_id):
+    if not account_ids:
+        return {
+            'holdings': [],
+            'cleared_holdings': [],
+            'daily_change': {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0},
+            'metrics': {},
+            'portfolio_summary': {'summary': {}}
+        }
+
+    snapshot_key, key_payload = _build_overview_snapshot_key(account_ids, ownership_map, account_id)
+    snapshot = OverviewSnapshot.query.filter_by(
+        snapshot_date=target_date,
+        snapshot_key=snapshot_key
+    ).first()
+
+    if snapshot and _is_overview_snapshot_fresh(snapshot, account_ids):
+        try:
+            return json.loads(snapshot.data_json)
+        except Exception:
+            snapshot = None
+
+    portfolio_service = PortfolioService(auto_refresh_prices=False)
+    portfolio_summary = portfolio_service.get_portfolio_summary(
+        account_ids,
+        TimePeriod.ALL_TIME,
+        end_date=target_date
+    )
+
+    view_data = _build_portfolio_view_data(
+        account_ids=account_ids,
+        accounts=accounts,
+        portfolio_summary=portfolio_summary,
+        asset_service=AssetValuationService(auto_refresh_prices=False),
+        ownership_map=ownership_map,
+        target_date=target_date,
+        exchange_rates=exchange_rates,
+        account_id=account_id
+    )
+
+    data_json = _dump_snapshot_payload(view_data)
+    symbols_json = json.dumps(_extract_snapshot_symbols(view_data), ensure_ascii=False)
+    account_ids_json = json.dumps(sorted(set(account_ids)), ensure_ascii=False)
+    ownership_json = (
+        json.dumps(key_payload['ownership'], ensure_ascii=False)
+        if key_payload.get('ownership') else None
+    )
+
+    if snapshot is None:
+        snapshot = OverviewSnapshot(
+            snapshot_key=snapshot_key,
+            snapshot_date=target_date,
+            account_ids_json=account_ids_json,
+            ownership_json=ownership_json,
+            selected_account_id=account_id,
+            data_json=data_json,
+            symbols_json=symbols_json
+        )
+        db.session.add(snapshot)
+    else:
+        snapshot.account_ids_json = account_ids_json
+        snapshot.ownership_json = ownership_json
+        snapshot.selected_account_id = account_id
+        snapshot.data_json = data_json
+        snapshot.symbols_json = symbols_json
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    return view_data
 
 
 def _get_overview_target_date(base_date=None):
@@ -512,20 +707,9 @@ def overview():
             account_ids = [acc.id for acc in accounts] if accounts else []
             filter_description = "All Members" + (f" ({account_type})" if account_type else "")
 
-        portfolio_service = PortfolioService(auto_refresh_prices=False)
-        
-        # 使用Portfolio Service获取投资组合数据（使用缓存价格）
-        portfolio_summary = portfolio_service.get_portfolio_summary(
-            account_ids,
-            TimePeriod.ALL_TIME,
-            end_date=overview_target_date
-        )
-
-        view_data = _build_portfolio_view_data(
+        view_data = _get_or_build_overview_snapshot(
             account_ids=account_ids,
             accounts=accounts,
-            portfolio_summary=portfolio_summary,
-            asset_service=AssetValuationService(auto_refresh_prices=False),
             ownership_map=ownership_map,
             target_date=overview_target_date,
             exchange_rates=exchange_rates,

@@ -14,11 +14,14 @@ from .stock_price_history import StockPriceHistory
 from .import_task import ImportTask, OCRTask
 from .cash import Cash
 from .market_holiday import MarketHoliday, StockHolidayAttempt
+from .overview_snapshot import OverviewSnapshot
+from .report_analysis_cache import ReportAnalysisCache
 
 __all__ = [
     'Family', 'Member', 'Account', 'AccountType',
     'Transaction', 'StocksCache', 'StockCategory',
     'Contribution', 'StockPriceCache', 'PriceUpdateLog',
     'StockPriceHistory', 'ImportTask', 'OCRTask', 'Cash',
-    'MarketHoliday', 'StockHolidayAttempt'
+    'MarketHoliday', 'StockHolidayAttempt', 'OverviewSnapshot',
+    'ReportAnalysisCache'
 ]

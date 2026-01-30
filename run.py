@@ -14,6 +14,8 @@ from app.models.account import Account, AccountType
 from app.models.transaction import Transaction
 # from app.models.stock import Stock, StockCategory  # Stock models deleted
 from app.models.stocks_cache import StocksCache
+from app.models.overview_snapshot import OverviewSnapshot
+from app.models.report_analysis_cache import ReportAnalysisCache
 
 def check_and_initialize_database(app):
     """检查并自动初始化数据库"""
@@ -65,6 +67,14 @@ def check_and_initialize_database(app):
                 
                 # 检查是否需要更新基础数据
                 account_type_count = AccountType.query.count()
+                if 'overview_snapshots' not in existing_tables:
+                    print("Detected missing overview_snapshots table. Creating...")
+                    OverviewSnapshot.__table__.create(db.engine)
+                    print("Created overview_snapshots table.")
+                if 'report_analysis_cache' not in existing_tables:
+                    print("Detected missing report_analysis_cache table. Creating...")
+                    ReportAnalysisCache.__table__.create(db.engine)
+                    print("Created report_analysis_cache table.")
                 if account_type_count == 0:
                     print("🔧 检测到缺少基础数据，正在补充...")
                     from app.services.init_service import InitializationService

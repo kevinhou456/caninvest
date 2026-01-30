@@ -344,13 +344,20 @@ def create_app(config_name=None):
                 
                 total_accounts_count = len(unique_accounts)
             
+            member_id = request.args.get('member_id', type=int)
+            account_id = request.args.get('account_id', type=int)
+            account_type = request.args.get('account_type')
+            if account_id:
+                member_id = None
+                account_type = None
+
             return {
                 'current_family': family,
                 'family_structure': family_structure,
                 'total_accounts_count': total_accounts_count,
-                'current_member_id': request.args.get('member_id', type=int),
-                'current_account_id': request.args.get('account_id', type=int),
-                'current_account_type': request.args.get('account_type'),
+                'current_member_id': member_id,
+                'current_account_id': account_id,
+                'current_account_type': account_type,
                 'current_view': request.endpoint.split('.')[-1] if request.endpoint else 'dashboard'
             }
         return {}

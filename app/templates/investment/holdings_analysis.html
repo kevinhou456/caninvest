@@ -189,8 +189,13 @@ const CASH_SLICE_COLOR = '#d6d8db';
 
 // Get current family ID and other parameters
 const familyId = {{ family.id if family else 'null' }};
-const memberId = new URLSearchParams(window.location.search).get('member_id');
-const accountId = new URLSearchParams(window.location.search).get('account_id');
+const urlParams = new URLSearchParams(window.location.search);
+const memberIdRaw = urlParams.get('member_id');
+const accountIdRaw = urlParams.get('account_id');
+const memberIdParsed = memberIdRaw ? parseInt(memberIdRaw, 10) : NaN;
+const accountIdParsed = accountIdRaw ? parseInt(accountIdRaw, 10) : NaN;
+const memberId = Number.isFinite(memberIdParsed) && memberIdParsed > 0 ? memberIdParsed : null;
+const accountId = Number.isFinite(accountIdParsed) && accountIdParsed > 0 ? accountIdParsed : null;
 const NUMBER_FORMAT_OPTIONS = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
 function formatCurrencyValue(value) {
@@ -245,6 +250,11 @@ function applyCurrentExchangeRateToDistribution(distribution) {
 }
 
 function loadHoldingsDistribution() {
+    if (window.GlobalLoading && typeof GlobalLoading.manualShow === 'function') {
+        GlobalLoading.manualShow('{{ _("Loading data...") }}');
+    } else if (window.GlobalLoading && typeof GlobalLoading.show === 'function') {
+        GlobalLoading.show('{{ _("Loading data...") }}');
+    }
     let apiUrl = `/api/v1/families/${familyId}/reports/holdings-distribution`;
     let params = new URLSearchParams();
     
@@ -256,8 +266,16 @@ function loadHoldingsDistribution() {
     }
     
     fetch(apiUrl)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Holdings distribution HTTP ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
+            if (!data || !data.distribution) {
+                throw new Error('Holdings distribution response missing data');
+            }
             distributionData = applyCurrentExchangeRateToDistribution(data.distribution);
             updateSummaryCards(distributionData.summary);
             updateStocksChart();
@@ -269,6 +287,13 @@ function loadHoldingsDistribution() {
         .catch(error => {
             console.error('Error loading holdings distribution:', error);
             showNoDataMessage();
+        })
+        .finally(() => {
+            if (window.GlobalLoading && typeof GlobalLoading.manualHide === 'function') {
+                GlobalLoading.manualHide(300);
+            } else if (window.GlobalLoading && typeof GlobalLoading.hide === 'function') {
+                GlobalLoading.hide(300);
+            }
         });
 }
 

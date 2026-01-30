@@ -3,7 +3,7 @@
 基于数据库状态的简单缓存逻辑，不搞复杂的全局状态管理
 """
 from typing import List, Dict, Tuple, Optional, Set
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from bisect import bisect_left
 from sqlalchemy import func
@@ -142,15 +142,39 @@ class StockHistoryCacheService:
         if ipo_date and start_date < ipo_date:
             start_date = ipo_date
 
-        if start_date > end_date:
+        effective_end = self._get_effective_end_for_expectation(symbol, currency, end_date)
+        if start_date > effective_end:
             return False
+
+        existing_dates = set()
+        for record in existing_data:
+            if isinstance(record.get('trade_date'), str):
+                trade_date = datetime.strptime(record['trade_date'], '%Y-%m-%d').date()
+            else:
+                trade_date = record.get('trade_date')
+            if trade_date:
+                existing_dates.add(trade_date)
 
         # 精确预估交易日数量（排除周末 + 已知节假日）
         market = self._get_market(symbol, currency)
+        known_no_data_dates = self._get_known_no_data_dates(symbol, market, start_date, effective_end)
+        last_expected = effective_end
+        while last_expected >= start_date:
+            if (last_expected.weekday() < 5 and
+                    not MarketHoliday.is_holiday(last_expected, market) and
+                    last_expected not in known_no_data_dates):
+                break
+            last_expected -= timedelta(days=1)
+
+        if last_expected >= start_date and last_expected not in existing_dates:
+            return True
+
         expected_trading_days = 0
         current = start_date
-        while current <= end_date:
-            if current.weekday() < 5 and not MarketHoliday.is_holiday(current, market):
+        while current <= effective_end:
+            if (current.weekday() < 5 and
+                    not MarketHoliday.is_holiday(current, market) and
+                    current not in known_no_data_dates):
                 expected_trading_days += 1
             current += timedelta(days=1)
 
@@ -172,12 +196,13 @@ class StockHistoryCacheService:
             start_date = ipo_date
             logger.info(f"{symbol} IPO日期为 {ipo_date}，调整查询起始日期")
 
-        if start_date > end_date:
+        effective_end = self._get_effective_end_for_expectation(symbol, currency, end_date)
+        if start_date > effective_end:
             return []
 
         # 如果强制刷新，返回整个范围，但也要经过扩展逻辑
         if force_refresh:
-            gaps = [(start_date, end_date)]
+            gaps = [(start_date, effective_end)]
             # 应用扩展逻辑
             gaps = self._expand_short_gaps_for_holiday_detection(gaps)
             return gaps
@@ -193,13 +218,14 @@ class StockHistoryCacheService:
 
         # 获取市场信息用于节假日检查
         market = self._get_market(symbol, currency)
+        known_no_data_dates = self._get_known_no_data_dates(symbol, market, start_date, effective_end)
 
         # 找出缺失的交易日范围，跳过已知节假日
         gaps = []
         current_date = start_date
         gap_start = None
 
-        while current_date <= end_date:
+        while current_date <= effective_end:
             # 跳过周末
             if current_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
                 current_date += timedelta(days=1)
@@ -207,6 +233,10 @@ class StockHistoryCacheService:
 
             # 跳过已知节假日
             if MarketHoliday.is_holiday(current_date, market):
+                current_date += timedelta(days=1)
+                continue
+
+            if current_date in known_no_data_dates:
                 current_date += timedelta(days=1)
                 continue
 
@@ -222,18 +252,63 @@ class StockHistoryCacheService:
 
         # 处理最后一个缺口
         if gap_start is not None:
-            gaps.append((gap_start, end_date))
+            gaps.append((gap_start, effective_end))
 
         # 智能扩展短期缺口以检测节假日
         gaps = self._expand_short_gaps_for_holiday_detection(gaps)
 
         if gaps:
-            self._log_missing_dates(symbol, currency, market, gaps, existing_dates)
+            self._log_missing_dates(symbol, currency, market, gaps, existing_dates, known_no_data_dates)
 
         return gaps
 
+    def _get_effective_end_for_expectation(self, symbol: str, currency: str, end_date: date) -> date:
+        """在交易时段内不强制要求当天收盘数据，避免误判缺口。"""
+        market = self._get_market(symbol, currency)
+        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        market_tz = self.stock_service._get_market_timezone(market)
+        local_now = now_utc.astimezone(market_tz)
+        market_date = local_now.date()
+
+        effective_end = min(end_date, market_date)
+        if effective_end < market_date:
+            return effective_end
+
+        # 若今天非交易日，回退到最近交易日
+        if market_date.weekday() >= 5 or MarketHoliday.is_holiday(market_date, market):
+            effective_end = market_date - timedelta(days=1)
+            while effective_end.weekday() >= 5 or MarketHoliday.is_holiday(effective_end, market):
+                effective_end -= timedelta(days=1)
+            return effective_end
+
+        # 未到收盘（盘中/开盘前）：仍使用上一交易日
+        market_close = local_now.replace(hour=16, minute=0, second=0, microsecond=0)
+        if local_now < market_close:
+            effective_end = market_date - timedelta(days=1)
+            while effective_end.weekday() >= 5 or MarketHoliday.is_holiday(effective_end, market):
+                effective_end -= timedelta(days=1)
+            return effective_end
+
+        return market_date
+
+    def _get_known_no_data_dates(self, symbol: str, market: str, start_date: date, end_date: date) -> Set[date]:
+        """Return dates recorded as no-data attempts for this symbol/market."""
+        try:
+            attempts = StockHolidayAttempt.query.filter(
+                StockHolidayAttempt.symbol == symbol,
+                StockHolidayAttempt.market == market,
+                StockHolidayAttempt.has_data == False,
+                StockHolidayAttempt.attempt_date >= start_date,
+                StockHolidayAttempt.attempt_date <= end_date
+            ).all()
+            return {attempt.attempt_date for attempt in attempts}
+        except Exception as exc:
+            logger.debug(f"Failed to load no-data attempts for {symbol}: {exc}")
+            return set()
+
     def _log_missing_dates(self, symbol: str, currency: str, market: str,
-                           gaps: List[Tuple[date, date]], existing_dates: Set[date]) -> None:
+                           gaps: List[Tuple[date, date]], existing_dates: Set[date],
+                           known_no_data_dates: Optional[Set[date]] = None) -> None:
         """输出缺失的具体交易日，便于调试"""
         today = date.today()
         for gap_start, gap_end in gaps:
@@ -244,6 +319,9 @@ class StockHistoryCacheService:
                     current += timedelta(days=1)
                     continue
                 if MarketHoliday.is_holiday(current, market):
+                    current += timedelta(days=1)
+                    continue
+                if current in known_no_data_dates:
                     current += timedelta(days=1)
                     continue
                 if current not in existing_dates:

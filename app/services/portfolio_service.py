@@ -249,6 +249,10 @@ class PortfolioService:
             Transaction.stock == symbol,
             Transaction.trade_date <= as_of_date
         ).order_by(Transaction.trade_date.asc()).all()
+
+        # If there are no transactions up to the target date, avoid any market-data fetches.
+        if not transactions:
+            return snapshot
         
         # 处理交易记录，构建FIFO持仓
         for tx in transactions:
@@ -1305,7 +1309,6 @@ class PortfolioService:
                 quarter_start_unrealized = quarter_start_portfolio.get('summary', {}).get('total_unrealized_gain', 0)
                 quarterly_unrealized_gain = quarter_end_unrealized - quarter_start_unrealized
 
-                quarterly_realized_gain = float(quarterly_realized_gain_dec)
                 quarterly_realized_gain_cad = float(quarterly_realized_gain_cad_dec)
                 quarterly_realized_gain_usd = float(quarterly_realized_gain_usd_dec)
 
@@ -1370,24 +1373,31 @@ class PortfolioService:
 
                 total_assets_float = float(total_assets_dec)
                 total_assets_cad += float(cash_total_cad_dec)
-                total_assets_usd += float(cash_total_usd_dec * usd_to_cad_decimal)
+                total_assets_usd += float(cash_total_usd_dec)
+
+                quarterly_realized_gain_with_rate = quarterly_realized_gain_cad + quarterly_realized_gain_usd * float(usd_to_cad_decimal)
+                quarterly_unrealized_gain_with_rate = unrealized_gain_cad + unrealized_gain_usd * float(usd_to_cad_decimal)
+                dividends_with_rate = dividends_cad + dividends_usd * float(usd_to_cad_decimal)
+                interest_with_rate = interest_cad + interest_usd * float(usd_to_cad_decimal)
+                buy_amount_with_rate = buy_cad + buy_usd * float(usd_to_cad_decimal)
+                sell_amount_with_rate = sell_cad + sell_usd * float(usd_to_cad_decimal)
 
                 quarterly_return_percent = 0.0
                 if total_assets_float > 0:
-                    quarterly_return_percent = ((quarterly_realized_gain + quarterly_unrealized_gain) / total_assets_float) * 100
+                    quarterly_return_percent = ((quarterly_realized_gain_with_rate + quarterly_unrealized_gain_with_rate) / total_assets_float) * 100
 
                 quarterly_data.append({
                     'year': year,
                     'quarter': quarter,
                     'total_assets': total_assets_float,
-                    'quarterly_realized_gain': quarterly_realized_gain,
-                    'quarterly_unrealized_gain': quarterly_unrealized_gain,
+                    'quarterly_realized_gain': quarterly_realized_gain_with_rate,
+                    'quarterly_unrealized_gain': quarterly_unrealized_gain_with_rate,
                     'quarterly_return_percent': quarterly_return_percent,
-                    'quarterly_dividends': dividends,
-                    'quarterly_interest': interest,
+                    'quarterly_dividends': dividends_with_rate,
+                    'quarterly_interest': interest_with_rate,
                     'transaction_count': transaction_count,
-                    'buy_amount': buy_amount,
-                    'sell_amount': sell_amount,
+                    'buy_amount': buy_amount_with_rate,
+                    'sell_amount': sell_amount_with_rate,
                     'currency_breakdown': {
                         'total_assets_cad': total_assets_cad,
                         'total_assets_usd': total_assets_usd,
