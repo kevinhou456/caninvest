@@ -1437,7 +1437,14 @@ class PortfolioService:
     def _get_last_trading_price(self, symbol: str, currency: str, target_date: date) -> Optional[Decimal]:
         if not symbol or not target_date:
             return None
-        effective_end = min(target_date, date.today())
+        # Use the cache service's market-aware end date to avoid missing the latest close.
+        try:
+            effective_end = self.history_cache_service._get_effective_end_for_expectation(
+                symbol, currency, target_date
+            )
+        except Exception:
+            effective_end = min(target_date, date.today())
+
         window_start = effective_end - timedelta(days=14)
         history = self.history_cache_service.get_cached_history(symbol, window_start, effective_end, currency)
         if not history:
@@ -1447,13 +1454,33 @@ class PortfolioService:
             key=lambda r: r['date'],
             reverse=True
         )
+        latest_date = None
         for record in history_sorted:
             try:
                 record_date = datetime.fromisoformat(record['date']).date()
             except ValueError:
                 continue
             if record_date <= effective_end:
+                latest_date = record_date
                 return Decimal(str(record['close']))
+
+        # If we still don't have the latest expected close, force a one-time refresh.
+        if latest_date is None:
+            history = self.history_cache_service.get_cached_history(
+                symbol, window_start, effective_end, currency, force_refresh=True
+            )
+            history_sorted = sorted(
+                (record for record in history if record.get('date') and record.get('close') is not None),
+                key=lambda r: r['date'],
+                reverse=True
+            )
+            for record in history_sorted:
+                try:
+                    record_date = datetime.fromisoformat(record['date']).date()
+                except ValueError:
+                    continue
+                if record_date <= effective_end:
+                    return Decimal(str(record['close']))
         return None
 
     def _shift_month(self, base_month_start: date, offset: int) -> Optional[date]:

@@ -254,11 +254,12 @@ def _get_overview_target_date(base_date=None):
         while target.weekday() >= 5:
             target -= timedelta(days=1)
         # If before market open on a weekday, use previous trading day.
-        market_open = local_now.replace(hour=9, minute=30, second=0, microsecond=0)
-        if local_now < market_open:
-            target -= timedelta(days=1)
-            while target.weekday() >= 5:
+        if local_now.weekday() < 5:
+            market_open = local_now.replace(hour=9, minute=30, second=0, microsecond=0)
+            if local_now < market_open:
                 target -= timedelta(days=1)
+                while target.weekday() >= 5:
+                    target -= timedelta(days=1)
         return target
     except Exception:
         base_date = base_date or date.today()
@@ -588,22 +589,65 @@ def _build_portfolio_view_data(
 
     daily_change_metrics = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
     usd_to_cad_rate = Decimal(str(exchange_rates.get('usd_to_cad', 1)))
-    if holdings:
+
+    def get_proportion(account_id_value):
+        if not ownership_map:
+            return Decimal('1')
+        try:
+            return Decimal(str(ownership_map.get(account_id_value, 0)))
+        except Exception:
+            return Decimal('0')
+
+    def sum_returns_by_currency(summary_data):
+        totals = {'CAD': Decimal('0'), 'USD': Decimal('0')}
+        for collection in ('current_holdings', 'cleared_holdings'):
+            for holding in (summary_data.get(collection, []) or []):
+                currency = (holding.get('currency') or 'USD').upper()
+                realized = Decimal(str(holding.get('realized_gain', 0) or 0))
+                unrealized = Decimal(str(holding.get('unrealized_gain', 0) or 0))
+                totals[currency] = totals.get(currency, Decimal('0')) + realized + unrealized
+        return totals
+
+    try:
+        from app.services.stock_history_cache_service import StockHistoryCacheService
+
+        history_service = StockHistoryCacheService()
+        portfolio_service = PortfolioService(auto_refresh_prices=False)
+
+        def is_trading_day(check_date: date) -> bool:
+            if check_date.weekday() >= 5:
+                return False
+            us_closed = history_service._is_market_holiday_by_market('US', check_date)
+            ca_closed = history_service._is_market_holiday_by_market('CA', check_date)
+            return not (us_closed and ca_closed)
+
+        def get_previous_trading_day(check_date: date) -> date:
+            current = check_date - timedelta(days=1)
+            for _ in range(366):
+                if is_trading_day(current):
+                    return current
+                current -= timedelta(days=1)
+            return check_date - timedelta(days=1)
+
+        prev_date = get_previous_trading_day(target_date)
+
         daily_change_cad_only = Decimal('0')
         daily_change_usd_only = Decimal('0')
 
-        for holding in holdings:
-            raw_change = holding.get('daily_change_value')
-            if raw_change in (None, ''):
+        for acc_id in account_ids:
+            proportion = get_proportion(acc_id)
+            if proportion <= 0:
                 continue
-
-            change_value = Decimal(str(raw_change))
-            currency = (holding.get('currency') or 'USD').upper()
-
-            if currency == 'USD':
-                daily_change_usd_only += change_value
-            else:
-                daily_change_cad_only += change_value
+            current_summary = portfolio_service.get_portfolio_summary(
+                [acc_id], TimePeriod.CUSTOM, end_date=target_date
+            )
+            prev_summary = portfolio_service.get_portfolio_summary(
+                [acc_id], TimePeriod.CUSTOM, end_date=prev_date
+            )
+            current_totals = sum_returns_by_currency(current_summary)
+            prev_totals = sum_returns_by_currency(prev_summary)
+            daily_change_cad_only += (current_totals.get('CAD', Decimal('0')) - prev_totals.get('CAD', Decimal('0'))) * proportion
+            daily_change_usd_only += (current_totals.get('USD', Decimal('0')) - prev_totals.get('USD', Decimal('0'))) * proportion
 
         total_daily_change_cad = daily_change_cad_only + (daily_change_usd_only * usd_to_cad_rate)
 
@@ -612,6 +656,8 @@ def _build_portfolio_view_data(
             'cad_only': float(daily_change_cad_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
             'usd_only': float(daily_change_usd_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
         }
+    except Exception:
+        daily_change_metrics = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
 
     comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
         account_ids,

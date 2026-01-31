@@ -5,7 +5,7 @@
 确保数据准确性和一致性
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, Optional, List, Set
 from decimal import Decimal, ROUND_HALF_UP
 import logging
@@ -1300,9 +1300,6 @@ class AssetValuationService:
         total_market_value = Decimal('0')
         holdings_detail = {}
         
-        # 判断是否需要历史价格
-        is_historical = target_date < date.today()
-        
         for symbol, shares in holdings.items():
             if shares <= 0:
                 continue
@@ -1310,16 +1307,41 @@ class AssetValuationService:
             # 获取股价和货币
             stock_info = self._get_stock_info(symbol)
             currency = stock_info.get('currency', 'USD')
+
+            # Determine market-local date and trading session to avoid stale prices after close.
+            market_today = date.today()
+            is_market_open = True
+            try:
+                market = self.stock_price_service._get_market(symbol, currency)
+                now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+                market_tz = self.stock_price_service._get_market_timezone(market)
+                market_today = now_utc.astimezone(market_tz).date()
+                is_market_open = self.stock_price_service._is_market_open(now_utc, market)
+            except Exception:
+                market_today = date.today()
+                is_market_open = True
+
+            # Use historical prices for dates before the market-local today.
+            is_historical = target_date < market_today
             
             # 根据日期选择价格获取方式
             if is_historical:
-                # 使用历史价格
                 price = self._get_historical_stock_price(symbol, target_date, currency)
             else:
-                # 使用当前缓存价格
-                price = self.stock_price_service.get_cached_stock_price(
-                    symbol, currency, auto_refresh=self.auto_refresh_prices
-                )
+                # If market is closed, prefer latest historical close (if cached)
+                # to avoid showing stale cached prices from a previous session.
+                if not is_market_open:
+                    history_price = self._get_historical_stock_price(symbol, target_date, currency)
+                    if history_price is not None:
+                        price = history_price
+                    else:
+                        price = self.stock_price_service.get_cached_stock_price(
+                            symbol, currency, auto_refresh=self.auto_refresh_prices
+                        )
+                else:
+                    price = self.stock_price_service.get_cached_stock_price(
+                        symbol, currency, auto_refresh=self.auto_refresh_prices
+                    )
             
             if price is None or price <= 0:
                 logger.warning(f"无法获取{symbol}在{target_date}的价格")

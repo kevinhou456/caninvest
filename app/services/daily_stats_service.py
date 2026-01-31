@@ -24,6 +24,8 @@ from app.services.report_service import ReportService
 from app.services.smart_history_manager import SmartHistoryManager
 from app.services.stock_history_cache_service import StockHistoryCacheService
 from app.services.daily_stats_cache_service import daily_stats_cache_service
+from app.services.portfolio_service import portfolio_service, TimePeriod
+from app.services.currency_service import currency_service
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +127,7 @@ class DailyStatsService:
         self.report_service = ReportService()
         self.history_manager = SmartHistoryManager()
         self.history_cache_service = StockHistoryCacheService()
+        self.portfolio_service = portfolio_service
         
     def get_monthly_calendar_data(self, account_ids: List[int], 
                                   year: int, month: int,
@@ -235,6 +238,8 @@ class DailyStatsService:
                 stock_market_value=prev_snapshot['stock_market_value'],
                 cash_balance=prev_snapshot['cash_balance_total_cad'],
                 unrealized_gain=prev_snapshot.get('unrealized_gain', Decimal('0')),
+                realized_gain=prev_snapshot.get('realized_gain', Decimal('0')),
+                total_return=prev_snapshot.get('total_return', Decimal('0')),
                 is_trading_day=self._is_trading_day(prev_trading_date),
                 has_transactions=False
             )
@@ -253,6 +258,8 @@ class DailyStatsService:
                 stock_market_value=combined_snapshot['stock_market_value'],
                 cash_balance=combined_snapshot['cash_balance_total_cad'],
                 unrealized_gain=combined_snapshot.get('unrealized_gain', Decimal('0')),
+                realized_gain=combined_snapshot.get('realized_gain', Decimal('0')),
+                total_return=combined_snapshot.get('total_return', Decimal('0')),
                 is_trading_day=self._is_trading_day(current_date),
                 has_transactions=current_date in transaction_dates
             )
@@ -276,63 +283,95 @@ class DailyStatsService:
         使用AssetValuationService确保数据一致性
         """
 
-        # 使用AssetValuationService统一计算，确保数据一致性
+        # Use Portfolio + Cash unified calculation.
         try:
             stock_value_total = Decimal('0')
             cash_total = Decimal('0')
             cash_cad = Decimal('0')
             cash_usd = Decimal('0')
             unrealized_gain_total = Decimal('0')
+            realized_gain_total = Decimal('0')
+
+            usd_to_cad_rate = currency_service.get_current_rate('USD', 'CAD') or 1
+            try:
+                usd_to_cad_decimal = Decimal(str(usd_to_cad_rate))
+            except Exception:
+                usd_to_cad_decimal = Decimal('1')
+
+            portfolio_summary = self.portfolio_service.get_portfolio_summary(
+                account_ids, TimePeriod.CUSTOM, end_date=target_date
+            )
+
+            def convert_if_needed(value: Decimal, currency: str) -> Decimal:
+                return value * usd_to_cad_decimal if currency == 'USD' else value
+
+            for holding in (portfolio_summary.get('current_holdings', []) or []):
+                proportion = self._get_account_proportion(holding.get('account_id'), ownership_map)
+                if proportion <= 0:
+                    continue
+                currency = (holding.get('currency') or 'USD').upper()
+                value_dec = Decimal(str(holding.get('current_value', 0) or 0)) * proportion
+                unrealized_dec = Decimal(str(holding.get('unrealized_gain', 0) or 0)) * proportion
+                realized_dec = Decimal(str(holding.get('realized_gain', 0) or 0)) * proportion
+
+                stock_value_total += convert_if_needed(value_dec, currency)
+                unrealized_gain_total += convert_if_needed(unrealized_dec, currency)
+                realized_gain_total += convert_if_needed(realized_dec, currency)
+
+            for holding in (portfolio_summary.get('cleared_holdings', []) or []):
+                proportion = self._get_account_proportion(holding.get('account_id'), ownership_map)
+                if proportion <= 0:
+                    continue
+                currency = (holding.get('currency') or 'USD').upper()
+                realized_dec = Decimal(str(holding.get('realized_gain', 0) or 0)) * proportion
+                realized_gain_total += convert_if_needed(realized_dec, currency)
 
             for account_id in account_ids:
                 proportion = self._get_account_proportion(account_id, ownership_map)
                 if proportion <= 0:
                     continue
 
-                # 使用AssetValuationService获取完整快照
-                snapshot = self.asset_service.get_asset_snapshot(account_id, target_date)
+                cash_balance = self.asset_service.get_cash_balance(account_id, target_date)
+                cash_cad += Decimal(str(cash_balance.get('cad', 0) or 0)) * proportion
+                cash_usd += Decimal(str(cash_balance.get('usd', 0) or 0)) * proportion
+                cash_total += Decimal(str(cash_balance.get('total_cad', 0) or 0)) * proportion
 
-                # 累计各项数据
-                stock_value_total += snapshot.stock_market_value * proportion
-                cash_cad += snapshot.cash_balance_cad * proportion
-                cash_usd += snapshot.cash_balance_usd * proportion
-                cash_total += snapshot.cash_balance_total_cad * proportion
-
-                # 计算浮动盈亏
-                account_unrealized_gain = self.asset_service._calculate_unrealized_gain_for_account(account_id, target_date)
-                unrealized_gain_total += account_unrealized_gain * proportion
-
-            # 计算总资产 = 股票市值 + 现金总额
+            # Total assets = stock value + cash total
             total_assets = stock_value_total + cash_total
+            total_return = realized_gain_total + unrealized_gain_total
 
-            # 转换为Daily Stats Service期望的格式
+            # Format for Daily Stats service
             combined_data = {
                 'total_assets': total_assets,
                 'stock_market_value': stock_value_total,
                 'cash_balance_cad': cash_cad,
                 'cash_balance_usd': cash_usd,
                 'cash_balance_total_cad': cash_total,
-                'unrealized_gain': unrealized_gain_total
+                'unrealized_gain': unrealized_gain_total,
+                'realized_gain': realized_gain_total,
+                'total_return': total_return
             }
 
-            logger.debug(f"AssetValuationService数据 {target_date}: 总资产={combined_data['total_assets']}")
+            logger.debug(f"Portfolio+Cash data {target_date}: total_assets {combined_data['total_assets']}")
             return combined_data
 
         except Exception as e:
-            logger.error(f"AssetValuationService获取数据失败: {e}")
+            logger.error(f"Portfolio+Cash data error: {e}")
 
-            # 回退方案：返回零值
+            # Fallback to zeros on failure
             combined_data = {
                 'total_assets': Decimal('0'),
                 'stock_market_value': Decimal('0'),
                 'cash_balance_cad': Decimal('0'),
                 'cash_balance_usd': Decimal('0'),
                 'cash_balance_total_cad': Decimal('0'),
-                'unrealized_gain': Decimal('0')
+                'unrealized_gain': Decimal('0'),
+                'realized_gain': Decimal('0'),
+                'total_return': Decimal('0')
             }
 
             return combined_data
-    
+
     def _get_account_proportion(self, account_id: int,
                                  ownership_map: Optional[Dict[int, Decimal]]) -> Decimal:
         if not ownership_map:
@@ -341,43 +380,27 @@ class DailyStatsService:
 
     def _get_combined_daily_report(self, account_ids: List[int], target_date: date,
                                    ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
-        """
-        获取多个账户的合并日度报表
-        复用ReportService的功能
-        """
-        combined_report = {
-            'total_assets': Decimal('0'),
-            'stock_market_value': Decimal('0'),
-            'cash_balance': Decimal('0'),
-            'total_unrealized_gain': Decimal('0')
+        """Get combined daily report for multiple accounts."""
+        combined_snapshot = self._get_combined_asset_snapshot(account_ids, target_date, ownership_map)
+
+        return {
+            'total_assets': combined_snapshot.get('total_assets', Decimal('0')),
+            'stock_market_value': combined_snapshot.get('stock_market_value', Decimal('0')),
+            'cash_balance': combined_snapshot.get('cash_balance_total_cad', Decimal('0')),
+            'total_unrealized_gain': combined_snapshot.get('unrealized_gain', Decimal('0')),
+            'total_realized_gain': combined_snapshot.get('realized_gain', Decimal('0')),
+            'total_return': combined_snapshot.get('total_return', Decimal('0'))
         }
-        
-        for account_id in account_ids:
-            proportion = self._get_account_proportion(account_id, ownership_map)
-            if proportion <= 0:
-                continue
-            try:
-                daily_report = self.report_service.get_daily_report(account_id, target_date)
-                current_data = daily_report['current']
-                
-                combined_report['total_assets'] += Decimal(str(current_data['total_assets'])) * proportion
-                combined_report['stock_market_value'] += Decimal(str(current_data['stock_market_value'])) * proportion
-                combined_report['cash_balance'] += Decimal(str(current_data['cash_balance']['total_cad'])) * proportion
 
-            except Exception as e:
-                logger.warning(f"获取账户{account_id}日度报表失败: {e}")
-                continue
-        
-        return combined_report
-    
     def _calculate_daily_change(self, current: Dict, previous: Dict) -> Dict:
-        """计算日变化，复用ReportService的逻辑"""
-        current_assets = current.get('total_assets', Decimal('0'))
-        prev_assets = previous.get('total_assets', Decimal('0'))
+        """Calculate daily change using total return when available."""
+        current_return = current.get('total_return', current.get('total_assets', Decimal('0')))
+        prev_return = previous.get('total_return', previous.get('total_assets', Decimal('0')))
 
-        change = current_assets - prev_assets
+        change = current_return - prev_return
         change_pct = Decimal('0')
 
+        prev_assets = previous.get('total_assets', Decimal('0'))
         if prev_assets > 0:
             change_pct = (change / prev_assets) * 100
 
@@ -390,11 +413,11 @@ class DailyStatsService:
             'amount': change,
             'percentage': change_pct
         }
-    
+
     def _calculate_daily_change_for_point(self, current_point: DailyStatsPoint, 
                                         prev_point: DailyStatsPoint):
         """为统计点计算日变化"""
-        current_point.daily_change = current_point.total_assets - prev_point.total_assets
+        current_point.daily_change = current_point.total_return - prev_point.total_return
         
         if prev_point.total_assets > 0:
             current_point.daily_return_pct = (current_point.daily_change / prev_point.total_assets) * 100
@@ -412,10 +435,10 @@ class DailyStatsService:
         if start_point and end_point:
             calendar_data.month_start_assets = start_point.total_assets
             calendar_data.month_end_assets = end_point.total_assets
-            calendar_data.month_total_change = end_point.total_assets - start_point.total_assets
+            calendar_data.month_total_change = end_point.total_return - start_point.total_return
             
-            if start_point.total_assets > 0:
-                calendar_data.month_return_pct = (calendar_data.month_total_change / start_point.total_assets) * 100
+            if end_point.total_assets > 0:
+                calendar_data.month_return_pct = (calendar_data.month_total_change / end_point.total_assets) * 100
         
         # 统计交易日和有交易的日子
         for point in calendar_data.daily_stats.values():
