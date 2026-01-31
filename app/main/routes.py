@@ -3419,30 +3419,36 @@ def stock_detail(stock_symbol):
         
         # 准备交易标记数据（买卖点）- 支持多账户
         transaction_markers = []
-        account_id_map = {}  # 映射账户ID到编号
+        account_id_map = {}  # ??????ID?????
         account_counter = 0
-        
-        # 计算涉及的账户数量
-        unique_accounts = set(t.account_id for t in transactions if t.type in ['BUY', 'SELL'])
-        show_account_numbers = len(unique_accounts) > 1
-        
+
+        account_name_map = {}
+        for tx in transactions:
+            if not tx.account_id:
+                continue
+            if tx.account_id not in account_name_map:
+                name = getattr(tx, 'formatted_account_name', None) or (tx.account.name if tx.account else None)
+                account_name_map[tx.account_id] = name or f'Account {tx.account_id}'
+
+        sorted_account_ids = sorted(account_name_map.keys(), key=lambda aid: account_name_map[aid])
+        for account_id in sorted_account_ids:
+            account_counter += 1
+            account_id_map[account_id] = account_counter
+
+        show_account_numbers = len(account_id_map) > 1
+
         for transaction in transactions:
             if transaction.type in ['BUY', 'SELL'] and transaction.price and transaction.trade_date:
-                # 为每个账户分配一个连续编号
-                if transaction.account_id not in account_id_map:
-                    account_counter += 1
-                    account_id_map[transaction.account_id] = account_counter
-                
                 transaction_markers.append({
                     'date': transaction.trade_date.strftime('%Y-%m-%d'),
                     'price': float(transaction.price),
                     'type': transaction.type,
                     'quantity': float(transaction.quantity) if transaction.quantity else 0,
                     'account_id': transaction.account_id,
-                    'account_number': account_id_map[transaction.account_id],
-                    'account_name': transaction.account.name if transaction.account else f'Account {transaction.account_id}'
+                    'account_number': account_id_map.get(transaction.account_id, 0),
+                    'account_name': account_name_map.get(transaction.account_id, f'Account {transaction.account_id}')
                 })
-        
+
         print(f"DEBUG: Passing to template - price_data count: {len(price_data)}, quantity_data count: {len(quantity_data)}")
         print(f"DEBUG: Price data sample: {price_data[:2] if price_data else 'Empty'}")
         print(f"DEBUG: Quantity data sample: {quantity_data[:2] if quantity_data else 'Empty'}")
@@ -3596,27 +3602,37 @@ def stock_detail(stock_symbol):
             })
         
         # 生成交易标记数据
-        account_counter = {}
         transaction_markers = []
+        account_id_map = {}
+        account_name_map = {}
+        account_counter = 0
+
+        for tx in transactions:
+            if not tx.account_id:
+                continue
+            if tx.account_id not in account_name_map:
+                name = getattr(tx, 'formatted_account_name', None) or (tx.account.name if tx.account else None)
+                account_name_map[tx.account_id] = name or f'Account {tx.account_id}'
+
+        sorted_account_ids = sorted(account_name_map.keys(), key=lambda aid: account_name_map[aid])
+        for account_id in sorted_account_ids:
+            account_counter += 1
+            account_id_map[account_id] = account_counter
+
+        show_account_numbers = len(account_id_map) > 1
+
         for transaction in transactions:
-            if transaction.account_id not in account_counter:
-                account_counter[transaction.account_id] = len(account_counter) + 1
-            
-            transaction_markers.append({
-                'date': transaction.trade_date.strftime('%Y-%m-%d'),
-                'type': transaction.type,
-                'price': float(transaction.unit_price),
-                'quantity': float(transaction.quantity),
-                'account_id': transaction.account_id,
-                'account_number': account_counter[transaction.account_id],
-                'account_name': next((acc.account_name for acc in accounts if acc.id == transaction.account_id), 'Unknown')
-            })
-        
-        # 判断是否需要显示账户编号
-        unique_accounts = len(set(t.account_id for t in transactions))
-        show_account_numbers = unique_accounts > 1
-        
-        # 计算当前持仓
+            if transaction.type in ['BUY', 'SELL'] and transaction.price and transaction.trade_date:
+                transaction_markers.append({
+                    'date': transaction.trade_date.strftime('%Y-%m-%d'),
+                    'type': transaction.type,
+                    'price': float(transaction.price),
+                    'quantity': float(transaction.quantity),
+                    'account_id': transaction.account_id,
+                    'account_number': account_id_map.get(transaction.account_id, 0),
+                    'account_name': account_name_map.get(transaction.account_id, f'Account {transaction.account_id}')
+                })
+
         current_holding = cumulative_quantity
         
         # 计算股票统计

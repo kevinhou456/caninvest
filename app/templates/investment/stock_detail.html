@@ -21,16 +21,14 @@
                                 {% if stock_info and stock_info.name %}
                                     <small class="text-muted">- {{ stock_info.name }}</small>
                                 {% endif %}
-                                
-                                <!-- Display current filter next to stock symbol -->
+
                                 {% if member_id or account_id %}
-                                    {% set filter_info = get_current_filter_display(family, member_id, account_id, true, account_members) %}
-                                    {% if filter_info %}
-                                        <span class="badge bg-info ms-3" style="font-size: 0.6em;">
-                                            <i class="{{ filter_info.icon_class }} me-1"></i>{{ filter_info.display_text }}
-                                        </span>
-                                    {% endif %}
+                                    <a href="{{ url_for('main.stock_detail', stock_symbol=stock_symbol) }}" class="btn btn-sm btn-outline-secondary ms-2 align-baseline">
+                                        {{ _('Show All') }}
+                                    </a>
                                 {% endif %}
+                                
+
                             </h2>
                             
                             <!-- Stock Symbol Correction Button -->
@@ -75,14 +73,7 @@
                             </div>
                             {% endif %}
                         </div>
-                        <!-- Show All button for filtered views -->
-                        {% if member_id or account_id %}
-                        <div class="ms-auto">
-                            <a href="{{ url_for('main.stock_detail', stock_symbol=stock_symbol) }}" class="btn btn-sm btn-outline-secondary">
-                                {{ _('Show All') }}
-                            </a>
-                        </div>
-                        {% endif %}
+
                     </div>
                 </div>
             </div>
@@ -97,9 +88,12 @@
                     <h5 class="mb-0">
                         <i class="fas fa-chart-mixed me-2"></i>{{ _('Stock Price & Holdings Analysis') }}
                     </h5>
-                    <small class="text-muted">{{ _('Price (line) & Quantity (bars)') }}</small>
+                    <small class="text-white">{{ _('Price (line) & Quantity (bars)') }}</small>
                 </div>
                 <div class="card-body">
+                    <div id="accountNumberLegend" class="account-number-legend d-none">
+                        <div class="legend-items"></div>
+                    </div>
                     <div style="position: relative; width: 100%; height: 600px;">
                         <canvas id="combinedChart"></canvas>
                     </div>
@@ -327,6 +321,47 @@ document.addEventListener('DOMContentLoaded', function() {
     const quantityDataRaw = {{ quantity_data | tojson | safe }};
     const transactionMarkersRaw = {{ transaction_markers | tojson | safe }};
     const showAccountNumbers = {{ show_account_numbers | tojson }};
+
+    function renderAccountNumberLegend() {
+        const legend = document.getElementById('accountNumberLegend');
+        if (!legend) return;
+        const itemsContainer = legend.querySelector('.legend-items');
+        if (!itemsContainer) return;
+
+        if (!showAccountNumbers || !transactionMarkersRaw || transactionMarkersRaw.length === 0) {
+            legend.classList.add('d-none');
+            itemsContainer.innerHTML = '';
+            return;
+        }
+
+        const accountMap = new Map();
+        transactionMarkersRaw.forEach(marker => {
+            if (!marker || !marker.account_number) {
+                return;
+            }
+            if (!accountMap.has(marker.account_number)) {
+                const name = marker.account_name || `Account ${marker.account_number}`;
+                accountMap.set(marker.account_number, name);
+            }
+        });
+
+        if (accountMap.size <= 1) {
+            legend.classList.add('d-none');
+            itemsContainer.innerHTML = '';
+            return;
+        }
+
+        const sorted = Array.from(accountMap.entries()).sort((a, b) => a[0] - b[0]);
+        itemsContainer.innerHTML = '';
+        sorted.forEach(([number, name]) => {
+            const item = document.createElement('div');
+            item.className = 'legend-item';
+            item.innerHTML = `<span class="legend-circle">${number}</span><span class="legend-text">${name}</span>`;
+            itemsContainer.appendChild(item);
+        });
+
+        legend.classList.remove('d-none');
+    }
     
     console.log('Initializing chart with', priceDataRaw ? priceDataRaw.length : 0, 'price points,', quantityDataRaw ? quantityDataRaw.length : 0, 'quantity points and', transactionMarkersRaw ? transactionMarkersRaw.length : 0, 'transaction markers');
     
@@ -557,7 +592,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     legend: {
                         display: true,
-                        position: 'top'
+                        position: 'bottom'
                     },
                     tooltip: {
                         mode: 'index',
@@ -595,6 +630,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         console.log('Chart created successfully!');
+        renderAccountNumberLegend();
         
     } catch (error) {
         console.error('Chart creation failed:', error);
@@ -952,6 +988,60 @@ document.addEventListener('DOMContentLoaded', function() {
 
 #transactionTable tbody tr {
     transition: all 0.3s ease;
+}
+
+.account-number-legend {
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-size: 0.85rem;
+    color: #212529;
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    padding: 6px 10px;
+    white-space: nowrap;
+}
+
+.account-number-legend .legend-items {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px 12px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    justify-content: center;
+}
+
+.account-number-legend .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 999px;
+    padding: 2px 8px;
+    border: 1px solid rgba(222, 226, 230, 0.7);
+    box-shadow: none;
+}
+
+.account-number-legend .legend-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #212529;
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border: 2px solid #fff;
+}
+
+.account-number-legend .legend-text {
+    white-space: nowrap;
+    color: #212529;
 }
 </style>
 
