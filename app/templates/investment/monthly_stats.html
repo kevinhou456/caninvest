@@ -74,6 +74,34 @@
     </div>
 </div>
 
+
+<!-- Monthly Stock P&L Modal -->
+<div class="modal fade monthly-stock-pnl-tooltip" id="monthlyStockPnlModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="monthlyStockPnlModalTitle">{{ _('Monthly Stock P&L') }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive" style="max-height: 520px;">
+                    <table class="table table-bordered table-sm" id="monthlyStockPnlTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>{{ _('Symbol') }}</th>
+                                <th class="text-end">{{ _('Monthly P&L') }}</th>
+                                <th class="text-end">{{ _('Realized Gain') }}</th>
+                                <th class="text-end">{{ _('Buy Qty') }}</th>
+                                <th class="text-end">{{ _('Sell Qty') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 <div id="loading-spinner" class="text-center py-5">
     <div class="spinner-border text-primary" role="status">
         <span class="sr-only">{{ _('Loading...') }}</span>
@@ -81,12 +109,46 @@
     <p class="mt-2 text-muted">{{ _('Loading monthly analysis data...') }}</p>
 </div>
 
+<style>
+.monthly-stock-pnl-tooltip .modal-dialog {
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    margin: 0;
+    max-width: 520px;
+    width: calc(100% - 2.5rem);
+}
+.monthly-stock-pnl-tooltip .modal-content {
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.monthly-stock-pnl-tooltip .modal-header {
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.9);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.monthly-stock-pnl-tooltip .modal-body {
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.96);
+}
+@media (max-width: 768px) {
+    .monthly-stock-pnl-tooltip .modal-dialog {
+        right: 0.75rem;
+        bottom: 0.75rem;
+        max-width: 100%;
+        width: calc(100% - 1.5rem);
+    }
+}
+</style>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
 let monthlyData = [];
 let monthlyPerformanceChart = null;
+let monthlyStockPnlModalInstance = null;
 let showCurrencyBreakdown = false;
 
 function showLoadingOverlay(message) {
@@ -110,6 +172,7 @@ function loadMonthlyAnalysis() {
     const familyId = {{ current_family.id if current_family else 1 }};
     const memberId = {{ current_member_id if current_member_id else 'null' }};
     const accountId = {{ current_account_id if current_account_id else 'null' }};
+    const accountType = {{ current_account_type|tojson if current_account_type else 'null' }};
 
     let apiUrl = `/api/v1/families/${familyId}/reports/monthly-analysis`;
     const params = new URLSearchParams();
@@ -119,6 +182,9 @@ function loadMonthlyAnalysis() {
     }
     if (accountId) {
         params.append('account_id', accountId);
+    }
+    if (accountType) {
+        params.append('account_type', accountType);
     }
 
     if (params.toString()) {
@@ -227,6 +293,15 @@ function updateMonthlyPerformanceChart() {
         },
         options: {
             responsive: true,
+            onClick: function(evt, elements) {
+                if (!elements || !elements.length) return;
+                const index = elements[0].index;
+                const item = chartData[index];
+                if (item) {
+                    openMonthlyStockPnlModal(item.year, item.month);
+                }
+            },
+            
             maintainAspectRatio: false,
             interaction: {
                 mode: 'index',
@@ -455,6 +530,96 @@ function updateMonthlyTable(currentTotals) {
         `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(totalSellCad, 2)} | USD: $${formatNumber(totalSellUsd, 2)}</small>`;
 
     updateCurrencyBreakdownVisibility();
+}
+
+
+function getMonthlyStockPnlModal() {
+    if (monthlyStockPnlModalInstance) {
+        return monthlyStockPnlModalInstance;
+    }
+    const modalEl = document.getElementById('monthlyStockPnlModal');
+    if (!modalEl) return null;
+    monthlyStockPnlModalInstance = new bootstrap.Modal(modalEl, {
+        backdrop: true,
+        keyboard: true
+    });
+    return monthlyStockPnlModalInstance;
+}
+
+function openMonthlyStockPnlModal(year, month) {
+    const modal = getMonthlyStockPnlModal();
+    if (!modal) return;
+    const titleEl = document.getElementById('monthlyStockPnlModalTitle');
+    if (titleEl) {
+        titleEl.textContent = `{{ _('Monthly Stock P&L') }}: ${year}-${String(month).padStart(2, '0')}`;
+    }
+    modal.show();
+    loadMonthlyStockPnl(year, month);
+}
+
+function loadMonthlyStockPnl(year, month) {
+    const familyId = {{ current_family.id if current_family else 1 }};
+    const memberId = {{ current_member_id if current_member_id else 'null' }};
+    const accountId = {{ current_account_id if current_account_id else 'null' }};
+    const accountType = {{ current_account_type|tojson if current_account_type else 'null' }};
+
+    let apiUrl = `/api/v1/families/${familyId}/reports/monthly-stock-pnl?year=${year}&month=${month}`;
+    const params = new URLSearchParams();
+    if (memberId) {
+        params.append('member_id', memberId);
+    }
+    if (accountId) {
+        params.append('account_id', accountId);
+    }
+    if (accountType) {
+        params.append('account_type', accountType);
+    }
+    if (params.toString()) {
+        apiUrl += '&' + params.toString();
+    }
+
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                renderMonthlyStockPnlTable(data.data);
+            } else {
+                console.error('Failed to load monthly stock P&L:', data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading monthly stock P&L:', error);
+        });
+}
+
+function renderMonthlyStockPnlTable(payload) {
+    const table = document.getElementById('monthlyStockPnlTable');
+    if (!table || !payload) return;
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    const symbols = payload.symbols || [];
+    if (!symbols.length) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="5" class="text-center text-muted">{{ _('No data') }}</td>`;
+        tbody.appendChild(row);
+        return;
+    }
+
+    symbols.forEach(item => {
+        const value = Number(item.value || 0);
+        const row = document.createElement('tr');
+        const valueClass = value >= 0 ? 'text-success' : 'text-danger';
+        row.innerHTML = `
+            <td>${item.label}</td>
+            <td class="text-end ${valueClass}">${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="text-end ${valueClass}">${(item.realized_gain || 0) < 0 ? '-' : ''}$${Math.abs(item.realized_gain || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="text-end">${(item.buy_qty || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
+            <td class="text-end">${(item.sell_qty || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
+        `;
+        tbody.appendChild(row);
+    });
 }
 
 function updateCurrencyBreakdownVisibility() {

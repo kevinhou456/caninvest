@@ -2628,6 +2628,7 @@ def monthly_stats():
     exchange_rates = currency_service.get_cad_usd_rates()
 
     return render_template('investment/monthly_stats.html',
+                         current_account_type=request.args.get('account_type'),
                          title=_('Monthly Statistics'),
                          exchange_rates=exchange_rates)
 

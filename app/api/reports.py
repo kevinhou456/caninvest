@@ -7,13 +7,15 @@ import json
 from typing import List, Optional, Tuple
 from flask import request, jsonify
 from flask_babel import _
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from decimal import Decimal
 from sqlalchemy import func, tuple_
 from app import db
 from app.models.family import Family
 from app.models.member import Member
-from app.models.account import Account, AccountMember
+from app.models.account import Account, AccountMember, AccountType
 from app.services.account_service import AccountService
+from app.services.portfolio_service import PortfolioService, TimePeriod
 # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
 from app.models.transaction import Transaction
 from app.models.contribution import Contribution
@@ -25,6 +27,43 @@ from app.services.currency_service import currency_service
 from app.services.currency_service import ExchangeRate
 from . import bp
 
+
+
+def _resolve_account_ids(family_id, member_id=None, account_id=None, account_type=None):
+    if account_type:
+        account_type = account_type.strip().upper()
+    if account_id:
+        account = Account.query.get_or_404(account_id)
+        if account.family_id != family_id:
+            return [], None
+        if account_type and (not account.account_type or account.account_type.name.upper() != account_type):
+            return [], None
+        return [account_id], None
+
+    if member_id:
+        member = Member.query.get_or_404(member_id)
+        if member.family_id != family_id:
+            return [], None
+        query = Account.query.join(AccountMember).filter(
+            AccountMember.member_id == member.id,
+            Account.family_id == family_id
+        )
+        if account_type:
+            query = query.join(AccountType).filter(func.upper(AccountType.name) == account_type)
+        accounts = query.all()
+        account_ids = [acc.id for acc in accounts]
+        ownership_map = {am.account_id: Decimal(str(am.ownership_percentage or 0)) / Decimal('100')
+                         for am in AccountMember.query.filter_by(member_id=member.id).all()}
+        # prune ownership_map to filtered accounts
+        if account_ids:
+            ownership_map = {aid: ownership_map.get(aid, Decimal('0')) for aid in account_ids}
+        return account_ids, ownership_map
+
+    query = Account.query.filter(Account.family_id == family_id)
+    if account_type:
+        query = query.join(AccountType).filter(func.upper(AccountType.name) == account_type)
+    accounts = query.all()
+    return [acc.id for acc in accounts], None
 
 def apply_member_ownership_proportions(analysis_data, member_id):
     """
@@ -693,6 +732,7 @@ def get_family_annual_analysis(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
     if member_id is not None and member_id <= 0:
         member_id = None
     if account_id is not None and account_id <= 0:
@@ -754,7 +794,8 @@ def get_family_annual_analysis(family_id):
             'filter_info': {
                 'member_id': member_id,
                 'account_id': account_id,
-                'account_count': len(account_ids)
+                'account_count': len(account_ids),
+            'account_type': account_type
             },
             'analysis': analysis_data
         })
@@ -812,6 +853,7 @@ def get_family_quarterly_analysis(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
     years_param = request.args.get('years')
     
     # 确定账户范围
@@ -861,7 +903,8 @@ def get_family_quarterly_analysis(family_id):
             'filter_info': {
                 'member_id': member_id,
                 'account_id': account_id,
-                'account_count': len(account_ids)
+                'account_count': len(account_ids),
+            'account_type': account_type
             },
             'analysis': analysis_data
         })
@@ -880,30 +923,16 @@ def get_family_monthly_analysis(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
     months = request.args.get('months', type=int)  # 不设置默认值，让服务层决定
     
-    # 确定账户范围
-    account_ids = []
-    if account_id:
-        # 单个账户
-        account = Account.query.get_or_404(account_id)
-        if account.family_id != family_id:
-            return jsonify({'error': 'Account does not belong to this family'}), 400
-        account_ids = [account_id]
-    elif member_id:
-        # 成员的所有账户
-        member = Member.query.get_or_404(member_id)
-        if member.family_id != family_id:
-            return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
-        account_ids = [am.account_id for am in account_memberships]
-    else:
-        # 家庭的所有账户
-        account_ids = AccountService.get_account_ids_display_list(family.id)
-    
+    # ??????
+    account_ids, _ = _resolve_account_ids(family.id, member_id, account_id, account_type)
+
     try:
         params = {
-            'months': months
+            'months': months,
+            'account_type': account_type
         }
         analysis_data, cache, cache_key, _ = _get_cached_analysis(
             'monthly', family_id, member_id, account_id, account_ids, params
@@ -921,7 +950,8 @@ def get_family_monthly_analysis(family_id):
             'filter_info': {
                 'member_id': member_id,
                 'account_id': account_id,
-                'account_count': len(account_ids)
+                'account_count': len(account_ids),
+            'account_type': account_type
             },
             'analysis': analysis_data
         })
@@ -932,6 +962,151 @@ def get_family_monthly_analysis(family_id):
             'error': f'Failed to generate monthly analysis: {str(e)}'
         }), 500
 
+
+@bp.route('/families/<int:family_id>/reports/monthly-stock-pnl', methods=['GET'])
+def get_family_monthly_stock_pnl(family_id):
+    """Get per-stock monthly P&L (CAD) for the selected month."""
+    family = Family.query.get_or_404(family_id)
+
+    member_id = request.args.get('member_id', type=int)
+    account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+
+    if not year or not month:
+        return jsonify({'success': False, 'error': 'year and month are required'}), 400
+
+    if not (1 <= month <= 12):
+        return jsonify({'success': False, 'error': 'Invalid month'}), 400
+
+    if year < 2000 or year > 2100:
+        return jsonify({'success': False, 'error': 'Invalid year'}), 400
+
+    account_ids, ownership_map = _resolve_account_ids(family.id, member_id, account_id, account_type)
+
+    if not account_ids:
+        return jsonify({'success': False, 'error': 'No accounts available'}), 400
+
+    from calendar import monthrange
+    start_date = date(year, month, 1)
+    end_date = date(year, month, monthrange(year, month)[1])
+    today = date.today()
+    effective_end = end_date if end_date <= today else today
+    prev_date = start_date - timedelta(days=1)
+
+    portfolio_service = PortfolioService(auto_refresh_prices=False)
+
+    def get_proportion(acc_id: int) -> Decimal:
+        if not ownership_map:
+            return Decimal('1')
+        return ownership_map.get(acc_id, Decimal('0'))
+
+    summary = portfolio_service.get_portfolio_summary(
+        account_ids, TimePeriod.CUSTOM, end_date=effective_end
+    )
+
+    symbols = {}
+    for holding in (summary.get('current_holdings', []) or []):
+        symbol = holding.get('symbol')
+        currency = (holding.get('currency') or 'USD').upper()
+        if not symbol:
+            continue
+        key = f"{symbol}:{currency}"
+        if key in symbols:
+            continue
+        symbols[key] = {
+            'symbol': symbol,
+            'currency': currency,
+            'label': symbol
+        }
+
+    tx_symbols = db.session.query(Transaction.stock, Transaction.currency).filter(
+        Transaction.account_id.in_(account_ids),
+        Transaction.trade_date >= start_date,
+        Transaction.trade_date <= effective_end,
+        Transaction.stock.isnot(None),
+        Transaction.stock != ''
+    ).distinct().all()
+
+    for symbol, currency in tx_symbols:
+        if not symbol:
+            continue
+        currency = (currency or 'USD').upper()
+        key = f"{symbol}:{currency}"
+        if key in symbols:
+            continue
+        symbols[key] = {
+            'symbol': symbol,
+            'currency': currency,
+            'label': symbol
+        }
+
+    if not symbols:
+        return jsonify({'success': True, 'data': {'labels': [], 'values': [], 'symbols': []}})
+
+    usd_to_cad = currency_service.get_current_rate('USD', 'CAD')
+    if not usd_to_cad:
+        usd_to_cad = currency_service.get_cad_usd_rates().get('usd_to_cad', 1)
+    usd_to_cad_dec = Decimal(str(usd_to_cad or 1))
+
+    results = []
+    for key, info in symbols.items():
+        total = Decimal('0')
+        realized_total = Decimal('0')
+        buy_qty = Decimal('0')
+        sell_qty = Decimal('0')
+        for acc_id in account_ids:
+            proportion = get_proportion(acc_id)
+            if proportion <= 0:
+                continue
+            current = portfolio_service.get_position_snapshot(info['symbol'], acc_id, effective_end)
+            previous = portfolio_service.get_position_snapshot(info['symbol'], acc_id, prev_date)
+            current_total = current.realized_gain + current.unrealized_gain
+            prev_total = previous.realized_gain + previous.unrealized_gain
+            total += (current_total - prev_total) * proportion
+
+            realized_total += (current.realized_gain - previous.realized_gain) * proportion
+
+            month_txs = Transaction.query.filter(
+                Transaction.account_id == acc_id,
+                Transaction.stock == info['symbol'],
+                Transaction.trade_date >= start_date,
+                Transaction.trade_date <= effective_end
+            ).all()
+            for tx in month_txs:
+                if tx.type == 'BUY':
+                    buy_qty += Decimal(str(tx.quantity)) * proportion
+                elif tx.type == 'SELL':
+                    sell_qty += Decimal(str(tx.quantity)) * proportion
+
+        if info['currency'] == 'USD':
+            total = total * usd_to_cad_dec
+            realized_total = realized_total * usd_to_cad_dec
+
+        results.append({
+            'label': info['label'],
+            'symbol': info['symbol'],
+            'currency': info['currency'],
+            'value': float(total),
+            'realized_gain': float(realized_total),
+            'buy_qty': float(buy_qty),
+            'sell_qty': float(sell_qty)
+        })
+
+    # Sort by absolute value desc for readability
+    results.sort(key=lambda x: abs(x['value']), reverse=True)
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'labels': [r['label'] for r in results],
+            'values': [r['value'] for r in results],
+            'symbols': results
+        }
+    })
+
+
 @bp.route('/families/<int:family_id>/reports/daily-analysis', methods=['GET'])
 def get_family_daily_analysis(family_id):
     """获取家庭日度分析报告"""
@@ -940,6 +1115,7 @@ def get_family_daily_analysis(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
     days = request.args.get('days', type=int, default=30)
     
     # 确定账户范围
@@ -975,7 +1151,8 @@ def get_family_daily_analysis(family_id):
             'filter_info': {
                 'member_id': member_id,
                 'account_id': account_id,
-                'account_count': len(account_ids)
+                'account_count': len(account_ids),
+            'account_type': account_type
             },
             'analysis': analysis_data
         })
@@ -994,6 +1171,7 @@ def get_family_performance_comparison(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
     
     # 确定账户范围
     account_ids = []
@@ -1026,7 +1204,8 @@ def get_family_performance_comparison(family_id):
             'filter_info': {
                 'member_id': member_id,
                 'account_id': account_id,
-                'account_count': len(account_ids)
+                'account_count': len(account_ids),
+            'account_type': account_type
             },
             'analysis': analysis_data
         })
@@ -1045,6 +1224,7 @@ def get_family_holdings_distribution(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
+    account_type = request.args.get('account_type')
     
     # 确定账户范围
     account_ids = []
@@ -1079,7 +1259,8 @@ def get_family_holdings_distribution(family_id):
             'filter_info': {
                 'member_id': member_id,
                 'account_id': account_id,
-                'account_count': len(account_ids)
+                'account_count': len(account_ids),
+            'account_type': account_type
             },
             'distribution': distribution_data
         })
