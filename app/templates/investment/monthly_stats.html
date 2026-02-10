@@ -132,6 +132,53 @@
     padding: 0.75rem 1rem;
     background: rgba(255, 255, 255, 0.96);
 }
+.monthly-performance-tooltip {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    background: rgba(33, 37, 41, 0.95);
+    color: #fff;
+    padding: 0.6rem 0.75rem;
+    border-radius: 10px;
+    pointer-events: none;
+    font-size: 0.85rem;
+    z-index: 1080;
+    max-width: 420px;
+}
+.monthly-performance-tooltip .tooltip-title {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+}
+.monthly-performance-tooltip .tooltip-body {
+    display: grid;
+    gap: 0.2rem;
+}
+.monthly-performance-tooltip .tooltip-line {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+.monthly-performance-tooltip .tooltip-line.text-danger {
+    color: #ff7b7b;
+}
+.monthly-performance-tooltip .tooltip-line.text-success {
+    color: #7cf2a4;
+}
+.monthly-performance-tooltip .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 8px;
+}
+.monthly-performance-tooltip .tooltip-footer {
+    margin-top: 0.35rem;
+    font-weight: 600;
+}
+.monthly-performance-tooltip .tooltip-separator {
+    margin: 0.45rem 0;
+    border-top: 1px dashed rgba(255, 255, 255, 0.25);
+}
 @media (max-width: 768px) {
     .monthly-stock-pnl-tooltip .modal-dialog {
         right: 0.75rem;
@@ -150,6 +197,8 @@ let monthlyData = [];
 let monthlyPerformanceChart = null;
 let monthlyStockPnlModalInstance = null;
 let showCurrencyBreakdown = false;
+const monthlyStockPnlCache = new Map();
+const monthlyStockPnlFetches = new Map();
 
 function showLoadingOverlay(message) {
     const msg = message || '正在加载数据...';
@@ -192,6 +241,8 @@ function loadMonthlyAnalysis() {
     }
 
     showLoadingOverlay('正在加载数据...');
+    monthlyStockPnlCache.clear();
+    monthlyStockPnlFetches.clear();
 
     fetch(apiUrl)
         .then(response => {
@@ -348,31 +399,96 @@ function updateMonthlyPerformanceChart() {
             },
             plugins: {
                 tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const label = context.dataset.label || '';
-                            if (label === '{{ _("Dividends & Interest") }}') {
-                                const monthIndex = context.dataIndex;
-                                const dividends = chartData[monthIndex].monthly_dividends || 0;
-                                const interest = chartData[monthIndex].monthly_interest || 0;
-                                return label + ': $' + context.parsed.y.toLocaleString() +
-                                       ' ({{ _("Dividends") }}: $' + dividends.toLocaleString() +
-                                       ', {{ _("Interest") }}: $' + interest.toLocaleString() + ')';
-                            }
-                            return label + ': $' + context.parsed.y.toLocaleString();
-                        },
-                        footer: function(tooltipItems) {
-                            let total = 0;
-                            tooltipItems.forEach(function(tooltipItem) {
-                                if (tooltipItem.dataset.yAxisID === 'yReturns') {
-                                    total += tooltipItem.parsed.y;
-                                }
-                            });
-                            if (total === 0) {
-                                return undefined;
-                            }
-                            return '{{ _("Total") }}: $' + total.toLocaleString();
+                    enabled: false,
+                    external: function(context) {
+                        const tooltip = context.tooltip;
+                        let tooltipEl = document.getElementById('monthly-performance-tooltip');
+
+                        if (!tooltipEl) {
+                            tooltipEl = document.createElement('div');
+                            tooltipEl.id = 'monthly-performance-tooltip';
+                            tooltipEl.className = 'monthly-performance-tooltip';
+                            tooltipEl.innerHTML = '<div class="tooltip-inner"></div>';
+                            document.body.appendChild(tooltipEl);
                         }
+
+                        if (tooltip.opacity === 0) {
+                            tooltipEl.style.opacity = 0;
+                            return;
+                        }
+
+                        const dataPoints = tooltip.dataPoints || [];
+                        const index = dataPoints[0] ? dataPoints[0].dataIndex : null;
+                        const item = (index !== null && chartData[index]) ? chartData[index] : null;
+
+                        if (!item) {
+                            tooltipEl.style.opacity = 0;
+                            return;
+                        }
+
+                        const key = `${item.year}-${String(item.month).padStart(2, '0')}`;
+                        const cached = monthlyStockPnlCache.get(key);
+                        if (!cached) {
+                            fetchMonthlyStockPnlSummary(item.year, item.month, key);
+                        }
+
+                        let html = '';
+                        if (tooltip.title && tooltip.title.length) {
+                            html += `<div class="tooltip-title">${tooltip.title[0]}</div>`;
+                        }
+
+                        if (dataPoints.length) {
+                            html += '<div class="tooltip-body">';
+                            dataPoints.forEach(dp => {
+                                const label = dp.dataset.label || '';
+                                let valueText = '$' + (dp.parsed.y || 0).toLocaleString();
+                                if (label === '{{ _("Dividends & Interest") }}') {
+                                    const dividends = item.monthly_dividends || 0;
+                                    const interest = item.monthly_interest || 0;
+                                    valueText = '$' + (dp.parsed.y || 0).toLocaleString() +
+                                        ` ({{ _("Dividends") }}: $${dividends.toLocaleString()}, {{ _("Interest") }}: $${interest.toLocaleString()})`;
+                                }
+                                const color = dp.dataset.borderColor || dp.dataset.backgroundColor || '#6c757d';
+                                html += `<div class="tooltip-line"><span class="dot" style="background:${color}"></span>${label}: ${valueText}</div>`;
+                            });
+                            html += '</div>';
+                        }
+
+                        let total = 0;
+                        dataPoints.forEach(dp => {
+                            if (dp.dataset.yAxisID === 'yReturns') {
+                                total += dp.parsed.y || 0;
+                            }
+                        });
+                        if (total !== 0) {
+                            html += `<div class="tooltip-footer">{{ _("Total") }}: $${total.toLocaleString()}</div>`;
+                        }
+
+                        const summaryLines = cached || ['{{ _("Loading per-stock P&L...") }}'];
+                        html += '<div class="tooltip-separator"></div>';
+                        html += '<div class="tooltip-body">';
+                        summaryLines.forEach(line => {
+                            const isLoading = line.indexOf('{{ _("Loading per-stock P&L...") }}') === 0;
+                            if (isLoading) {
+                                html += `<div class="tooltip-line text-muted">${line}</div>`;
+                                return;
+                            }
+                            const match = line.match(/:\s*([+-]?\$?[\d,.]+)\s*\|/);
+                            let cls = '';
+                            if (match && match[1]) {
+                                cls = (match[1].startsWith('-')) ? 'text-danger' : 'text-success';
+                            }
+                            html += `<div class="tooltip-line ${cls}">${line}</div>`;
+                        });
+                        html += '</div>';
+
+                        const inner = tooltipEl.querySelector('.tooltip-inner');
+                        inner.innerHTML = html;
+
+                        const position = context.chart.canvas.getBoundingClientRect();
+                        tooltipEl.style.opacity = 1;
+                        tooltipEl.style.left = position.left + window.pageXOffset + tooltip.caretX + 'px';
+                        tooltipEl.style.top = position.top + window.pageYOffset + tooltip.caretY + 'px';
                     }
                 },
                 legend: {
@@ -532,6 +648,67 @@ function updateMonthlyTable(currentTotals) {
     updateCurrencyBreakdownVisibility();
 }
 
+function buildMonthlyStockPnlUrl(year, month) {
+    const familyId = {{ current_family.id if current_family else 1 }};
+    const memberId = {{ current_member_id if current_member_id else 'null' }};
+    const accountId = {{ current_account_id if current_account_id else 'null' }};
+    const accountType = {{ current_account_type|tojson if current_account_type else 'null' }};
+
+    let apiUrl = `/api/v1/families/${familyId}/reports/monthly-stock-pnl?year=${year}&month=${month}`;
+    const params = new URLSearchParams();
+    if (memberId) {
+        params.append('member_id', memberId);
+    }
+    if (accountId) {
+        params.append('account_id', accountId);
+    }
+    if (accountType) {
+        params.append('account_type', accountType);
+    }
+    if (params.toString()) {
+        apiUrl += '&' + params.toString();
+    }
+    return apiUrl;
+}
+
+function formatSignedCurrency(value) {
+    const num = Number(value || 0);
+    const abs = Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (num < 0 ? '-' : '') + '$' + abs;
+}
+
+function fetchMonthlyStockPnlSummary(year, month, key) {
+    if (monthlyStockPnlCache.has(key) || monthlyStockPnlFetches.has(key)) return;
+    const request = fetch(buildMonthlyStockPnlUrl(year, month))
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) return;
+            const symbols = (data.data && data.data.symbols) ? data.data.symbols : [];
+            const lines = [];
+            const maxRows = 5;
+            symbols.slice(0, maxRows).forEach(item => {
+                const pnl = formatSignedCurrency(item.value);
+                const realized = formatSignedCurrency(item.realized_gain);
+                const buyQty = (item.buy_qty || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                const sellQty = (item.sell_qty || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                lines.push(`${item.label}: ${pnl} | R: ${realized} | B: ${buyQty} S: ${sellQty}`);
+            });
+            if (symbols.length > maxRows) {
+                lines.push('{{ _("More... click bar for full list") }}');
+            } else if (symbols.length) {
+                lines.push('{{ _("Click bar for full list") }}');
+            }
+            monthlyStockPnlCache.set(key, lines);
+            if (monthlyPerformanceChart) {
+                monthlyPerformanceChart.update('none');
+            }
+        })
+        .finally(() => {
+            monthlyStockPnlFetches.delete(key);
+        });
+    monthlyStockPnlFetches.set(key, request);
+}
+
 
 function getMonthlyStockPnlModal() {
     if (monthlyStockPnlModalInstance) {
@@ -558,27 +735,7 @@ function openMonthlyStockPnlModal(year, month) {
 }
 
 function loadMonthlyStockPnl(year, month) {
-    const familyId = {{ current_family.id if current_family else 1 }};
-    const memberId = {{ current_member_id if current_member_id else 'null' }};
-    const accountId = {{ current_account_id if current_account_id else 'null' }};
-    const accountType = {{ current_account_type|tojson if current_account_type else 'null' }};
-
-    let apiUrl = `/api/v1/families/${familyId}/reports/monthly-stock-pnl?year=${year}&month=${month}`;
-    const params = new URLSearchParams();
-    if (memberId) {
-        params.append('member_id', memberId);
-    }
-    if (accountId) {
-        params.append('account_id', accountId);
-    }
-    if (accountType) {
-        params.append('account_type', accountType);
-    }
-    if (params.toString()) {
-        apiUrl += '&' + params.toString();
-    }
-
-    fetch(apiUrl)
+    fetch(buildMonthlyStockPnlUrl(year, month))
         .then(response => response.json())
         .then(data => {
             if (data.success) {
