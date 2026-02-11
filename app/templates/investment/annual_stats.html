@@ -321,6 +321,7 @@ let filterInfo = {};
 const familyId = {{ (current_family.id if current_family else 1) | tojson }};
 const memberId = {{ (current_member_id if current_member_id else None) | tojson }};
 const accountId = {{ (current_account_id if current_account_id else None) | tojson }};
+const accountType = {{ (current_account_type if current_account_type else None) | tojson }};
 
 function showLoadingOverlay(message) {
     const msg = message || '正在加载数据...';
@@ -349,6 +350,9 @@ function loadAnnualAnalysis() {
     }
     if (accountId) {
         params.append('account_id', accountId);
+    }
+    if (accountType) {
+        params.append('account_type', accountType);
     }
     if (separateByAccount) {
         params.append('separate_accounts', '1');

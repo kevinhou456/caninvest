@@ -111,6 +111,7 @@ function loadQuarterlyAnalysis() {
     const familyId = {{ current_family.id if current_family else 1 }};
     const memberId = {{ current_member_id if current_member_id else 'null' }};
     const accountId = {{ current_account_id if current_account_id else 'null' }};
+    const accountType = {{ current_account_type|tojson if current_account_type else 'null' }};
     
     let apiUrl = `/api/v1/families/${familyId}/reports/quarterly-analysis`;
     const params = new URLSearchParams();
@@ -120,6 +121,9 @@ function loadQuarterlyAnalysis() {
     }
     if (accountId) {
         params.append('account_id', accountId);
+    }
+    if (accountType) {
+        params.append('account_type', accountType);
     }
     
     if (params.toString()) {

@@ -741,25 +741,8 @@ def get_family_annual_analysis(family_id):
     separate_accounts = request.args.get('separate_accounts', default=False, type=lambda v: str(v).lower() in ('1', 'true', 'yes', 'on'))
     
     # 确定账户范围
-    account_ids = []
-    if account_id:
-        # 单个账户
-        account = Account.query.get_or_404(account_id)
-        if account.family_id != family_id:
-            return jsonify({'error': 'Account does not belong to this family'}), 400
-        account_ids = [account_id]
-    elif member_id:
-        # 成员的所有账户
-        member = Member.query.get_or_404(member_id)
-        if member.family_id != family_id:
-            return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
-        account_ids = [am.account_id for am in account_memberships]
-    else:
-        # 家庭的所有账户
-        account_ids = AccountService.get_account_ids_display_list(family.id)
-    
-    # 解析年份参数
+    account_ids, _ = _resolve_account_ids(family.id, member_id, account_id, account_type)
+
     years = None
     if years_param:
         try:
@@ -769,6 +752,7 @@ def get_family_annual_analysis(family_id):
     
     try:
         params = {
+            'account_type': account_type,
             'years': years,
             'separate_accounts': separate_accounts
         }
@@ -857,25 +841,8 @@ def get_family_quarterly_analysis(family_id):
     years_param = request.args.get('years')
     
     # 确定账户范围
-    account_ids = []
-    if account_id:
-        # 单个账户
-        account = Account.query.get_or_404(account_id)
-        if account.family_id != family_id:
-            return jsonify({'error': 'Account does not belong to this family'}), 400
-        account_ids = [account_id]
-    elif member_id:
-        # 成员的所有账户
-        member = Member.query.get_or_404(member_id)
-        if member.family_id != family_id:
-            return jsonify({'error': 'Member does not belong to this family'}), 400
-        account_memberships = AccountMember.query.filter_by(member_id=member.id).all()
-        account_ids = [am.account_id for am in account_memberships]
-    else:
-        # 家庭的所有账户
-        account_ids = AccountService.get_account_ids_display_list(family.id)
-    
-    # 解析年份参数
+    account_ids, _ = _resolve_account_ids(family.id, member_id, account_id, account_type)
+
     years = None
     if years_param:
         try:
@@ -885,7 +852,8 @@ def get_family_quarterly_analysis(family_id):
     
     try:
         params = {
-            'years': years
+            'years': years,
+            'account_type': account_type
         }
         analysis_data, cache, cache_key, _ = _get_cached_analysis(
             'quarterly', family_id, member_id, account_id, account_ids, params
