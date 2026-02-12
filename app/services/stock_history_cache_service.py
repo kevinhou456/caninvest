@@ -19,14 +19,38 @@ logger = logging.getLogger(__name__)
 
 class StockHistoryCacheService:
     """
-    简化的股票历史价格缓存服务
+    Simple stock history cache service.
 
-    设计原则：
-    1. 数据库就是唯一的真实状态源
-    2. 每次查询都基于数据库实际状态决定是否需要API调用
-    3. 不维护复杂的内存状态和全局注册表
-    4. 逻辑简单直接：查库 -> 找缺口 -> 调API -> 存库
+    Design:
+    1. DB is the single source of truth.
+    2. Always decide to fetch based on DB state.
+    3. Avoid global in-memory state.
+    4. Simple flow: read DB -> find gaps -> fetch -> store.
     """
+
+    def is_known_no_data(self, symbol: str, start_date: date, end_date: date, currency: str = 'USD') -> bool:
+        """Return True if the date range is fully known to have no data."""
+        if not symbol or start_date is None or end_date is None:
+            return False
+        if start_date > end_date:
+            return False
+
+        symbol = symbol.upper()
+        currency = currency.upper()
+        market = self._get_market(symbol, currency)
+        effective_end = self._get_effective_end_for_expectation(symbol, currency, end_date)
+        if start_date > effective_end:
+            return True
+
+        known_no_data_dates = self._get_known_no_data_dates(symbol, market, start_date, effective_end)
+
+        current = start_date
+        while current <= effective_end:
+            if current.weekday() < 5 and not MarketHoliday.is_holiday(current, market) and current not in known_no_data_dates:
+                return False
+            current += timedelta(days=1)
+
+        return True
 
     def __init__(self):
         self.stock_service = StockPriceService()
