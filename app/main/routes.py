@@ -60,6 +60,7 @@ def _normalize_ownership_map(ownership_map):
 
 def _build_overview_snapshot_key(account_ids, ownership_map, selected_account_id):
     payload = {
+        'schema_version': 2,
         'account_ids': sorted(set(account_ids or [])),
         'ownership': _normalize_ownership_map(ownership_map),
         'selected_account_id': selected_account_id
@@ -397,6 +398,8 @@ def _build_portfolio_view_data(
                 existing['total_cost'] = safe_float(existing.get('total_cost')) + safe_float(holding.get('total_cost'))
                 existing['current_value'] = safe_float(existing.get('current_value')) + safe_float(holding.get('current_value'))
                 existing['unrealized_gain'] = safe_float(existing.get('unrealized_gain')) + safe_float(holding.get('unrealized_gain'))
+                existing['daily_change_value'] = safe_float(existing.get('daily_change_value')) + safe_float(holding.get('daily_change_value'))
+                existing['previous_value'] = safe_float(existing.get('previous_value')) + safe_float(holding.get('previous_value'))
                 existing['realized_gain'] = safe_float(existing.get('realized_gain')) + safe_float(holding.get('realized_gain'))
                 existing['total_bought_shares'] = safe_float(existing.get('total_bought_shares')) + safe_float(holding.get('total_bought_shares'))
                 existing['total_sold_shares'] = safe_float(existing.get('total_sold_shares')) + safe_float(holding.get('total_sold_shares'))
@@ -1016,6 +1019,7 @@ def update_overview_prices():
         
         portfolio_service = PortfolioService(auto_refresh_prices=False)
         currency_service = CurrencyService()
+        overview_target_date = _get_overview_target_date()
         
         # 获取汇率信息
         exchange_rates = currency_service.get_cad_usd_rates()
