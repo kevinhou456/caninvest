@@ -60,7 +60,7 @@ def _normalize_ownership_map(ownership_map):
 
 def _build_overview_snapshot_key(account_ids, ownership_map, selected_account_id):
     payload = {
-        'schema_version': 2,
+        'schema_version': 3,
         'account_ids': sorted(set(account_ids or [])),
         'ownership': _normalize_ownership_map(ownership_map),
         'selected_account_id': selected_account_id
@@ -95,6 +95,97 @@ def _extract_snapshot_symbols(snapshot_payload):
         seen.add(key)
         symbols.append({'symbol': symbol, 'currency': currency})
     return symbols
+
+
+def _is_numeric(value):
+    return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
+
+
+def _safe_float(value, default=0.0):
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_weight_for_account(account_id, ownership_map):
+    if not ownership_map:
+        return Decimal('1')
+    try:
+        return Decimal(str(ownership_map.get(account_id, 0)))
+    except Exception:
+        return Decimal('0')
+
+
+def _merge_portfolio_summaries(per_account_views):
+    merged = {
+        'current_holdings': [],
+        'cleared_holdings': [],
+        'summary': {}
+    }
+
+    for _, view_data in per_account_views:
+        portfolio_summary = view_data.get('portfolio_summary') or {}
+        merged['current_holdings'].extend((portfolio_summary.get('current_holdings') or []))
+        merged['cleared_holdings'].extend((portfolio_summary.get('cleared_holdings') or []))
+
+        summary = portfolio_summary.get('summary') or {}
+        for key, value in summary.items():
+            if _is_numeric(value):
+                merged['summary'][key] = _safe_float(merged['summary'].get(key, 0)) + _safe_float(value)
+            elif key not in merged['summary']:
+                merged['summary'][key] = value
+
+    return merged
+
+
+def _merge_daily_change_metrics(per_account_views, ownership_map):
+    merged = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
+
+    for account_id, view_data in per_account_views:
+        weight = float(_get_weight_for_account(account_id, ownership_map))
+        daily_change = view_data.get('daily_change') or {}
+        merged['cad'] += _safe_float(daily_change.get('cad')) * weight
+        merged['cad_only'] += _safe_float(daily_change.get('cad_only')) * weight
+        merged['usd_only'] += _safe_float(daily_change.get('usd_only')) * weight
+
+    return {
+        'cad': round(merged['cad'], 2),
+        'cad_only': round(merged['cad_only'], 2),
+        'usd_only': round(merged['usd_only'], 2)
+    }
+
+
+def _accumulate_nested_numeric(target, source, weight):
+    for key, value in (source or {}).items():
+        if isinstance(value, dict):
+            nested_target = target.setdefault(key, {})
+            _accumulate_nested_numeric(nested_target, value, weight)
+        elif _is_numeric(value):
+            target[key] = _safe_float(target.get(key, 0.0)) + _safe_float(value) * weight
+
+
+def _merge_comprehensive_metrics(per_account_views, ownership_map, exchange_rates):
+    merged = {}
+
+    for account_id, view_data in per_account_views:
+        weight = float(_get_weight_for_account(account_id, ownership_map))
+        metrics = view_data.get('metrics') or {}
+        _accumulate_nested_numeric(merged, metrics, weight)
+
+    usd_to_cad = _safe_float(
+        (exchange_rates or {}).get('usd_to_cad'),
+        _safe_float(merged.get('exchange_rate', 1.0), 1.0)
+    )
+    merged['exchange_rate'] = usd_to_cad
+
+    total_return_cad = _safe_float((merged.get('total_return') or {}).get('cad'))
+    total_deposits_cad = _safe_float((merged.get('total_deposits') or {}).get('cad'))
+    merged['total_return_rate'] = (total_return_cad / total_deposits_cad * 100) if total_deposits_cad else 0.0
+
+    return merged
 
 
 def _get_latest_price_update(symbols):
@@ -184,23 +275,64 @@ def _get_or_build_overview_snapshot(*, account_ids, accounts, ownership_map, tar
         except Exception:
             snapshot = None
 
-    portfolio_service = PortfolioService(auto_refresh_prices=False)
-    portfolio_summary = portfolio_service.get_portfolio_summary(
-        account_ids,
-        TimePeriod.ALL_TIME,
-        end_date=target_date
-    )
+    # 多账户请求优先复用单账户快照，再合并计算组合快照
+    can_compose_from_account_snapshots = (account_id is None and len(account_ids) > 1)
+    per_account_views = []
 
-    view_data = _build_portfolio_view_data(
-        account_ids=account_ids,
-        accounts=accounts,
-        portfolio_summary=portfolio_summary,
-        asset_service=AssetValuationService(auto_refresh_prices=False),
-        ownership_map=ownership_map,
-        target_date=target_date,
-        exchange_rates=exchange_rates,
-        account_id=account_id
-    )
+    if can_compose_from_account_snapshots:
+        account_lookup = {acc.id: acc for acc in accounts} if accounts else {}
+        for single_account_id in account_ids:
+            account_obj = account_lookup.get(single_account_id)
+            if not account_obj:
+                account_obj = Account.query.filter_by(id=single_account_id).first()
+            if not account_obj:
+                continue
+
+            single_view = _get_or_build_overview_snapshot(
+                account_ids=[single_account_id],
+                accounts=[account_obj],
+                ownership_map=None,
+                target_date=target_date,
+                exchange_rates=exchange_rates,
+                account_id=single_account_id
+            )
+            per_account_views.append((single_account_id, single_view))
+
+    if can_compose_from_account_snapshots and len(per_account_views) == len(account_ids):
+        merged_portfolio_summary = _merge_portfolio_summaries(per_account_views)
+        merged_daily_change = _merge_daily_change_metrics(per_account_views, ownership_map)
+        merged_metrics = _merge_comprehensive_metrics(per_account_views, ownership_map, exchange_rates)
+
+        view_data = _build_portfolio_view_data(
+            account_ids=account_ids,
+            accounts=accounts,
+            portfolio_summary=merged_portfolio_summary,
+            asset_service=AssetValuationService(auto_refresh_prices=False),
+            ownership_map=ownership_map,
+            target_date=target_date,
+            exchange_rates=exchange_rates,
+            account_id=account_id,
+            precomputed_metrics=merged_metrics,
+            precomputed_daily_change=merged_daily_change
+        )
+    else:
+        portfolio_service = PortfolioService(auto_refresh_prices=False)
+        portfolio_summary = portfolio_service.get_portfolio_summary(
+            account_ids,
+            TimePeriod.ALL_TIME,
+            end_date=target_date
+        )
+
+        view_data = _build_portfolio_view_data(
+            account_ids=account_ids,
+            accounts=accounts,
+            portfolio_summary=portfolio_summary,
+            asset_service=AssetValuationService(auto_refresh_prices=False),
+            ownership_map=ownership_map,
+            target_date=target_date,
+            exchange_rates=exchange_rates,
+            account_id=account_id
+        )
 
     data_json = _dump_snapshot_payload(view_data)
     symbols_json = json.dumps(_extract_snapshot_symbols(view_data), ensure_ascii=False)
@@ -281,7 +413,9 @@ def _build_portfolio_view_data(
     ownership_map=None,
     target_date=None,
     exchange_rates=None,
-    account_id=None
+    account_id=None,
+    precomputed_metrics=None,
+    precomputed_daily_change=None
 ):
     target_date = target_date or date.today()
     exchange_rates = exchange_rates or currency_service.get_cad_usd_rates()
@@ -611,69 +745,76 @@ def _build_portfolio_view_data(
                 totals[currency] = totals.get(currency, Decimal('0')) + realized + unrealized
         return totals
 
-    try:
-        from app.services.stock_history_cache_service import StockHistoryCacheService
+    if precomputed_daily_change is not None:
+        daily_change_metrics = precomputed_daily_change
+    else:
+        try:
+            from app.services.stock_history_cache_service import StockHistoryCacheService
 
-        history_service = StockHistoryCacheService()
-        portfolio_service = PortfolioService(auto_refresh_prices=False)
+            history_service = StockHistoryCacheService()
+            portfolio_service = PortfolioService(auto_refresh_prices=False)
 
-        def is_trading_day(check_date: date) -> bool:
-            if check_date.weekday() >= 5:
-                return False
-            us_closed = history_service._is_market_holiday_by_market('US', check_date)
-            ca_closed = history_service._is_market_holiday_by_market('CA', check_date)
-            return not (us_closed and ca_closed)
+            def is_trading_day(check_date: date) -> bool:
+                if check_date.weekday() >= 5:
+                    return False
+                us_closed = history_service._is_market_holiday_by_market('US', check_date)
+                ca_closed = history_service._is_market_holiday_by_market('CA', check_date)
+                return not (us_closed and ca_closed)
 
-        def get_previous_trading_day(check_date: date) -> date:
-            current = check_date - timedelta(days=1)
-            for _ in range(366):
-                if is_trading_day(current):
-                    return current
-                current -= timedelta(days=1)
-            return check_date - timedelta(days=1)
+            def get_previous_trading_day(check_date: date) -> date:
+                current = check_date - timedelta(days=1)
+                for _ in range(366):
+                    if is_trading_day(current):
+                        return current
+                    current -= timedelta(days=1)
+                return check_date - timedelta(days=1)
 
-        prev_date = get_previous_trading_day(target_date)
+            prev_date = get_previous_trading_day(target_date)
 
-        daily_change_cad_only = Decimal('0')
-        daily_change_usd_only = Decimal('0')
+            daily_change_cad_only = Decimal('0')
+            daily_change_usd_only = Decimal('0')
 
-        for acc_id in account_ids:
-            proportion = get_proportion(acc_id)
-            if proportion <= 0:
-                continue
-            current_summary = portfolio_service.get_portfolio_summary(
-                [acc_id], TimePeriod.CUSTOM, end_date=target_date
-            )
-            prev_summary = portfolio_service.get_portfolio_summary(
-                [acc_id], TimePeriod.CUSTOM, end_date=prev_date
-            )
-            current_totals = sum_returns_by_currency(current_summary)
-            prev_totals = sum_returns_by_currency(prev_summary)
-            daily_change_cad_only += (current_totals.get('CAD', Decimal('0')) - prev_totals.get('CAD', Decimal('0'))) * proportion
-            daily_change_usd_only += (current_totals.get('USD', Decimal('0')) - prev_totals.get('USD', Decimal('0'))) * proportion
+            for acc_id in account_ids:
+                proportion = get_proportion(acc_id)
+                if proportion <= 0:
+                    continue
+                current_summary = portfolio_service.get_portfolio_summary(
+                    [acc_id], TimePeriod.CUSTOM, end_date=target_date
+                )
+                prev_summary = portfolio_service.get_portfolio_summary(
+                    [acc_id], TimePeriod.CUSTOM, end_date=prev_date
+                )
+                current_totals = sum_returns_by_currency(current_summary)
+                prev_totals = sum_returns_by_currency(prev_summary)
+                daily_change_cad_only += (current_totals.get('CAD', Decimal('0')) - prev_totals.get('CAD', Decimal('0'))) * proportion
+                daily_change_usd_only += (current_totals.get('USD', Decimal('0')) - prev_totals.get('USD', Decimal('0'))) * proportion
 
-        total_daily_change_cad = daily_change_cad_only + (daily_change_usd_only * usd_to_cad_rate)
+            total_daily_change_cad = daily_change_cad_only + (daily_change_usd_only * usd_to_cad_rate)
 
-        daily_change_metrics = {
-            'cad': float(total_daily_change_cad.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
-            'cad_only': float(daily_change_cad_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
-            'usd_only': float(daily_change_usd_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
-        }
-    except Exception:
-        daily_change_metrics = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
+            daily_change_metrics = {
+                'cad': float(total_daily_change_cad.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+                'cad_only': float(daily_change_cad_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+                'usd_only': float(daily_change_usd_only.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+            }
+        except Exception:
+            daily_change_metrics = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
 
-    comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
-        account_ids,
-        target_date=target_date,
-        ownership_map=ownership_map
-    )
+    if precomputed_metrics is not None:
+        comprehensive_metrics = precomputed_metrics
+    else:
+        comprehensive_metrics = asset_service.get_comprehensive_portfolio_metrics(
+            account_ids,
+            target_date=target_date,
+            ownership_map=ownership_map
+        )
 
-    summary_data = portfolio_summary.get('summary', {})
-    total_cost = summary_data.get('total_cost', 0)
-    total_realized = summary_data.get('total_realized_gain', 0)
-    total_unrealized = summary_data.get('total_unrealized_gain', 0)
-    total_return = total_realized + total_unrealized
-    comprehensive_metrics['total_return_rate'] = (total_return / total_cost * 100) if total_cost else 0
+    if precomputed_metrics is None:
+        summary_data = portfolio_summary.get('summary', {})
+        total_cost = summary_data.get('total_cost', 0)
+        total_realized = summary_data.get('total_realized_gain', 0)
+        total_unrealized = summary_data.get('total_unrealized_gain', 0)
+        total_return = total_realized + total_unrealized
+        comprehensive_metrics['total_return_rate'] = (total_return / total_cost * 100) if total_cost else 0
 
     return {
         'holdings': holdings,
