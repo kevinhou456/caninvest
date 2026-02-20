@@ -1276,12 +1276,22 @@ class AssetValuationService:
         return snapshot.stock_market_value
     
     def get_cash_balance(self, account_id: int, target_date: Optional[date] = None) -> Dict[str, Decimal]:
-        """获取现金余额"""
-        snapshot = self.get_asset_snapshot(account_id, target_date)
+        """获取现金余额（仅现金，不触发股票估值）"""
+        if target_date is None:
+            target_date = date.today()
+
+        cad_balance, usd_balance = self._calculate_cash_balance(account_id, target_date)
+        usd_to_cad = self.currency_service.get_current_rate('USD', 'CAD')
+        usd_to_cad_decimal = (
+            Decimal(str(usd_to_cad))
+            if not isinstance(usd_to_cad, Decimal)
+            else usd_to_cad
+        )
+
         return {
-            'cad': snapshot.cash_balance_cad,
-            'usd': snapshot.cash_balance_usd,
-            'total_cad': snapshot.cash_balance_total_cad
+            'cad': cad_balance,
+            'usd': usd_balance,
+            'total_cad': cad_balance + (usd_balance * usd_to_cad_decimal)
         }
 
     
@@ -1461,7 +1471,7 @@ class AssetValuationService:
             Transaction.account_id == account_id,
             Transaction.trade_date <= target_date,
             Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
-        ).order_by(Transaction.trade_date.asc()).all()
+        ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
 
         # 从零开始累计计算
         cad_balance = Decimal('0')
@@ -1493,7 +1503,7 @@ class AssetValuationService:
             Transaction.account_id == account_id,
             Transaction.trade_date > target_date,
             Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
-        ).order_by(Transaction.trade_date.desc()).all()  # 按时间倒序，从最近开始倒推
+        ).order_by(Transaction.trade_date.desc(), Transaction.id.desc()).all()  # 按时间倒序，从最近开始倒推
 
         cad_balance = current_cad
         usd_balance = current_usd

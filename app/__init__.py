@@ -5,6 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_babel import Babel, get_locale
 from flask_cors import CORS
+from sqlalchemy import inspect, text
 from config import config
 
 # 初始化扩展
@@ -12,6 +13,35 @@ db = SQLAlchemy()
 migrate = Migrate()
 babel = Babel()
 cors = CORS()
+
+
+def _ensure_performance_indexes(app: Flask) -> None:
+    """Ensure critical indexes exist for existing databases."""
+    try:
+        with app.app_context():
+            inspector = inspect(db.engine)
+            if 'transactions' not in inspector.get_table_names():
+                return
+
+            existing_indexes = {
+                idx.get('name')
+                for idx in inspector.get_indexes('transactions')
+                if idx.get('name')
+            }
+            required_indexes = {
+                'idx_transactions_account_trade_date_id':
+                    'CREATE INDEX IF NOT EXISTS idx_transactions_account_trade_date_id '
+                    'ON transactions (account_id, trade_date, id)'
+            }
+
+            with db.engine.begin() as connection:
+                for name, ddl in required_indexes.items():
+                    if name in existing_indexes:
+                        continue
+                    connection.execute(text(ddl))
+    except Exception as exc:
+        app.logger.warning(f'Failed to ensure performance indexes: {exc}')
+
 
 def create_app(config_name=None):
     """应用工厂函数"""
@@ -26,6 +56,7 @@ def create_app(config_name=None):
     db.init_app(app)
     migrate.init_app(app, db)
     cors.init_app(app)
+    _ensure_performance_indexes(app)
     
     # 初始化任务调度器 - 检查配置选项
     if not app.config.get('TESTING') and app.config.get('SCHEDULER_AUTO_START', False):

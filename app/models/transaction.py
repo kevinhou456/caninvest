@@ -9,6 +9,9 @@ class Transaction(db.Model):
     """交易记录模型"""
     
     __tablename__ = 'transactions'
+    __table_args__ = (
+        db.Index('idx_transactions_account_trade_date_id', 'account_id', 'trade_date', 'id'),
+    )
     
     id = db.Column(db.Integer, primary_key=True)
     trade_date = db.Column(db.Date, nullable=False, comment='交易日期')
