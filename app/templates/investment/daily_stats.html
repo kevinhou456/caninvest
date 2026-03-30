@@ -7,7 +7,7 @@
 <style>
 /* Custom FullCalendar styling for P&L display */
 .fc-daygrid-day-frame {
-    min-height: 80px;
+    min-height: 90px;
 }
 
 .fc-daygrid-day-events {
@@ -304,10 +304,38 @@
     </div>
 </div>
 
-<!-- FullCalendar View + Daily P&L Chart -->
+<!-- Daily P&L Chart (top) -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <!-- Month navigation -->
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-light py-0 px-2" onclick="navMonth('prev')" title="上月">&#8249;</button>
+                    <button class="btn btn-sm btn-outline-light py-0 px-2" onclick="navMonth('today')" title="本月">今</button>
+                    <button class="btn btn-sm btn-outline-light py-0 px-2" onclick="navMonth('next')" title="下月">&#8250;</button>
+                    <span id="chart-month-title" class="fw-bold text-white ms-1" style="font-size:1rem;min-width:7rem;"></span>
+                </div>
+                <!-- Legend -->
+                <div class="d-flex gap-3 align-items-center flex-wrap" style="font-size:12px; color:#fff;">
+                    <span><span style="display:inline-block;width:12px;height:12px;background:rgba(28,200,138,0.8);border-radius:2px;margin-right:4px;"></span>浮动盈利</span>
+                    <span><span style="display:inline-block;width:12px;height:12px;background:rgba(231,74,59,0.8);border-radius:2px;margin-right:4px;"></span>浮动亏损</span>
+                    <span><span style="display:inline-block;width:12px;height:12px;background:rgba(246,194,62,0.85);border-radius:2px;margin-right:4px;"></span>实现盈亏</span>
+                    <span><span style="display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:4px;background:#4e73df;"></span>月累计</span>
+                    <span>▼ 买入日 &nbsp; ▲ 卖出日</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="dailyPnlChart" style="height:260px"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FullCalendar View (bottom) -->
 <div class="row mb-4">
-    <div class="col-lg-6 mb-4 mb-lg-0">
-        <div class="card shadow h-100">
+    <div class="col-12">
+        <div class="card shadow">
             <div class="card-body">
                 <div id="calendar"></div>
 
@@ -322,16 +350,6 @@
                         <span>{{ _('Negative P&L') }}</span>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card shadow h-100">
-            <div class="card-header">
-                <h6 class="m-0 font-weight-bold text-primary">{{ _('Daily P&L') }}</h6>
-            </div>
-            <div class="card-body">
-                <canvas id="dailyPnlChart" height="320"></canvas>
             </div>
         </div>
     </div>
@@ -378,17 +396,21 @@ const memberId = new URLSearchParams(window.location.search).get('member_id');
 const accountId = new URLSearchParams(window.location.search).get('account_id');
 {% endraw %}
 
+// Month navigation from chart header buttons
+function navMonth(direction) {
+    if (!calendar) return;
+    if (direction === 'prev') calendar.prev();
+    else if (direction === 'next') calendar.next();
+    else calendar.today();
+}
+
 // Initialize FullCalendar
 function initializeCalendar() {
     const calendarEl = document.getElementById('calendar');
     
     calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridMonth',
-        headerToolbar: {
-            left: 'prev,next today',
-            center: 'title',
-            right: 'dayGridMonth'
-        },
+        headerToolbar: false,
         height: 'auto',
         aspectRatio: 1.35,
         firstDay: 0, // Sunday
@@ -414,7 +436,13 @@ function initializeCalendar() {
             const startDate = info.view.currentStart;
             const year = startDate.getFullYear();
             const month = startDate.getMonth() + 1;
-            
+
+            // Update chart card header title
+            const titleEl = document.getElementById('chart-month-title');
+            if (titleEl) {
+                titleEl.textContent = `${year}年${month}月`;
+            }
+
             // Show loading dialog when month changes
             showLoadingDialog();
             loadCalendarData(year, month);
@@ -616,6 +644,40 @@ function updateDayCell(dayEl, dateStr, dayData) {
 
     pnlContainer.appendChild(pnlDiv);
 
+    // Buy/sell transaction lines
+    const txns = dayData.transactions || [];
+    const buys = txns.filter(t => t.type === 'BUY');
+    const sells = txns.filter(t => t.type === 'SELL');
+
+    if (buys.length) {
+        const buyDiv = document.createElement('div');
+        buyDiv.style.cssText = 'font-size:0.68rem;color:#333;margin-top:2px;line-height:1.3;';
+        buys.forEach(t => {
+            const line = document.createElement('div');
+            line.textContent = `▼ ${t.stock} ${t.quantity}@${t.price.toFixed(2)}`;
+            buyDiv.appendChild(line);
+        });
+        pnlContainer.appendChild(buyDiv);
+    }
+
+    if (sells.length) {
+        const rg = dayData.daily_realized_gain || 0;
+        const rgSign = rg >= 0 ? '+' : '-';
+        const rgFmt = Math.abs(rg).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        const sellDiv = document.createElement('div');
+        sellDiv.style.cssText = 'font-size:0.68rem;color:#333;margin-top:2px;line-height:1.3;';
+        sells.forEach(t => {
+            const line = document.createElement('div');
+            line.textContent = `▲ ${t.stock} ${t.quantity}@${t.price.toFixed(2)}`;
+            sellDiv.appendChild(line);
+        });
+        const rgLine = document.createElement('div');
+        rgLine.style.cssText = `color:${rg >= 0 ? '#c88a00' : '#c0392b'};font-weight:bold;`;
+        rgLine.textContent = `实现 ${rgSign}$${rgFmt}`;
+        sellDiv.appendChild(rgLine);
+        pnlContainer.appendChild(sellDiv);
+    }
+
     const dayFrame = dayEl.querySelector('.fc-daygrid-day-frame');
     if (dayFrame) {
         dayFrame.appendChild(pnlContainer);
@@ -633,8 +695,6 @@ function clearDayIndicators(dayEl) {
 function renderDailyPnlChart(dailyStats) {
     if (!dailyStats) return;
     const todayISO = new Date().toISOString().split('T')[0];
-
-    // Get current exchange rate for USD to CAD conversion
     const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
 
     const statsArray = Object.values(dailyStats)
@@ -642,90 +702,177 @@ function renderDailyPnlChart(dailyStats) {
         .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     const labels = statsArray.map(day => day.date.slice(-5));
+
+    // Daily P&L change values
     const values = statsArray.map(day => {
-        let dailyChange = day.daily_change || 0;
-
-        // If day contains currency breakdown, recalculate with current exchange rate
-        if (day.currency_breakdown && day.currency_breakdown.daily_change) {
-            const changeCadValue = day.currency_breakdown.daily_change.CAD || 0;
-            const changeUsdValue = day.currency_breakdown.daily_change.USD || 0;
-            dailyChange = changeCadValue + changeUsdValue * currentRate;
+        let v = day.daily_change || 0;
+        if (day.currency_breakdown?.daily_change) {
+            v = (day.currency_breakdown.daily_change.CAD || 0) +
+                (day.currency_breakdown.daily_change.USD || 0) * currentRate;
         }
-
-        return dailyChange;
+        return v;
     });
+
+    // 当日实现盈利（卖出价 − 成本价），由后端精确计算，避免前端跨月首日误差
+    const realizedGains = statsArray.map(day => day.daily_realized_gain || 0);
+
+    // Buy/sell day indices (for triangle markers)
+    const buyIndices = [];
+    const sellIndices = [];
+    statsArray.forEach((day, i) => {
+        if (day.has_buy) buyIndices.push(i);
+        if (day.has_sell) sellIndices.push(i);
+    });
+
+    // Cumulative P&L line
+    const cumulativeValues = [];
+    let runningTotal = 0;
+    values.forEach(v => { runningTotal += v; cumulativeValues.push(runningTotal); });
 
     const ctx = document.getElementById('dailyPnlChart');
     if (!ctx) return;
+    if (dailyPnlChart) dailyPnlChart.destroy();
 
-    if (dailyPnlChart) {
-        dailyPnlChart.destroy();
-    }
+    // Custom plugin: buy triangles (▼) and sell realized-gain labels
+    const tradeMarkerPlugin = {
+        id: 'tradeMarker',
+        afterDatasetsDraw(chart) {
+            const meta = chart.getDatasetMeta(0);
+            if (!meta) return;
+            const dc = chart.ctx;
 
-    const cumulativeValues = [];
-    let runningTotal = 0;
-    values.forEach(v => {
-        runningTotal += v;
-        cumulativeValues.push(runningTotal);
-    });
+            const sz = 5;
+
+            // ▼ Black triangle above bar top for buy days
+            buyIndices.forEach(idx => {
+                if (!meta.data[idx]) return;
+                const bar = meta.data[idx];
+                const bx = bar.x;
+                const ty = Math.min(bar.y, bar.base) - 5;
+                dc.save();
+                dc.beginPath();
+                dc.moveTo(bx,      ty + sz); // bottom tip (pointing down)
+                dc.lineTo(bx - sz, ty);
+                dc.lineTo(bx + sz, ty);
+                dc.closePath();
+                dc.fillStyle = 'rgba(0,0,0,0.85)';
+                dc.fill();
+                dc.restore();
+            });
+
+            // ▲ Black triangle above bar top for sell days
+            sellIndices.forEach(idx => {
+                if (!meta.data[idx]) return;
+                const bar = meta.data[idx];
+                const bx = bar.x;
+                // offset further up if same day also has a buy triangle
+                const extra = buyIndices.includes(idx) ? sz * 2 + 4 : 0;
+                const ty = Math.min(bar.y, bar.base) - 5 - extra;
+                dc.save();
+                dc.beginPath();
+                dc.moveTo(bx,      ty);      // top tip (pointing up)
+                dc.lineTo(bx - sz, ty + sz);
+                dc.lineTo(bx + sz, ty + sz);
+                dc.closePath();
+                dc.fillStyle = 'rgba(0,0,0,0.85)';
+                dc.fill();
+                dc.restore();
+            });
+
+        }
+    };
 
     dailyPnlChart = new Chart(ctx, {
         type: 'bar',
+        plugins: [tradeMarkerPlugin],
         data: {
             labels,
-            datasets: [{
-                label: '{{ _('Daily Change') }}',
-                data: values,
-                backgroundColor: values.map(v => v >= 0 ? 'rgba(28, 200, 138, 0.8)' : 'rgba(231, 74, 59, 0.8)'),
-                borderRadius: 4,
-                borderSkipped: false,
-            }, {
-                type: 'line',
-                label: '{{ _('Monthly Cumulative') }}',
-                data: cumulativeValues,
-                borderColor: '#4e73df',
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                tension: 0.25,
-                pointRadius: 0,
-                pointHoverRadius: 3,
-                yAxisID: 'y'
-            }]
+            datasets: [
+                {
+                    label: '当日浮动盈亏',
+                    data: values,
+                    backgroundColor: values.map(v => v >= 0 ? 'rgba(28,200,138,0.8)' : 'rgba(231,74,59,0.8)'),
+                    borderRadius: 3,
+                    borderSkipped: false,
+                    order: 2
+                },
+                {
+                    label: '实现盈亏',
+                    data: realizedGains.map(v => v !== 0 ? v : null),
+                    backgroundColor: 'rgba(246,194,62,0.85)',
+                    borderColor: 'rgba(180,130,0,0.9)',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    borderSkipped: false,
+                    order: 2
+                },
+                {
+                    type: 'line',
+                    label: '月累计',
+                    data: cumulativeValues,
+                    borderColor: '#4e73df',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
+                    yAxisID: 'y',
+                    order: 0
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
                 x: {
-                    ticks: {
-                        color: '#6e707e',
-                        maxRotation: 0,
-                        autoSkip: true,
-                        maxTicksLimit: 12
-                    },
-                    grid: {
-                        display: false
-                    }
+                    ticks: { color: '#6e707e', maxRotation: 0, autoSkip: true, maxTicksLimit: 14 },
+                    grid: { display: false }
                 },
                 y: {
                     ticks: {
                         color: '#6e707e',
                         callback: value => `$${value.toLocaleString()}`
                     },
-                    grid: {
-                        color: 'rgba(234, 236, 244, 0.4)'
-                    }
+                    grid: { color: 'rgba(234,236,244,0.4)' }
                 }
             },
             plugins: {
-                legend: {
-                    display: true
-                },
+                legend: { display: false },
                 tooltip: {
                     callbacks: {
                         label: context => {
-                            const value = context.parsed.y || 0;
-                            return `${value >= 0 ? '+' : ''}$${value.toLocaleString()}`;
+                            const v = context.parsed.y;
+                            if (v === null || v === undefined) return null;
+                            const sign = v >= 0 ? '+' : '';
+                            const fmt = Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            return `${context.dataset.label}: ${sign}$${fmt}`;
+                        },
+                        afterBody: (tooltipItems) => {
+                            const idx = tooltipItems[0]?.dataIndex;
+                            if (idx === undefined) return [];
+                            const day = statsArray[idx];
+                            if (!day || !day.transactions || !day.transactions.length) return [];
+
+                            const lines = ['─────────────'];
+                            const buys = day.transactions.filter(t => t.type === 'BUY');
+                            const sells = day.transactions.filter(t => t.type === 'SELL');
+                            if (buys.length) {
+                                lines.push('买入:');
+                                buys.forEach(t => {
+                                    lines.push(`  ${t.stock}  ${t.quantity} 股 @ $${t.price.toFixed(2)} ${t.currency}`);
+                                });
+                            }
+                            if (sells.length) {
+                                const rg = day.daily_realized_gain || 0;
+                                const rgSign = rg >= 0 ? '+' : '-';
+                                const rgFmt = Math.abs(rg).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                                lines.push(`卖出: (实现盈亏 ${rgSign}$${rgFmt})`);
+                                sells.forEach(t => {
+                                    lines.push(`  ${t.stock}  ${t.quantity} 股 @ $${t.price.toFixed(2)} ${t.currency}`);
+                                });
+                            }
+                            return lines;
                         }
                     }
                 }

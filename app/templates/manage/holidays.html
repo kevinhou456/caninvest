@@ -1,0 +1,318 @@
+{% extends "base/investment_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="fas fa-calendar-times me-2"></i>{{ _('Manage Holidays') }}</h2>
+        <p class="text-muted mb-0">查看、添加或删除市场休市日。系统自动推断的记录（置信度&lt;99）可能有误，可在此纠正。</p>
+    </div>
+    <button class="btn btn-primary" onclick="openAddModal()">
+        <i class="fas fa-plus me-2"></i>手动添加休市日
+    </button>
+</div>
+
+<!-- 年份筛选 -->
+<div class="mb-3">
+    <div class="btn-group" role="group">
+        {% for y in available_years %}
+        <a href="{{ url_for('main.manage_holidays', year=y) }}"
+           class="btn btn-sm {{ 'btn-primary' if y == selected_year else 'btn-outline-secondary' }}">{{ y }}</a>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="row">
+    <!-- 美国市场 -->
+    <div class="col-md-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><span class="badge bg-primary me-2">US</span>美国市场休市日 — {{ selected_year }}</h5>
+                <span class="badge bg-secondary">{{ us_holidays|length }} 条</span>
+            </div>
+            <div class="card-body p-0">
+                {% if us_holidays %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>日期</th>
+                                <th>星期</th>
+                                <th>置信度</th>
+                                <th>来源</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h in us_holidays %}
+                            <tr>
+                                <td>{{ h.holiday_date.strftime('%Y-%m-%d') }}</td>
+                                <td class="text-muted">{{ ['周一','周二','周三','周四','周五','周六','周日'][h.holiday_date.weekday()] }}</td>
+                                <td>
+                                    {% if h.confidence_level >= 99 %}
+                                    <span class="badge bg-success">手动</span>
+                                    {% elif h.confidence_level >= 5 %}
+                                    <span class="badge bg-warning text-dark">{{ h.confidence_level }} 只股票</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">{{ h.confidence_level }} 只股票</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-muted small">
+                                    {% if h.confidence_level >= 99 %}手动{% else %}自动推断{% endif %}
+                                </td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-outline-info btn-sm py-0"
+                                                title="查看检测详情"
+                                                onclick="viewAttempts('{{ h.holiday_date.isoformat() }}', 'US')">
+                                            <i class="fas fa-search"></i>
+                                        </button>
+                                        <button class="btn btn-outline-danger btn-sm py-0"
+                                                onclick="deleteHoliday({{ h.id }}, '{{ h.holiday_date.isoformat() }}', 'US')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="p-4 text-center text-muted">{{ selected_year }} 年暂无美国市场休市记录</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 加拿大市场 -->
+    <div class="col-md-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><span class="badge bg-danger me-2">CA</span>加拿大市场休市日 — {{ selected_year }}</h5>
+                <span class="badge bg-secondary">{{ ca_holidays|length }} 条</span>
+            </div>
+            <div class="card-body p-0">
+                {% if ca_holidays %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>日期</th>
+                                <th>星期</th>
+                                <th>置信度</th>
+                                <th>来源</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h in ca_holidays %}
+                            <tr>
+                                <td>{{ h.holiday_date.strftime('%Y-%m-%d') }}</td>
+                                <td class="text-muted">{{ ['周一','周二','周三','周四','周五','周六','周日'][h.holiday_date.weekday()] }}</td>
+                                <td>
+                                    {% if h.confidence_level >= 99 %}
+                                    <span class="badge bg-success">手动</span>
+                                    {% elif h.confidence_level >= 5 %}
+                                    <span class="badge bg-warning text-dark">{{ h.confidence_level }} 只股票</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">{{ h.confidence_level }} 只股票</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-muted small">
+                                    {% if h.confidence_level >= 99 %}手动{% else %}自动推断{% endif %}
+                                </td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-outline-info btn-sm py-0"
+                                                title="查看检测详情"
+                                                onclick="viewAttempts('{{ h.holiday_date.isoformat() }}', 'CA')">
+                                            <i class="fas fa-search"></i>
+                                        </button>
+                                        <button class="btn btn-outline-danger btn-sm py-0"
+                                                onclick="deleteHoliday({{ h.id }}, '{{ h.holiday_date.isoformat() }}', 'CA')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="p-4 text-center text-muted">{{ selected_year }} 年暂无加拿大市场休市记录</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 说明卡片 -->
+<div class="card mt-2">
+    <div class="card-body">
+        <h6 class="text-muted mb-2"><i class="fas fa-info-circle me-1"></i>说明</h6>
+        <ul class="mb-0 small text-muted">
+            <li><strong>自动推断</strong>：当某天有 ≥5 只股票从 yfinance 获取不到数据时，系统自动将该日标记为休市。置信度越高表示检测到更多股票无数据。</li>
+            <li><strong>错误推断</strong>：若因 API 故障误标记为休市，请直接删除该条记录，系统将重新识别为交易日。</li>
+            <li><strong>手动添加</strong>：手动添加的记录置信度为 99（绿色"手动"标签），不会被自动覆盖。</li>
+            <li><strong>查看详情</strong>：点击 <i class="fas fa-search"></i> 可查看该日期各股票的原始检测记录，辅助判断是否为误报。</li>
+        </ul>
+    </div>
+</div>
+
+<!-- 添加休市日 Modal -->
+<div class="modal fade" id="addHolidayModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus me-2"></i>手动添加休市日</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">日期 <span class="text-danger">*</span></label>
+                    <input type="date" id="addDate" class="form-control">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">市场 <span class="text-danger">*</span></label>
+                    <select id="addMarket" class="form-select">
+                        <option value="US">🇺🇸 美国 (US)</option>
+                        <option value="CA">🇨🇦 加拿大 (CA)</option>
+                    </select>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="addBoth">
+                    <label class="form-check-label" for="addBoth">同时添加到两个市场（美加共同假期，如圣诞节、元旦）</label>
+                </div>
+                <div id="addError" class="alert alert-danger mt-3 d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="submitAddHoliday()">
+                    <i class="fas fa-save me-1"></i>保存
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 检测详情 Modal -->
+<div class="modal fade" id="attemptsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="attemptsTitle">检测详情</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="attemptsBody">
+                <div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> 加载中...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function openAddModal() {
+    document.getElementById('addDate').value = '';
+    document.getElementById('addMarket').value = 'US';
+    document.getElementById('addBoth').checked = false;
+    document.getElementById('addError').classList.add('d-none');
+    new bootstrap.Modal(document.getElementById('addHolidayModal')).show();
+}
+
+async function submitAddHoliday() {
+    const dateVal = document.getElementById('addDate').value;
+    const market = document.getElementById('addMarket').value;
+    const both = document.getElementById('addBoth').checked;
+    const errEl = document.getElementById('addError');
+    errEl.classList.add('d-none');
+
+    if (!dateVal) {
+        errEl.textContent = '请选择日期';
+        errEl.classList.remove('d-none');
+        return;
+    }
+
+    const markets = both ? ['US', 'CA'] : [market];
+    const errors = [];
+
+    for (const m of markets) {
+        try {
+            const resp = await fetch('/api/market-holidays', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({holiday_date: dateVal, market: m})
+            });
+            const data = await resp.json();
+            if (!data.success) errors.push(`${m}: ${data.error}`);
+        } catch (e) {
+            errors.push(`${m}: 请求失败`);
+        }
+    }
+
+    if (errors.length) {
+        errEl.textContent = errors.join('; ');
+        errEl.classList.remove('d-none');
+    } else {
+        bootstrap.Modal.getInstance(document.getElementById('addHolidayModal')).hide();
+        location.reload();
+    }
+}
+
+async function deleteHoliday(id, dateStr, market) {
+    if (!confirm(`确认删除 ${market} 市场 ${dateStr} 的休市记录？\n删除后该日期将被识别为交易日。`)) return;
+    try {
+        const resp = await fetch(`/api/market-holidays/${id}`, {method: 'DELETE'});
+        const data = await resp.json();
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('删除失败：' + data.error);
+        }
+    } catch (e) {
+        alert('请求失败');
+    }
+}
+
+async function viewAttempts(dateStr, market) {
+    document.getElementById('attemptsTitle').textContent = `检测详情 — ${market} 市场 ${dateStr}`;
+    document.getElementById('attemptsBody').innerHTML =
+        '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> 加载中...</div>';
+    new bootstrap.Modal(document.getElementById('attemptsModal')).show();
+
+    try {
+        const resp = await fetch(`/api/market-holidays/attempts?date=${dateStr}`);
+        const data = await resp.json();
+
+        if (!data.success) {
+            document.getElementById('attemptsBody').innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+
+        const filtered = data.attempts.filter(a => a.market === market);
+        if (!filtered.length) {
+            document.getElementById('attemptsBody').innerHTML =
+                '<p class="text-muted text-center py-3">该日期暂无检测记录（可能由内置节假日表触发，而非动态推断）。</p>';
+            return;
+        }
+
+        const noData = filtered.filter(a => !a.has_data);
+        const hasData = filtered.filter(a => a.has_data);
+
+        let html = `<p class="small text-muted mb-2">共 ${filtered.length} 条记录，其中 <strong class="text-danger">${noData.length}</strong> 只无数据，<strong class="text-success">${hasData.length}</strong> 只有数据。</p>`;
+        html += '<div class="table-responsive"><table class="table table-sm">';
+        html += '<thead class="table-light"><tr><th>股票</th><th>市场</th><th>数据状态</th><th>记录时间</th></tr></thead><tbody>';
+        for (const a of filtered) {
+            const badge = a.has_data
+                ? '<span class="badge bg-success">有数据</span>'
+                : '<span class="badge bg-danger">无数据</span>';
+            html += `<tr><td>${a.symbol}</td><td>${a.market}</td><td>${badge}</td><td class="text-muted small">${a.attempted_at ? a.attempted_at.slice(0,19) : '-'}</td></tr>`;
+        }
+        html += '</tbody></table></div>';
+        document.getElementById('attemptsBody').innerHTML = html;
+    } catch (e) {
+        document.getElementById('attemptsBody').innerHTML = '<div class="alert alert-danger">请求失败</div>';
+    }
+}
+</script>
+{% endblock %}

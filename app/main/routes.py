@@ -9,7 +9,7 @@ from flask_babel import _
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta, timezone
 from bisect import bisect_left
-from sqlalchemy import func, tuple_
+from sqlalchemy import func, tuple_, text as sa_text
 from app.main import bp
 from app import db
 from app.models.family import Family
@@ -4157,3 +4157,133 @@ def get_async_portfolio_prices():
             'success': False,
             'error': f'Failed to update stock prices: {str(e)}'
         }), 500
+
+
+# ============================================================
+# Manage Holidays
+# ============================================================
+
+@bp.route('/manage/holidays')
+def manage_holidays():
+    """市场节假日管理页面"""
+    try:
+        year = request.args.get('year', type=int) or date.today().year
+
+        us_holidays = MarketHoliday.query.filter_by(market='US').filter(
+            MarketHoliday.holiday_date >= date(year, 1, 1),
+            MarketHoliday.holiday_date <= date(year, 12, 31)
+        ).order_by(MarketHoliday.holiday_date.asc()).all()
+
+        ca_holidays = MarketHoliday.query.filter_by(market='CA').filter(
+            MarketHoliday.holiday_date >= date(year, 1, 1),
+            MarketHoliday.holiday_date <= date(year, 12, 31)
+        ).order_by(MarketHoliday.holiday_date.asc()).all()
+
+        # 获取有可用年份列表
+        years_query = db.session.query(
+            db.func.extract('year', MarketHoliday.holiday_date).label('yr')
+        ).distinct().order_by(sa_text('yr desc')).all()
+        available_years = [int(r.yr) for r in years_query]
+        if year not in available_years:
+            available_years.insert(0, year)
+
+        return render_template(
+            'manage/holidays.html',
+            title=_('Manage Holidays'),
+            us_holidays=us_holidays,
+            ca_holidays=ca_holidays,
+            selected_year=year,
+            available_years=available_years,
+            current_view='manage_holidays'
+        )
+    except Exception as e:
+        flash(_('Error loading holidays: ') + str(e), 'error')
+        return redirect(url_for('main.overview'))
+
+
+@bp.route('/api/market-holidays', methods=['POST'])
+def create_market_holiday():
+    """手动添加市场节假日"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('holiday_date') or not data.get('market'):
+            return jsonify({'success': False, 'error': 'holiday_date and market are required'}), 400
+
+        market = data['market'].upper()
+        if market not in ('US', 'CA'):
+            return jsonify({'success': False, 'error': 'market must be US or CA'}), 400
+
+        holiday_date = datetime.strptime(data['holiday_date'], '%Y-%m-%d').date()
+
+        existing = MarketHoliday.query.filter_by(holiday_date=holiday_date, market=market).first()
+        if existing:
+            return jsonify({'success': False, 'error': 'Holiday already exists for this date and market'}), 400
+
+        holiday = MarketHoliday(
+            holiday_date=holiday_date,
+            market=market,
+            confidence_level=99  # 手动添加置信度最高
+        )
+        db.session.add(holiday)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Holiday added successfully',
+            'holiday': {
+                'id': holiday.id,
+                'holiday_date': holiday.holiday_date.isoformat(),
+                'market': holiday.market,
+                'confidence_level': holiday.confidence_level
+            }
+        })
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/market-holidays/<int:holiday_id>', methods=['DELETE'])
+def delete_market_holiday(holiday_id):
+    """删除市场节假日"""
+    try:
+        holiday = MarketHoliday.query.get_or_404(holiday_id)
+        db.session.delete(holiday)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Holiday deleted successfully'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/market-holidays/attempts', methods=['GET'])
+def get_holiday_attempts():
+    """获取节假日检测尝试记录（调试用）"""
+    try:
+        target_date_str = request.args.get('date')
+        if not target_date_str:
+            return jsonify({'success': False, 'error': 'date parameter required'}), 400
+
+        target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+        attempts = StockHolidayAttempt.query.filter_by(attempt_date=target_date).order_by(
+            StockHolidayAttempt.market, StockHolidayAttempt.symbol
+        ).all()
+
+        return jsonify({
+            'success': True,
+            'date': target_date_str,
+            'attempts': [
+                {
+                    'symbol': a.symbol,
+                    'market': a.market,
+                    'has_data': a.has_data,
+                    'attempted_at': a.attempted_at.isoformat() if a.attempted_at else None
+                }
+                for a in attempts
+            ]
+        })
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid date format'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

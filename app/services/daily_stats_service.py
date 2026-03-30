@@ -62,6 +62,10 @@ class DailyStatsPoint:
     # 是否为交易日
     is_trading_day: bool = False
     has_transactions: bool = False
+    has_buy: bool = False
+    has_sell: bool = False
+    daily_realized_gain: Decimal = Decimal('0')
+    transactions: list = None  # [{type, stock, quantity, price, currency}]
     
     def to_dict(self) -> Dict:
         """转换为字典格式"""
@@ -77,7 +81,11 @@ class DailyStatsPoint:
             'daily_change': float(self.daily_change),
             'daily_return_pct': float(self.daily_return_pct),
             'is_trading_day': self.is_trading_day,
-            'has_transactions': self.has_transactions
+            'has_transactions': self.has_transactions,
+            'has_buy': self.has_buy,
+            'has_sell': self.has_sell,
+            'daily_realized_gain': float(self.daily_realized_gain),
+            'transactions': self.transactions or []
         }
 
 
@@ -221,8 +229,8 @@ class DailyStatsService:
         """
         daily_stats = {}
         
-        # 获取该月的所有交易日期（用于标记has_transactions）
-        transaction_dates = self._get_transaction_dates_in_range(account_ids, start_date, end_date)
+        # 获取该月的所有交易日期（用于标记has_transactions / has_buy / has_sell）及每日交易明细
+        transaction_dates, buy_dates, sell_dates, txn_by_date = self._get_transaction_dates_in_range(account_ids, start_date, end_date)
         
         # 逐日计算（这里可以进一步优化为批量计算）
         current_date = start_date
@@ -261,7 +269,10 @@ class DailyStatsService:
                 realized_gain=combined_snapshot.get('realized_gain', Decimal('0')),
                 total_return=combined_snapshot.get('total_return', Decimal('0')),
                 is_trading_day=self._is_trading_day(current_date),
-                has_transactions=current_date in transaction_dates
+                has_transactions=current_date in transaction_dates,
+                has_buy=current_date in buy_dates,
+                has_sell=current_date in sell_dates,
+                transactions=txn_by_date.get(current_date, [])
             )
             
             # 计算日变化（相对于前一个有数据的日期）
@@ -414,11 +425,15 @@ class DailyStatsService:
             'percentage': change_pct
         }
 
-    def _calculate_daily_change_for_point(self, current_point: DailyStatsPoint, 
+    def _calculate_daily_change_for_point(self, current_point: DailyStatsPoint,
                                         prev_point: DailyStatsPoint):
         """为统计点计算日变化"""
         current_point.daily_change = current_point.total_return - prev_point.total_return
-        
+
+        # 当日实现盈利 = 今日累计已实现 − 前一交易日累计已实现（prev_point 基准正确，避免跨月首日误差）
+        if current_point.has_sell:
+            current_point.daily_realized_gain = current_point.realized_gain - prev_point.realized_gain
+
         if prev_point.total_assets > 0:
             current_point.daily_return_pct = (current_point.daily_change / prev_point.total_assets) * 100
     
@@ -473,18 +488,45 @@ class DailyStatsService:
             current -= timedelta(days=1)
         return None
     
-    def _get_transaction_dates_in_range(self, account_ids: List[int], 
-                                       start_date: date, end_date: date) -> set:
-        """获取日期范围内有交易的日期集合"""
+    def _get_transaction_dates_in_range(self, account_ids: List[int],
+                                       start_date: date, end_date: date):
+        """获取日期范围内有交易的日期集合，同时返回买入/卖出日期集合及每日交易明细"""
         from app.models.transaction import Transaction
-        
-        transactions = Transaction.query.filter(
+
+        rows = Transaction.query.filter(
             Transaction.account_id.in_(account_ids),
             Transaction.trade_date >= start_date,
-            Transaction.trade_date <= end_date
-        ).with_entities(Transaction.trade_date).distinct().all()
-        
-        return {tx.trade_date for tx in transactions}
+            Transaction.trade_date <= end_date,
+            Transaction.stock.isnot(None),
+            Transaction.stock != ''
+        ).with_entities(
+            Transaction.trade_date, Transaction.type,
+            Transaction.stock, Transaction.quantity,
+            Transaction.price, Transaction.currency
+        ).order_by(Transaction.trade_date, Transaction.stock).all()
+
+        all_dates: set = set()
+        buy_dates: set = set()
+        sell_dates: set = set()
+        txn_by_date: Dict[date, list] = {}
+
+        for tx_date, tx_type, stock, qty, price, currency in rows:
+            all_dates.add(tx_date)
+            if tx_type == 'BUY':
+                buy_dates.add(tx_date)
+            elif tx_type == 'SELL':
+                sell_dates.add(tx_date)
+            if tx_date not in txn_by_date:
+                txn_by_date[tx_date] = []
+            txn_by_date[tx_date].append({
+                'type': tx_type,
+                'stock': stock,
+                'quantity': float(qty) if qty else 0,
+                'price': float(price) if price else 0,
+                'currency': currency or ''
+            })
+
+        return all_dates, buy_dates, sell_dates, txn_by_date
     
     def get_calendar_summary_stats(self, account_ids: List[int], 
                                   year: int, month: int,

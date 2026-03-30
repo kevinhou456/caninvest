@@ -423,6 +423,11 @@
                      onclick="window.location.href='{{ url_for('main.stock_categories') }}'">
                     <i class="fas fa-chart-bar me-2 text-info"></i>{{ _('Manage Stock Category') }}
                 </div>
+                <div class="nav-item nav-management {{ 'active' if current_view == 'manage_holidays' }}"
+                     data-management-view="manage_holidays"
+                     onclick="window.location.href='{{ url_for('main.manage_holidays') }}'">
+                    <i class="fas fa-calendar-times me-2 text-warning"></i>{{ _('Manage Holidays') }}
+                </div>
             </div>
         </div>
     </div>
