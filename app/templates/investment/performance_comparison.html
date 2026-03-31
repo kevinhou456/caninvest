@@ -78,9 +78,20 @@
 {% block scripts %}
 <script>
 let performanceSeries = [];
+let accountsBreakdown = [];
 let performanceChart = null;
 let currentRange = '1m';
 let currentReturnType = 'mwr';
+
+// 各账户曲线颜色调色板（细虚线）
+const ACCOUNT_COLORS = [
+    'rgba(255, 159, 64, 1)',
+    'rgba(153, 102, 255, 1)',
+    'rgba(255, 205, 86, 1)',
+    'rgba(75, 192, 192, 1)',
+    'rgba(255, 99, 132, 1)',
+    'rgba(201, 203, 207, 1)',
+];
 
 function showLoadingOverlay(message) {
     const msg = message || '{{ _('Loading data...') }}';
@@ -163,6 +174,7 @@ function loadPerformanceComparison(range) {
         .then(data => {
             const analysis = data.analysis || {};
             performanceSeries = analysis.performance_series || [];
+            accountsBreakdown = analysis.accounts_breakdown || [];
             updateSummaryCards(analysis.summary || {});
             updatePerformanceChart();
             document.getElementById('loading-spinner').style.display = 'none';
@@ -218,42 +230,61 @@ function updatePerformanceChart() {
     const sp500Data = performanceSeries.map(item => item.sp500 || 0);
     const nasdaqData = performanceSeries.map(item => item.nasdaq || 0);
 
+    // 合计 + 指数基准 datasets
+    const datasets = [
+        {
+            label: '{{ _('Portfolio') }}',
+            data: portfolioData,
+            borderColor: 'rgba(78, 115, 223, 1)',
+            backgroundColor: 'rgba(78, 115, 223, 0.1)',
+            borderWidth: 2.5,
+            tension: 0.3,
+            fill: false,
+            pointRadius: 0
+        },
+        {
+            label: '{{ _('S&P 500 (SPX)') }}',
+            data: sp500Data,
+            borderColor: 'rgba(28, 200, 138, 1)',
+            backgroundColor: 'rgba(28, 200, 138, 0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: false,
+            pointRadius: 0
+        },
+        {
+            label: '{{ _('Nasdaq (IXIC)') }}',
+            data: nasdaqData,
+            borderColor: 'rgba(231, 74, 59, 1)',
+            backgroundColor: 'rgba(231, 74, 59, 0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: false,
+            pointRadius: 0
+        }
+    ];
+
+    // 各账户细曲线（仅多账户合计视图时显示）
+    accountsBreakdown.forEach((acct, idx) => {
+        const color = ACCOUNT_COLORS[idx % ACCOUNT_COLORS.length];
+        datasets.push({
+            label: acct.account_name,
+            data: acct.performance_series.map(d => d.portfolio || 0),
+            borderColor: color,
+            backgroundColor: 'transparent',
+            borderWidth: 1.2,
+            borderDash: [4, 3],
+            tension: 0.3,
+            fill: false,
+            pointRadius: 0
+        });
+    });
+
     performanceChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
-            datasets: [
-                {
-                    label: '{{ _('Portfolio') }}',
-                    data: portfolioData,
-                    borderColor: 'rgba(78, 115, 223, 1)',
-                    backgroundColor: 'rgba(78, 115, 223, 0.1)',
-                    borderWidth: 2,
-                    tension: 0.3,
-                    fill: false,
-                    pointRadius: 0
-                },
-                {
-                    label: '{{ _('S&P 500 (SPX)') }}',
-                    data: sp500Data,
-                    borderColor: 'rgba(28, 200, 138, 1)',
-                    backgroundColor: 'rgba(28, 200, 138, 0.1)',
-                    borderWidth: 2,
-                    tension: 0.3,
-                    fill: false,
-                    pointRadius: 0
-                },
-                {
-                    label: '{{ _('Nasdaq (IXIC)') }}',
-                    data: nasdaqData,
-                    borderColor: 'rgba(231, 74, 59, 1)',
-                    backgroundColor: 'rgba(231, 74, 59, 0.1)',
-                    borderWidth: 2,
-                    tension: 0.3,
-                    fill: false,
-                    pointRadius: 0
-                }
-            ]
+            datasets: datasets
         },
         options: {
             responsive: true,

@@ -172,6 +172,18 @@ class PeriodStats:
     period_unrealized_gain_change: Decimal = Decimal('0')
 
 
+class _CacheRowProxy:
+    """将 dict 包装成与 PerformanceDailyCache ORM 对象相同的属性访问接口，
+    用于刚计算完但尚未从 DB 重新查询的缓存数据。"""
+    __slots__ = ('total_assets', 'daily_flow', 'stock_value', 'cash_value')
+
+    def __init__(self, data: dict):
+        self.total_assets = data['total_assets']
+        self.daily_flow = data['daily_flow']
+        self.stock_value = data.get('stock_value', Decimal('0'))
+        self.cash_value = data.get('cash_value', Decimal('0'))
+
+
 class PortfolioService:
     """统一投资组合服务"""
     
@@ -244,11 +256,17 @@ class PortfolioService:
         )
         
         # 获取截止日期前的所有交易记录
+        # 同一天内 BUY 优先于 SELL：CASE WHEN type='BUY' THEN 0 ELSE 1 END
+        from sqlalchemy import case as sa_case
         transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.stock == symbol,
             Transaction.trade_date <= as_of_date
-        ).order_by(Transaction.trade_date.asc()).all()
+        ).order_by(
+            Transaction.trade_date.asc(),
+            sa_case((Transaction.type == 'BUY', 0), else_=1).asc(),
+            Transaction.id.asc()
+        ).all()
 
         # If there are no transactions up to the target date, avoid any market-data fetches.
         if not transactions:
@@ -920,8 +938,24 @@ class PortfolioService:
             end_holdings_map = aggregate_holdings(end_holdings_raw)
             prev_holdings_map = aggregate_holdings(prev_holdings_raw)
 
+            # 只显示该年度有过活动的股票：年内有交易 OR 年末仍持有
+            year_start = date(year, 1, 1)
+            active_symbols_this_year = set(
+                row[0] for row in db.session.query(Transaction.stock).filter(
+                    Transaction.account_id.in_(account_ids),
+                    Transaction.stock.isnot(None),
+                    Transaction.trade_date >= year_start,
+                    Transaction.trade_date <= year_end
+                ).distinct().all()
+            )
+
             holdings_rows: List[Dict] = []
             for key, holding in end_holdings_map.items():
+                symbol = holding.get('symbol')
+                current_shares = float(holding.get('current_shares', holding.get('shares', 0)) or 0)
+                # 跳过：该年度无交易 且 年末未持有
+                if symbol not in active_symbols_this_year and current_shares <= 0:
+                    continue
                 prev = prev_holdings_map.get(key, {}) or {}
 
                 current_shares = float(holding.get('current_shares', holding.get('shares', 0)) or 0)
@@ -1317,34 +1351,29 @@ class PortfolioService:
             unrealized_gain_cad = float(quarter_end_unrealized_cad_dec - quarter_start_unrealized_cad_dec)
             unrealized_gain_usd = float(quarter_end_unrealized_usd_dec - quarter_start_unrealized_usd_dec)
         
+            # 使用统一的 get_cash_balance 获取现金，禁止使用 get_asset_snapshot
             cash_total_cad_dec = Decimal('0')
             cash_total_usd_dec = Decimal('0')
-            total_assets_with_cash_dec = Decimal('0')
-        
+
             for account_id in account_ids_subset:
                 proportion_dec = get_proportion(account_id)
                 if proportion_dec <= 0:
                     continue
                 try:
-                    snapshot = asset_service.get_asset_snapshot(account_id, effective_end)
+                    cash_balance = asset_service.get_cash_balance(account_id, effective_end)
+                    cash_total_cad_dec += Decimal(str(cash_balance.get('cad', 0) or 0)) * proportion_dec
+                    cash_total_usd_dec += Decimal(str(cash_balance.get('usd', 0) or 0)) * proportion_dec
                 except Exception:
                     continue
-        
-                cash_cad_dec = Decimal(str(snapshot.cash_balance_cad or 0)) * proportion_dec
-                cash_usd_dec = Decimal(str(snapshot.cash_balance_usd or 0)) * proportion_dec
-                cash_total_cad_dec += cash_cad_dec
-                cash_total_usd_dec += cash_usd_dec
-                total_assets_with_cash_dec += Decimal(str(snapshot.total_assets or 0)) * proportion_dec
-        
+
+            # 总资产 = 股票市值 + 现金（统一架构，不使用 snapshot.total_assets）
             total_assets_dec = total_assets_stock_dec + cash_total_cad_dec + (cash_total_usd_dec * usd_to_cad_decimal)
-            if total_assets_with_cash_dec > 0:
-                total_assets_dec = total_assets_with_cash_dec
-        
+
             if cash_total_cad_dec < 0:
                 cash_total_cad_dec = Decimal('0')
             if cash_total_usd_dec < 0:
                 cash_total_usd_dec = Decimal('0')
-        
+
             total_assets_float = float(total_assets_dec)
             total_assets_cad += float(cash_total_cad_dec)
             total_assets_usd += float(cash_total_usd_dec)
@@ -1895,26 +1924,20 @@ class PortfolioService:
             unrealized_gain_cad = float(month_end_unrealized_cad_dec - month_start_unrealized_cad_dec)
             unrealized_gain_usd = float(month_end_unrealized_usd_dec - month_start_unrealized_usd_dec)
 
-            # 统计现金余额（按月末快照）
+            # 使用统一的 get_cash_balance 获取现金，禁止使用 get_asset_snapshot
             for account_id in account_ids:
                 proportion_dec = get_proportion(account_id)
                 if proportion_dec <= 0:
                     continue
                 try:
-                    snapshot = asset_service.get_asset_snapshot(account_id, effective_end)
+                    cash_balance = asset_service.get_cash_balance(account_id, effective_end)
+                    cash_total_cad_dec += Decimal(str(cash_balance.get('cad', 0) or 0)) * proportion_dec
+                    cash_total_usd_dec += Decimal(str(cash_balance.get('usd', 0) or 0)) * proportion_dec
                 except Exception:
                     continue
 
-                cash_cad_dec = Decimal(str(snapshot.cash_balance_cad or 0)) * proportion_dec
-                cash_usd_dec = Decimal(str(snapshot.cash_balance_usd or 0)) * proportion_dec
-                cash_total_cad_dec += cash_cad_dec
-                cash_total_usd_dec += cash_usd_dec
-                total_assets_with_cash_dec += Decimal(str(snapshot.total_assets or 0)) * proportion_dec
-
+            # 总资产 = 股票市值 + 现金（统一架构，不使用 snapshot.total_assets）
             total_assets_dec = total_assets_stock_dec + cash_total_cad_dec + (cash_total_usd_dec * usd_to_cad_decimal)
-
-            if total_assets_with_cash_dec > 0:
-                total_assets_dec = total_assets_with_cash_dec
 
             if cash_total_cad_dec < 0:
                 cash_total_cad_dec = Decimal('0')
@@ -2112,10 +2135,178 @@ class PortfolioService:
             }
         }
     
+    def _build_portfolio_time_series(
+        self,
+        account_ids: List[int],
+        date_range: List[date],
+        get_proportion,
+        asset_service: 'AssetValuationService'
+    ) -> Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]:
+        """计算指定账户列表在date_range每天的总资产和资金流入/流出。返回 (portfolio_values, daily_flows)。
+
+        单账户时自动使用缓存（proportion=1 存储，由调用方乘以 proportion）。
+        多账户时直接计算（不缓存，调用方应尽量拆分为单账户调用）。
+        """
+        if len(account_ids) == 1:
+            return self._build_single_account_time_series(
+                account_ids[0], date_range, asset_service
+            )
+
+        # 多账户直接计算（不缓存）
+        return self._fetch_time_series_from_db(account_ids, date_range, get_proportion, asset_service)
+
+    def _build_single_account_time_series(
+        self,
+        account_id: int,
+        date_range: List[date],
+        asset_service: 'AssetValuationService'
+    ) -> Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]:
+        """单账户时间序列计算，自动读写缓存（proportion=1）。
+        若缓存不可用（如表尚未创建），则直接走 DB 计算，不影响主流程。
+        """
+        cached = {}
+        try:
+            from app.services.performance_cache_service import performance_cache_service
+            cached = performance_cache_service.get_cached_rows(account_id, date_range)
+        except Exception as e:
+            logger.debug(f"Performance cache read failed (will compute from DB): {e}")
+
+        to_compute = [d for d in date_range if d not in cached]
+
+        if to_compute:
+            raw_proportion = lambda _: Decimal('1')
+            computed_values, computed_flows = self._fetch_time_series_from_db(
+                [account_id], to_compute, raw_proportion, asset_service
+            )
+            # 构建写缓存数据
+            cache_data = {}
+            for i, d in enumerate(to_compute):
+                total = computed_values[i][1]
+                flow = computed_flows[i][1]
+                try:
+                    cb = asset_service.get_cash_balance(account_id, d)
+                    cash_val = Decimal(str(cb['total_cad']))
+                except Exception:
+                    cash_val = Decimal('0')
+                cache_data[d] = {
+                    'stock_value': total - cash_val,
+                    'cash_value': cash_val,
+                    'total_assets': total,
+                    'daily_flow': flow,
+                }
+            try:
+                from app.services.performance_cache_service import performance_cache_service
+                performance_cache_service.save_rows(account_id, cache_data)
+            except Exception as e:
+                logger.debug(f"Performance cache write failed (non-fatal): {e}")
+
+            for d, vals in cache_data.items():
+                cached[d] = _CacheRowProxy(vals)
+
+        portfolio_values = [(d, Decimal(str(cached[d].total_assets))) for d in date_range]
+        daily_flows = [(d, Decimal(str(cached[d].daily_flow))) for d in date_range]
+        return portfolio_values, daily_flows
+
+    def _fetch_time_series_from_db(
+        self,
+        account_ids: List[int],
+        date_range: List[date],
+        get_proportion,
+        asset_service: 'AssetValuationService'
+    ) -> Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]:
+        """直接从 DB 计算指定日期的时间序列（不读写缓存）。"""
+        portfolio_values: List[Tuple[date, Decimal]] = []
+        daily_flows: List[Tuple[date, Decimal]] = []
+
+        for current_date in date_range:
+            try:
+                portfolio_data = self.get_portfolio_summary(
+                    account_ids, TimePeriod.CUSTOM, current_date, current_date
+                )
+                stock_value = Decimal(str(portfolio_data.get('summary', {}).get('total_current_value', 0)))
+            except Exception as e:
+                logger.warning(f"获取{current_date}股票数据失败，使用0: {e}")
+                stock_value = Decimal('0')
+
+            cash_total = Decimal('0')
+            for account_id in account_ids:
+                proportion = get_proportion(account_id)
+                if proportion <= 0:
+                    continue
+                try:
+                    cash_balance = asset_service.get_cash_balance(account_id, current_date)
+                    cash_total += Decimal(str(cash_balance['total_cad'])) * proportion
+                except Exception as e:
+                    logger.warning(f"获取账户{account_id}在{current_date}现金数据失败: {e}")
+
+            portfolio_values.append((current_date, stock_value + cash_total))
+
+            day_flows = Decimal('0')
+            for tx in Transaction.query.filter(
+                Transaction.account_id.in_(account_ids),
+                Transaction.trade_date == current_date
+            ).all():
+                tx_type = (tx.type or '').upper()
+                if tx_type in ('DEPOSIT', 'WITHDRAWAL'):
+                    proportion = get_proportion(tx.account_id)
+                    if proportion <= 0:
+                        continue
+                    amount = Decimal(str(tx.amount or 0)) * proportion
+                    if tx_type == 'WITHDRAWAL':
+                        amount *= Decimal('-1')
+                    day_flows += amount
+            daily_flows.append((current_date, day_flows))
+
+        return portfolio_values, daily_flows
+
+    def _compute_period_returns(
+        self,
+        portfolio_values: List[Tuple[date, Decimal]],
+        daily_flows: List[Tuple[date, Decimal]],
+        use_twr: bool
+    ) -> List[float]:
+        """将资产时间序列转换为相对于第一天的百分比收益序列。
+
+        TWR（时间加权）：把存款/取款剥离，只反映投资表现。
+          period_return = (value - flow) / previous_value - 1
+          （day-end flow 约定：flow 发生在当天末，不影响当天起始基准）
+        MWR（资金加权，简化版）：直接用 value / base - 1，存款会计入"收益"，
+          适合衡量账户总体增长但不适合跨账户比较。
+        """
+        if not portfolio_values:
+            return []
+        base_value = portfolio_values[0][1]
+        if base_value <= 0:
+            return [0.0] * len(portfolio_values)
+
+        returns: List[float] = []
+        if use_twr:
+            previous_value = None
+            for i, (_, value) in enumerate(portfolio_values):
+                flow = daily_flows[i][1]
+                if previous_value is None:
+                    returns.append(0.0)
+                elif previous_value <= 0:
+                    returns.append(returns[-1] if returns else 0.0)
+                else:
+                    # 正确 TWR 公式（day-end flow）：
+                    # 去掉当日存取款后的纯投资价值 / 前一日收盘价 - 1
+                    value_ex_flow = value - flow
+                    period_return = value_ex_flow / previous_value - Decimal('1')
+                    cumulative = (Decimal('1') + Decimal(str(returns[-1] / 100))) if returns else Decimal('1')
+                    cumulative *= (Decimal('1') + period_return)
+                    returns.append(float((cumulative - Decimal('1')) * Decimal('100')))
+                previous_value = value
+        else:
+            for _, value in portfolio_values:
+                returns.append(float(((value / base_value) - Decimal('1')) * Decimal('100')))
+        return returns
+
     def get_performance_comparison(self, account_ids: List[int],
                                    period: str = '1m',
                                    member_id: Optional[int] = None,
-                                   return_type: str = 'mwr') -> Dict:
+                                   return_type: str = 'mwr',
+                                   include_breakdown: bool = False) -> Dict:
         """获取收益对比数据，支持多种时间范围"""
         if not account_ids:
             return {
@@ -2185,85 +2376,34 @@ class PortfolioService:
 
         asset_service = AssetValuationService()
 
-        portfolio_values: List[Tuple[date, Decimal]] = []
-        daily_flows: List[Tuple[date, Decimal]] = []  # date, net flow
+        # 逐账户计算（单账户走缓存，proportion=1 存储）
+        # 然后加权求和得到合计，避免多账户合并计算无法命中缓存
+        acct_raw: Dict[int, Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]] = {}
+        for acct_id in account_ids:
+            proportion = get_proportion(acct_id)
+            if proportion <= 0:
+                continue
+            raw_vals, raw_flows = self._build_portfolio_time_series(
+                [acct_id], date_range, lambda _: Decimal('1'), asset_service
+            )
+            # 应用 proportion
+            acct_raw[acct_id] = (
+                [(d, v * proportion) for d, v in raw_vals],
+                [(d, f * proportion) for d, f in raw_flows],
+            )
 
-        for current_date in date_range:
-            # 使用统一的计算逻辑：股票价值 + 现金余额 = 总资产
-
-            # 1. 获取股票价值（使用统一的get_portfolio_summary）
-            try:
-                portfolio_data = self.get_portfolio_summary(
-                    account_ids, TimePeriod.CUSTOM, current_date, current_date
-                )
-                stock_value = Decimal(str(portfolio_data.get('summary', {}).get('total_current_value', 0)))
-            except Exception as e:
-                logger.warning(f"获取{current_date}股票数据失败，使用0: {e}")
-                stock_value = Decimal('0')
-
-            # 2. 获取现金余额（使用统一的get_cash_balance）
-            cash_total = Decimal('0')
-            for account_id in account_ids:
-                proportion = get_proportion(account_id)
-                if proportion <= 0:
-                    continue
-
-                try:
-                    # 统一使用Cash表数据，不做历史推算
-                    cash_balance = asset_service.get_cash_balance(account_id, current_date)
-                    cash_total += Decimal(str(cash_balance['total_cad'])) * proportion
-                except Exception as e:
-                    logger.warning(f"获取账户{account_id}在{current_date}现金数据失败: {e}")
-                    continue
-
-            # 3. 计算总资产 = 股票 + 现金
-            total_value = stock_value + cash_total
-            portfolio_values.append((current_date, total_value))
-
-            day_flows = Decimal('0')
-            for tx in Transaction.query.filter(
-                Transaction.account_id.in_(account_ids),
-                Transaction.trade_date == current_date
-            ).all():
-                tx_type = (tx.type or '').upper()
-                if tx_type in ('DEPOSIT', 'WITHDRAWAL'):
-                    proportion = get_proportion(tx.account_id)
-                    if proportion <= 0:
-                        continue
-                    amount = Decimal(str(tx.amount or 0)) * proportion
-                    if tx_type == 'WITHDRAWAL':
-                        amount *= Decimal('-1')
-                    day_flows += amount
-            daily_flows.append((current_date, day_flows))
-
-        portfolio_returns: List[float] = []
-        # 修复：使用第一天的值作为基准，而不是第一个大于0的值
+        # 合计 = 各账户之和
+        n = len(date_range)
+        portfolio_values: List[Tuple[date, Decimal]] = [
+            (date_range[i], sum(acct_raw[aid][0][i][1] for aid in acct_raw))
+            for i in range(n)
+        ]
+        daily_flows: List[Tuple[date, Decimal]] = [
+            (date_range[i], sum(acct_raw[aid][1][i][1] for aid in acct_raw))
+            for i in range(n)
+        ]
+        portfolio_returns = self._compute_period_returns(portfolio_values, daily_flows, use_twr)
         actual_base_value = portfolio_values[0][1] if portfolio_values else Decimal('0')
-
-        if actual_base_value <= 0:
-            portfolio_returns = [0.0 for _ in portfolio_values]
-            base_value = Decimal('1')
-        else:
-            base_value = actual_base_value
-            if use_twr:
-                previous_value = None
-                for i, (current_date, value) in enumerate(portfolio_values):
-                    flow = daily_flows[i][1]
-                    if previous_value is None or previous_value <= 0:
-                        portfolio_returns.append(0.0)
-                    else:
-                        adjusted_prev = previous_value - flow
-                        if adjusted_prev <= 0:
-                            portfolio_returns.append(0.0)
-                        else:
-                            period_return = (value - flow - adjusted_prev) / adjusted_prev
-                            cumulative = (Decimal('1') + Decimal(str(portfolio_returns[-1] / 100))) if portfolio_returns else Decimal('1')
-                            cumulative *= (Decimal('1') + period_return)
-                            portfolio_returns.append(float((cumulative - Decimal('1')) * Decimal('100')))
-                    previous_value = value
-            else:
-                for _, value in portfolio_values:
-                    portfolio_returns.append(float(((value / base_value) - Decimal('1')) * Decimal('100')))
 
         def build_index_returns(symbol: str) -> List[float]:
             cache_key = (symbol.upper(), start_date, today)
@@ -2336,8 +2476,28 @@ class PortfolioService:
         base_value_float = float(actual_base_value) if actual_base_value > 0 else 0.0
         total_return_value = float(portfolio_values[-1][1] - actual_base_value) if (portfolio_values and actual_base_value > 0) else 0.0
 
+        # 各账户细分曲线 — 复用 acct_raw，无需重复计算
+        accounts_breakdown: List[Dict] = []
+        if include_breakdown and len(acct_raw) > 1:
+            for acct_id, (acct_values, acct_flows) in acct_raw.items():
+                account = Account.query.get(acct_id)
+                if not account:
+                    continue
+                # 各账户细线始终使用 TWR：剥离存取款影响，只反映投资表现
+                # MWR 下存款会计入"收益"，导致有存款的账户曲线陡升，误导用户
+                acct_returns = self._compute_period_returns(acct_values, acct_flows, use_twr=True)
+                accounts_breakdown.append({
+                    'account_id': acct_id,
+                    'account_name': account.name,
+                    'performance_series': [
+                        {'date': d.isoformat(), 'portfolio': acct_returns[i] if i < len(acct_returns) else 0.0}
+                        for i, d in enumerate(date_range)
+                    ]
+                })
+
         return {
             'performance_series': performance_series,
+            'accounts_breakdown': accounts_breakdown,
             'summary': {
                 'start_date': start_date.isoformat(),
                 'end_date': today.isoformat(),

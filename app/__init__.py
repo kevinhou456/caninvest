@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from flask import Flask, request, session, g
 from flask_sqlalchemy import SQLAlchemy
@@ -13,6 +14,52 @@ db = SQLAlchemy()
 migrate = Migrate()
 babel = Babel()
 cors = CORS()
+
+
+def _auto_migrate(app: Flask) -> None:
+    """应用启动时自动创建缺失的数据库表，无需手动操作。
+
+    使用 db.create_all(checkfirst=True) 而非 flask_migrate_upgrade，
+    因为项目数据库由 db.create_all 直接创建，alembic_version 为空，
+    flask_migrate_upgrade 会尝试重建所有表导致冲突。
+    db.create_all 是幂等的：已存在的表不受影响，只创建缺失的表。
+    """
+    try:
+        with app.app_context():
+            db.create_all()
+    except Exception as exc:
+        app.logger.warning(f'Auto migrate (create_all) failed (non-fatal): {exc}')
+
+
+def _cleanup_stale_report_cache(app: Flask) -> None:
+    """启动时清理孤儿/过期的 report_analysis_cache 行：
+    1. 超过 14 天未更新的行（版本号升级后的旧缓存会自然走到这里）
+    2. account_id 指向已不存在账户的行
+    """
+    try:
+        with app.app_context():
+            from datetime import timedelta
+            from app.models.report_analysis_cache import ReportAnalysisCache
+            from app.models.account import Account
+
+            cutoff = datetime.utcnow() - timedelta(days=14)
+            stale = ReportAnalysisCache.query.filter(
+                ReportAnalysisCache.updated_at < cutoff
+            ).delete(synchronize_session=False)
+
+            # 清理 account_id 不为空但账户已删除的行
+            existing_ids = {a.id for a in Account.query.with_entities(Account.id).all()}
+            orphan = ReportAnalysisCache.query.filter(
+                ReportAnalysisCache.account_id.isnot(None),
+                ReportAnalysisCache.account_id.notin_(existing_ids)
+            ).delete(synchronize_session=False)
+
+            if stale or orphan:
+                db.session.commit()
+                app.logger.info(f'Report cache cleanup: removed {stale} stale + {orphan} orphan rows')
+    except Exception as exc:
+        db.session.rollback()
+        app.logger.warning(f'Report cache cleanup failed (non-fatal): {exc}')
 
 
 def _ensure_performance_indexes(app: Flask) -> None:
@@ -56,7 +103,9 @@ def create_app(config_name=None):
     db.init_app(app)
     migrate.init_app(app, db)
     cors.init_app(app)
+    _auto_migrate(app)
     _ensure_performance_indexes(app)
+    _cleanup_stale_report_cache(app)
     
     # 初始化任务调度器 - 检查配置选项
     if not app.config.get('TESTING') and app.config.get('SCHEDULER_AUTO_START', False):

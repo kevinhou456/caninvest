@@ -186,9 +186,14 @@ def _normalize_cache_params(params: dict) -> dict:
     return normalized
 
 
+# 每次修改 portfolio_service 计算逻辑时手动递增，使所有旧缓存自动失效
+_CACHE_SCHEMA_VERSION = 4
+
+
 def _build_analysis_cache_key(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],
                               account_ids: List[int], params: dict) -> Tuple[str, dict]:
     payload = {
+        'v': _CACHE_SCHEMA_VERSION,
         'cache_type': cache_type,
         'family_id': family_id,
         'member_id': member_id,
@@ -257,20 +262,12 @@ def _is_analysis_cache_fresh(cache: ReportAnalysisCache, account_ids: List[int],
     if max_cash and max_cash > cache_time:
         return False
 
-    skip_price_history = False
-    if cache_type in ('monthly', 'quarterly', 'annual'):
-        try:
-            skip_price_history = cache_time.date() == datetime.now().date()
-        except Exception:
-            skip_price_history = False
-
-    if not skip_price_history:
-        symbol_pairs = _get_symbol_pairs(account_ids)
-        max_history, max_price = _get_latest_symbol_updates(symbol_pairs)
-        if max_history and max_history > cache_time:
-            return False
-        if max_price and max_price > cache_time:
-            return False
+    symbol_pairs = _get_symbol_pairs(account_ids)
+    max_history, max_price = _get_latest_symbol_updates(symbol_pairs)
+    if max_history and max_history > cache_time:
+        return False
+    if max_price and max_price > cache_time:
+        return False
 
     max_rate = _get_latest_exchange_rate_update(cache_type)
     if max_rate and max_rate > cache_time:
@@ -306,6 +303,7 @@ def _store_analysis_cache(cache_type: str, family_id: int, member_id: Optional[i
     account_ids_json = json.dumps(sorted(set(account_ids or [])))
     params_json = json.dumps(_normalize_cache_params(params or {}), ensure_ascii=False)
     data_json = _dump_cache_payload(analysis_data)
+    now = datetime.utcnow()
 
     if cache is None:
         cache = ReportAnalysisCache(
@@ -316,7 +314,9 @@ def _store_analysis_cache(cache_type: str, family_id: int, member_id: Optional[i
             account_id=account_id,
             account_ids_json=account_ids_json,
             params_json=params_json,
-            data_json=data_json
+            data_json=data_json,
+            created_at=now,
+            updated_at=now,
         )
         db.session.add(cache)
     else:
@@ -326,6 +326,7 @@ def _store_analysis_cache(cache_type: str, family_id: int, member_id: Optional[i
         cache.account_ids_json = account_ids_json
         cache.params_json = params_json
         cache.data_json = data_json
+        cache.updated_at = now  # 显式设置，不依赖 SQLAlchemy onupdate
     try:
         db.session.commit()
     except Exception:
@@ -1164,8 +1165,11 @@ def get_family_performance_comparison(family_id):
     try:
         # 调用统一的投资组合服务
         from app.services.portfolio_service import portfolio_service
-        analysis_data = portfolio_service.get_performance_comparison(account_ids, range_param, member_id=member_id,
-                                                                     return_type=request.args.get('return_type', 'mwr'))
+        analysis_data = portfolio_service.get_performance_comparison(
+            account_ids, range_param, member_id=member_id,
+            return_type=request.args.get('return_type', 'mwr'),
+            include_breakdown=len(account_ids) > 1
+        )
 
         return jsonify({
             'family': family.to_dict(),

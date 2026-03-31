@@ -1313,18 +1313,30 @@ def batch_update_cash():
         
         # 批量更新每个账户的现金
         updated_count = 0
+        updated_account_ids = []
         for update in updates:
             account_id = update.get('account_id')
             cad_amount = update.get('cad', 0)
             usd_amount = update.get('usd', 0)
-            
+
             if account_id:
                 # 验证账户存在
                 account = Account.query.get(account_id)
                 if account:
                     Cash.update_cash(account_id, usd=usd_amount, cad=cad_amount)
                     updated_count += 1
-        
+                    updated_account_ids.append(account_id)
+
+        # 现金变更只影响今日缓存
+        try:
+            from datetime import date as _date
+            from app.services.performance_cache_service import performance_cache_service
+            today = _date.today()
+            for aid in updated_account_ids:
+                performance_cache_service.invalidate_from_date(aid, today)
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'message': _('Cash balances updated successfully'),
@@ -1948,10 +1960,17 @@ def save_transaction_record(transaction_id=None, account_id=None, transaction_ty
                 transaction.notes = notes
         
         db.session.commit()
-        
+
+        # 失效该账户从交易日起的缓存
+        try:
+            from app.services.performance_cache_service import performance_cache_service
+            performance_cache_service.invalidate_from_date(transaction.account_id, transaction.trade_date)
+        except Exception:
+            pass  # 缓存失效失败不影响主流程
+
         flash(f"成功保存交易记录! ID: {transaction.id}", 'success')
         return transaction
-        
+
     except Exception as e:
         print(f"DEBUG: ❌ Exception occurred in save_transaction_record: {str(e)}")
         print(f"DEBUG: Exception type: {type(e)}")
@@ -2912,15 +2931,21 @@ def delete_all_transactions():
         
         # 删除所有交易记录
         deleted_count = Transaction.query.delete()
-        
+
         db.session.commit()
-        
+
+        try:
+            from app.services.performance_cache_service import performance_cache_service
+            performance_cache_service.invalidate_all()
+        except Exception:
+            pass
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'message': f'Successfully deleted {deleted_count} transactions',
             'deleted_count': deleted_count
         })
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({
@@ -3030,16 +3055,24 @@ def delete_transaction(transaction_id):
     try:
         # 查找交易记录
         transaction = Transaction.query.get_or_404(transaction_id)
-        
+        acct_id = transaction.account_id
+        trade_date = transaction.trade_date
+
         # 删除交易
         db.session.delete(transaction)
         db.session.commit()
-        
+
+        try:
+            from app.services.performance_cache_service import performance_cache_service
+            performance_cache_service.invalidate_from_date(acct_id, trade_date)
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'message': '交易记录删除成功'
         })
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({
@@ -3098,6 +3131,8 @@ def update_transaction(transaction_id):
                     }), 400
 
         # 更新字段
+        old_trade_date = transaction.trade_date
+        old_account_id = transaction.account_id
         if 'trade_date' in data:
             from datetime import datetime
             transaction.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
@@ -3117,9 +3152,20 @@ def update_transaction(transaction_id):
             transaction.notes = data['notes']
         if 'amount' in data:
             transaction.amount = float(data['amount']) if data['amount'] else None
-        
+
         db.session.commit()
-        
+
+        try:
+            from app.services.performance_cache_service import performance_cache_service
+            # 失效旧日期起（日期可能变化，取两者较早的）
+            invalidate_date = min(old_trade_date, transaction.trade_date)
+            performance_cache_service.invalidate_from_date(old_account_id, invalidate_date)
+            # 若账户也变了，同时失效新账户
+            if transaction.account_id != old_account_id:
+                performance_cache_service.invalidate_from_date(transaction.account_id, transaction.trade_date)
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'message': '交易记录更新成功',
@@ -3175,15 +3221,21 @@ def delete_account_transactions(account_id):
         
         # 删除该账户的所有交易记录
         deleted_count = Transaction.query.filter_by(account_id=account_id).delete()
-        
+
         db.session.commit()
-        
+
+        try:
+            from app.services.performance_cache_service import performance_cache_service
+            performance_cache_service.invalidate_account(account_id)
+        except Exception:
+            pass
+
         return jsonify({
             'success': True,
             'message': f'Successfully deleted {deleted_count} transactions from account "{account.name}"',
             'deleted_count': deleted_count
         })
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({
