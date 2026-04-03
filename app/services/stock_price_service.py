@@ -64,6 +64,15 @@ class StockPriceService:
         if local_time.weekday() >= 5:
             return False
 
+        # Check market holidays
+        try:
+            from app.models.market_holiday import MarketHoliday
+            mkt_key = 'CA' if market == 'TSX' else 'US'
+            if MarketHoliday.query.filter_by(holiday_date=local_time.date(), market=mkt_key).first():
+                return False
+        except Exception:
+            pass
+
         # Regular market hours: 9:30 - 16:00 ET
         if local_time.hour < 9 or local_time.hour > 16:
             return False

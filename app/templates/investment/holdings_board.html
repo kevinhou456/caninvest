@@ -1064,15 +1064,30 @@ function buildTxTooltip(holding) {
         const type = tx.type || '';
         const date = tx.date || '';
         const acc = tx.account_name ? ` (${tx.account_name})` : '';
-        const base = escapeHtml(`${date} ${type} ${qty} @ $${price}${acc}`);
+        const baseText = escapeHtml(`${date} ${qty} @ $${price}${acc}`);
 
-        if (type === 'BUY' && priceNum > 0 && currentPrice > 0) {
-            const pnlPct = ((currentPrice - priceNum) / priceNum) * 100;
-            const colorClass = pnlPct >= 0 ? 'text-success' : 'text-danger';
-            const sign = pnlPct >= 0 ? '+' : '';
-            return `${base} <span class="${colorClass}">(${sign}${pnlPct.toFixed(2)}%)</span>`;
+        if (type === 'BUY') {
+            const pnlSpan = (priceNum > 0 && currentPrice > 0)
+                ? (() => {
+                    const pnlPct = ((currentPrice - priceNum) / priceNum) * 100;
+                    const c = pnlPct >= 0 ? '#28a745' : '#dc3545';
+                    const sign = pnlPct >= 0 ? '+' : '';
+                    return ` <span style="color:${c}">(${sign}${pnlPct.toFixed(2)}%)</span>`;
+                })()
+                : '';
+            return `<span style="color:#28a745;font-weight:600">▲ BUY</span> ${baseText}${pnlSpan}`;
+        } else if (type === 'SELL') {
+            const pnlSpan = (priceNum > 0 && currentPrice > 0)
+                ? (() => {
+                    const pnlPct = ((currentPrice - priceNum) / priceNum) * 100;
+                    const c = pnlPct >= 0 ? '#28a745' : '#dc3545';
+                    const sign = pnlPct >= 0 ? '+' : '';
+                    return ` <span style="color:${c}">(${sign}${pnlPct.toFixed(2)}%)</span>`;
+                })()
+                : '';
+            return `<span style="color:#dc3545;font-weight:600">▼ SELL</span> ${baseText}${pnlSpan}`;
         }
-        return base;
+        return `<span style="font-weight:600">${escapeHtml(type)}</span> ${baseText}`;
     });
     const header = escapeHtml(holding.symbol || '');
     return `<strong>${header}</strong><br>${rows.join('<br>')}`;

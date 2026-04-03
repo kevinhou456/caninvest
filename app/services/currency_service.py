@@ -506,8 +506,8 @@ class CurrencyService:
                 # 计算年度平均值
                 valid_rates = []
                 for obs in observations:
-                    if obs.get(f'd.{series_id}') and obs[f'd.{series_id}']['v'] is not None:
-                        valid_rates.append(float(obs[f'd.{series_id}']['v']))
+                    if obs.get(series_id) and obs[series_id].get('v') is not None:
+                        valid_rates.append(float(obs[series_id]['v']))
 
                 if valid_rates:
                     annual_average = sum(valid_rates) / len(valid_rates)

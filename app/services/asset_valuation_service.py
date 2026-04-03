@@ -264,11 +264,18 @@ class AssetValuationService:
                         # 计算Daily Change
                         daily_change_value = 0
                         daily_change_percent = 0
-                        previous_price = self._get_previous_close_price(symbol, currency, target_date)
-                        if previous_price and previous_price > 0:
-                            daily_change_per_share = float(current_price) - float(previous_price)
-                            daily_change_value = daily_change_per_share * float(current_shares)
-                            daily_change_percent = (daily_change_per_share / float(previous_price)) * 100
+                        from app.models.market_holiday import MarketHoliday as _MH
+                        _market = self.history_cache_service._get_market(symbol, currency)
+                        _is_today_holiday = (
+                            target_date >= date.today() and
+                            (target_date.weekday() >= 5 or _MH.is_holiday(target_date, _market))
+                        )
+                        if not _is_today_holiday:
+                            previous_price = self._get_previous_close_price(symbol, currency, target_date)
+                            if previous_price and previous_price > 0:
+                                daily_change_per_share = float(current_price) - float(previous_price)
+                                daily_change_value = daily_change_per_share * float(current_shares)
+                                daily_change_percent = (daily_change_per_share / float(previous_price)) * 100
 
                         percent_base_cost = total_cost_native if currency == 'USD' else total_cost_cad
 
@@ -810,26 +817,35 @@ class AssetValuationService:
             total_daily_change_cad = Decimal('0')
             total_daily_change_cad_only = Decimal('0')
             total_daily_change_usd_only = Decimal('0')
-            
+
+            # 节假日/周末不计算当日变化
+            from app.models.market_holiday import MarketHoliday as _MH
+            if target_date >= date.today() and (
+                target_date.weekday() >= 5 or
+                _MH.is_holiday(target_date, 'US') or
+                _MH.is_holiday(target_date, 'CA')
+            ):
+                return {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
+
             # 获取汇率
             exchange_rate = self.currency_service.get_current_rate('USD', 'CAD')
             exchange_rate_decimal = Decimal(str(exchange_rate))
-            
+
             # 遍历所有账户，汇总个股的当日变化
             for account_id in account_ids:
                 # 获取该账户的所有持仓
                 holdings = self._get_holdings_at_date(account_id, target_date)
-                
+
                 for symbol, shares in holdings.items():
                     if shares <= 0:
                         continue
-                    
+
                     # 获取股票信息
                     currency = Transaction.get_currency_by_stock_symbol(symbol)
                     current_price = self.stock_price_service.get_cached_stock_price(
                         symbol, currency, auto_refresh=self.auto_refresh_prices
                     ) or 0
-                    
+
                     if current_price > 0:
                         # 获取前一日收盘价
                         previous_price = self._get_previous_close_price(symbol, currency, target_date)
