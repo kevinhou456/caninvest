@@ -965,8 +965,7 @@ def process_csv_with_mapping(df, column_mappings):
                         processing_errors.append(f"Row {row_num}: Price required for stock transaction")
                         continue
                     
-                    # 股票交易不使用amount字段
-                    row_data['amount'] = None
+                    # 股票交易的amount字段：如果用户映射了amount列则使用，否则为None
                     
             except (ValueError, TypeError) as e:
                 processing_errors.append(f"Row {row_num}: Invalid number format - {str(e)}")
@@ -1035,7 +1034,23 @@ def process_csv_with_mapping(df, column_mappings):
                 except (ValueError, TypeError):
                     row_data['fee'] = 0
             else:
-                row_data['fee'] = 0
+                # 没有fee列时，对BUY/SELL尝试从amount和quantity*price的差值推算手续费
+                inferred_fee = 0
+                if (row_data.get('type') in ('BUY', 'SELL') and
+                        row_data.get('amount') and
+                        row_data.get('quantity') and row_data.get('price')):
+                    gross = row_data['quantity'] * row_data['price']
+                    tx_type = row_data['type']
+                    if tx_type == 'BUY':
+                        # BUY: 实付 = gross + fee，fee = amount - gross
+                        diff = row_data['amount'] - gross
+                    else:
+                        # SELL: 实收 = gross - fee，fee = gross - amount
+                        diff = gross - row_data['amount']
+                    # 差值为正且不超过15才认为是手续费
+                    if 0 < diff <= 15:
+                        inferred_fee = diff
+                row_data['fee'] = inferred_fee
             
             # 备注
             if 'notes' in column_mappings and column_mappings['notes']:
