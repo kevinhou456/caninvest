@@ -42,6 +42,7 @@
                         <th>{{ _('Unrealized Gain/Loss') }}</th>
                         <th>{{ _('Return Rate') }}</th>
                         <th>{{ _('Annual Exchange Rates(*)') }}</th>
+                        <th id="t5008-col-header" style="display:none;">T5008</th>
                     </tr>
                 </thead>
                 <tbody id="annual-data-tbody">
@@ -894,6 +895,13 @@ function updateAnnualTable() {
             displayYear = item.year;
         }
 
+        const singleAcct = !!accountId || (filterInfo && filterInfo.account_id);
+        const effectiveAccountId = accountId || (filterInfo && filterInfo.account_id);
+        const isMainRow = !item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row && !item.is_account_row;
+        const t5008Cell = singleAcct && isMainRow
+            ? `<td class="text-center"><button class="btn btn-outline-secondary btn-sm py-0" onclick="showT5008(${item.year}, ${effectiveAccountId})">T5008</button></td>`
+            : `<td></td>`;
+
         row.innerHTML = `
             <td class="font-weight-bold">${displayYear}</td>
             <td>
@@ -926,6 +934,7 @@ function updateAnnualTable() {
             <td class="text-muted">
                 ${item.is_detail_row || item.is_member_row || item.is_member_account_type_row ? '' : (item.annual_usd_cad_rate ? formatNumber(item.annual_usd_cad_rate, 4) : 'N/A')}
             </td>
+            ${t5008Cell}
         `;
         
         tbody.appendChild(row);
@@ -1293,6 +1302,97 @@ function updateAccountToggleVisibility() {
     } else {
         wrapper.style.display = '';
     }
+    const t5008Header = document.getElementById('t5008-col-header');
+    if (t5008Header) t5008Header.style.display = singleAccount ? '' : 'none';
+}
+
+async function showT5008(year, acctId) {
+    const el = document.getElementById('t5008Modal');
+    const existing = bootstrap.Modal.getInstance(el);
+    if (existing) existing.dispose();
+    document.getElementById('t5008ModalLabel').textContent = `T5008 — ${year}`;
+    document.getElementById('t5008Body').innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> 加载中...</div>';
+    new bootstrap.Modal(el).show();
+
+    try {
+        const resp = await fetch(`/api/v1/families/1/reports/annual-analysis/t5008?account_id=${acctId}&year=${year}`);
+        const data = await resp.json();
+        if (!data.success) {
+            document.getElementById('t5008Body').innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+        if (!data.records.length) {
+            document.getElementById('t5008Body').innerHTML = '<p class="text-muted text-center py-3">该年度没有卖出交易。</p>';
+            return;
+        }
+        // 汇率统一用4位小数，保证显示值和计算结果一致
+        const fxRate = data.annual_usd_cad_rate ? Math.round(data.annual_usd_cad_rate * 10000) / 10000 : null;
+
+        const fmtAmt = (val, currency) => {
+            if (currency === 'USD' && fxRate) {
+                const cad = val * fxRate;
+                return `$${cad.toFixed(2)} ($${val.toFixed(2)})`;
+            }
+            return `$${val.toFixed(2)}`;
+        };
+
+        // 合计分CAD和USD分别累计
+        let totalProceedsCad = 0, totalAcbCad = 0, totalGainCad = 0;
+        let html = `<div class="table-responsive"><table class="table table-sm table-hover">
+            <thead class="table-light"><tr>
+                <th>日期</th><th>股票</th><th class="text-end">数量</th>
+                <th class="text-end">成本基础(ACB)</th><th class="text-end">卖出金额</th>
+                <th class="text-end">收益/亏损</th><th>币种</th>
+            </tr></thead><tbody>`;
+        for (const r of data.records) {
+            const rate = r.currency === 'USD' && fxRate ? fxRate : 1;
+            totalProceedsCad += r.proceeds * rate;
+            totalAcbCad += r.acb * rate;
+            totalGainCad += r.gain * rate;
+            const gainCls = r.gain >= 0 ? 'text-success' : 'text-danger';
+            const sign = r.gain >= 0 ? '+' : '';
+            const gainFmt = r.currency === 'USD' && fxRate
+                ? `${sign}$${(r.gain * fxRate).toFixed(2)} (${sign}$${r.gain.toFixed(2)})`
+                : `${sign}$${r.gain.toFixed(2)}`;
+            html += `<tr>
+                <td>${r.date}</td>
+                <td><strong>${r.symbol}</strong></td>
+                <td class="text-end">${r.quantity}</td>
+                <td class="text-end">${fmtAmt(r.acb, r.currency)}</td>
+                <td class="text-end">${fmtAmt(r.proceeds, r.currency)}</td>
+                <td class="text-end ${gainCls}">${gainFmt}</td>
+                <td>${r.currency}${r.currency === 'USD' && fxRate ? ` <small class="text-muted">(×${fxRate.toFixed(4)})</small>` : ''}</td>
+            </tr>`;
+        }
+        const totalCls = totalGainCad >= 0 ? 'text-success' : 'text-danger';
+        const totalSign = totalGainCad >= 0 ? '+' : '';
+        const rateNote = fxRate ? ` <small class="text-muted fw-normal">USD已按年度平均汇率 ${fxRate.toFixed(4)} 换算</small>` : '';
+        html += `</tbody><tfoot class="table-light fw-bold"><tr>
+            <td colspan="3">合计(CAD)${rateNote}</td>
+            <td class="text-end">$${totalAcbCad.toFixed(2)}</td>
+            <td class="text-end">$${totalProceedsCad.toFixed(2)}</td>
+            <td class="text-end ${totalCls}">${totalSign}$${totalGainCad.toFixed(2)}</td>
+            <td></td>
+        </tr></tfoot></table></div>
+        <p class="text-muted small mt-2 mb-0">* 成本基础按平均成本法(ACB)计算；USD金额格式：CAD（USD）</p>`;
+        document.getElementById('t5008Body').innerHTML = html;
+    } catch (e) {
+        document.getElementById('t5008Body').innerHTML = '<div class="alert alert-danger">请求失败</div>';
+    }
 }
 </script>
+
+<!-- T5008 Modal -->
+<div class="modal fade" id="t5008Modal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="t5008ModalLabel">T5008</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="t5008Body">
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

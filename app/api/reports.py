@@ -792,6 +792,95 @@ def get_family_annual_analysis(family_id):
         }), 500
 
 
+@bp.route('/families/<int:family_id>/reports/annual-analysis/t5008', methods=['GET'])
+def get_t5008_data(family_id):
+    """获取指定账户指定年份的T5008数据（平均成本法ACB）"""
+    Family.query.get_or_404(family_id)
+    account_id = request.args.get('account_id', type=int)
+    year = request.args.get('year', type=int)
+    if not account_id or not year:
+        return jsonify({'success': False, 'error': 'account_id and year are required'}), 400
+
+    account = Account.query.get_or_404(account_id)
+
+    year_start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
+
+    # 获取该年所有SELL交易
+    sell_txs = Transaction.query.filter(
+        Transaction.account_id == account_id,
+        Transaction.type == 'SELL',
+        Transaction.trade_date >= year_start,
+        Transaction.trade_date <= year_end
+    ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
+
+    if not sell_txs:
+        return jsonify({'success': True, 'records': [], 'year': year, 'account_name': account.name})
+
+    symbols = list({tx.stock for tx in sell_txs})
+
+    records = []
+    for symbol in symbols:
+        # 拉取该账户该股票截至年末的所有交易（按时间顺序）
+        all_txs = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.stock == symbol,
+            Transaction.trade_date <= year_end
+        ).order_by(
+            Transaction.trade_date.asc(),
+            Transaction.id.asc()
+        ).all()
+
+        # 平均成本法（ACB）模拟
+        total_shares = 0.0
+        total_cost = 0.0  # 持仓总成本（含手续费）
+
+        for tx in all_txs:
+            if tx.type == 'BUY':
+                qty = float(tx.quantity)
+                cost = qty * float(tx.price) + float(tx.fee or 0)
+                total_shares += qty
+                total_cost += cost
+            elif tx.type == 'SELL':
+                sell_qty = float(tx.quantity)
+                proceeds = float(tx.net_amount)
+                # 每股平均成本
+                avg_cost_per_share = (total_cost / total_shares) if total_shares > 0 else 0.0
+                acb = avg_cost_per_share * sell_qty
+                # 更新持仓
+                total_shares -= sell_qty
+                total_cost -= acb
+                if total_shares < 1e-9:
+                    total_shares = 0.0
+                    total_cost = 0.0
+
+                if tx.trade_date >= year_start:
+                    gain = proceeds - acb
+                    records.append({
+                        'date': tx.trade_date.isoformat(),
+                        'symbol': symbol,
+                        'quantity': sell_qty,
+                        'proceeds': round(proceeds, 2),
+                        'acb': round(acb, 2),
+                        'gain': round(gain, 2),
+                        'currency': tx.currency or 'CAD',
+                    })
+
+    records.sort(key=lambda r: (r['symbol'], r['date']))
+
+    from app.services.currency_service import currency_service
+    annual_rate = currency_service.get_annual_average_rate(year, 'USD', 'CAD')
+    annual_rate_float = float(annual_rate) if annual_rate else None
+
+    return jsonify({
+        'success': True,
+        'records': records,
+        'year': year,
+        'account_name': account.name,
+        'annual_usd_cad_rate': annual_rate_float,
+    })
+
+
 @bp.route('/families/<int:family_id>/reports/annual-analysis/exchange-rates', methods=['POST'])
 def refresh_annual_exchange_rates(family_id):
     """刷新指定年份的年度平均汇率（来源：加拿大银行）"""
