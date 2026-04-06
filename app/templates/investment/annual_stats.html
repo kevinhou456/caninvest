@@ -104,6 +104,7 @@
                                 <i class="fas fa-sort ms-1 sort-icon"></i>
                             </div>
                         </th>
+                        <th id="t3-col-header" class="text-center" style="display:none;">T3-42</th>
                         <th class="text-end sortable" data-sort="shares">
                             {{ _('Shares') }}
                             <i class="fas fa-sort ms-1 sort-icon"></i>
@@ -305,6 +306,11 @@
     font-size: 0.7rem;
     color: #adb5bd;
 }
+.tooltip-roc .tooltip-inner {
+    max-width: 480px;
+    white-space: nowrap;
+    text-align: left;
+}
 </style>
 {% endblock %}
 
@@ -386,6 +392,8 @@ function loadAnnualAnalysis() {
                 updateYearlyHoldingsUI();
                 document.getElementById('loading-spinner').style.display = 'none';
                 updateAccountToggleVisibility();
+                // 异步加载T3数据并刷新持仓表
+                loadAllT3Records().then(() => { if (selectedYear) renderYearlyHoldingsTable(selectedYear); });
             } else {
                 showError('No analysis data returned from API');
             }
@@ -898,9 +906,27 @@ function updateAnnualTable() {
         const singleAcct = !!accountId || (filterInfo && filterInfo.account_id);
         const effectiveAccountId = accountId || (filterInfo && filterInfo.account_id);
         const isMainRow = !item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row && !item.is_account_row;
-        const t5008Cell = singleAcct && isMainRow
-            ? `<td class="text-center"><button class="btn btn-outline-secondary btn-sm py-0" onclick="showT5008(${item.year}, ${effectiveAccountId})">T5008</button></td>`
-            : `<td></td>`;
+        let t5008Cell;
+        if (singleAcct && isMainRow) {
+            // 单账户主行：按 account_ids 调用
+            t5008Cell = `<td class="text-center"><button class="btn btn-outline-secondary btn-sm py-0" onclick="showT5008(${item.year}, {accountIds: [${effectiveAccountId}]})">T5008</button></td>`;
+        } else if (!singleAcct && item.is_member_row && item.member_id) {
+            // 全账户视图下，成员汇总行：按 member_id 调用，弹窗内按账户类型分表
+            t5008Cell = `<td class="text-center"><button class="btn btn-outline-secondary btn-sm py-0" onclick="showT5008(${item.year}, {memberId: ${item.member_id}})">T5008</button></td>`;
+        } else {
+            t5008Cell = `<td></td>`;
+        }
+
+        const buildFlowTooltip = (list) => {
+            if (!singleAcct || !list || !list.length) return '';
+            const lines = list.map(r => {
+                const line = `${r.date}: $${r.amount.toFixed(2)} ${r.currency}`;
+                return r.notes ? `${line} (${r.notes})` : line;
+            }).join('&lt;br&gt;');
+            return ` data-bs-toggle="tooltip" data-bs-placement="left" data-bs-html="true" data-bs-title="${lines.replace(/"/g, '&quot;')}"`;
+        };
+        const depositTooltip = buildFlowTooltip(item.deposit_list);
+        const withdrawalTooltip = buildFlowTooltip(item.withdrawal_list);
 
         row.innerHTML = `
             <td class="font-weight-bold">${displayYear}</td>
@@ -916,11 +942,11 @@ function updateAnnualTable() {
                 $${formatNumber(combinedIncomeTotal, 2)}*
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(combinedIncomeCad, 2)} | USD: $${formatNumber(combinedIncomeUsd, 2)}</small>
             </td>
-            <td class="text-primary">
+            <td class="text-primary"${depositTooltip}>
                 $${formatNumber(depositsTotal, 2)}*
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.deposit_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.deposit_usd || 0, 2)}</small>
             </td>
-            <td class="text-warning">
+            <td class="text-warning"${withdrawalTooltip}>
                 $${formatNumber(withdrawalsTotal, 2)}*
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.withdrawal_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.withdrawal_usd || 0, 2)}</small>
             </td>
@@ -1016,6 +1042,13 @@ function updateAnnualTable() {
     document.getElementById('total-usd-cad-rate-footer').textContent = latestUsdCadRate ? 'Current Rates: ' + formatNumber(latestUsdCadRate, 4) : 'N/A';
 
     updateCurrencyBreakdownVisibility();
+
+    // 初始化存取款 tooltip
+    tbody.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        const existing = bootstrap.Tooltip.getInstance(el);
+        if (existing) existing.dispose();
+        new bootstrap.Tooltip(el, {trigger: 'hover', html: true, sanitize: false});
+    });
 }
 
 // Year-end holdings rendering
@@ -1092,10 +1125,36 @@ function renderYearlyHoldingsTable(year) {
         tr.dataset.returnPercent = item.return_rate || 0;
         const stockDetailUrl = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__', member_id=member_id, account_id=account_id) }}`.replace('__SYMBOL__', item.symbol || '');
 
+        const t3Cell = (() => {
+            if (!(filterInfo.account_type_name === 'Regular' && item.symbol)) return `<td></td>`;
+            const yearKey = `${year}:${item.symbol}`;
+            const yearRec = t3DataCache[yearKey];
+            const allRecs = t3BySymbol[item.symbol] || [];
+            // 显示内容：当年有数据显示金额，无数据但其他年有则显示*
+            let hint = '';
+            if (yearRec != null) {
+                hint = `<br><small class="fw-bold" style="font-size:0.75em;">$${parseFloat(yearRec.amount).toFixed(2)}</small>`;
+            } else if (allRecs.length > 0) {
+                hint = `<br><small class="fw-bold text-muted" style="font-size:0.75em;">*</small>`;
+            }
+            // Tooltip：所有年份数据（HTML格式，每行一条）
+            let tooltipContent = '';
+            if (allRecs.length > 0) {
+                tooltipContent = allRecs.map(r => {
+                    const line = `${r.year}: $${parseFloat(r.amount).toFixed(2)}`;
+                    return r.notes ? `${line} (${r.notes})` : line;
+                }).join('&lt;br&gt;');
+            }
+            const tooltipAttr = tooltipContent
+                ? ` data-bs-toggle="tooltip" data-bs-placement="left" data-bs-html="true" data-bs-title="${tooltipContent.replace(/"/g, '&quot;')}"`
+                : '';
+            return `<td class="text-center"${tooltipAttr}><button class="btn btn-outline-info btn-sm py-0" onclick="showT3Modal('${item.symbol}', ${year})">T3</button>${hint}</td>`;
+        })();
+
         tr.innerHTML = `
             <td>
                 <div class="d-flex align-items-center">
-                    <div class="bg-${(item.currency || 'USD') === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar" 
+                    <div class="bg-${(item.currency || 'USD') === 'CAD' ? 'warning' : 'success'} rounded-circle d-flex align-items-center justify-content-center me-2 stock-avatar"
                          style="color: ${(item.currency || 'USD') === 'CAD' ? 'black' : 'white'};">
                         ${(item.currency || 'USD') === 'CAD' ? 'C$' : '$'}
                     </div>
@@ -1105,6 +1164,7 @@ function renderYearlyHoldingsTable(year) {
                     </div>
                 </div>
             </td>
+            ${t3Cell}
             <td class="text-end">${formatShares(item.shares || 0)}</td>
             <td class="text-end">
                 $${formatNumber(avgCost || 0, 4)}
@@ -1118,6 +1178,13 @@ function renderYearlyHoldingsTable(year) {
             <td class="text-end"><span class="badge ${returnClass}">${formatNumber(item.return_rate || 0, 1, true)}%</span></td>
         `;
         tbody.appendChild(tr);
+    });
+
+    // 初始化T3 tooltip
+    tbody.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        const existing = bootstrap.Tooltip.getInstance(el);
+        if (existing) existing.dispose();
+        new bootstrap.Tooltip(el, {trigger: 'hover', html: true, sanitize: false});
     });
 
     initYearlyHoldingsSorting();
@@ -1303,10 +1370,13 @@ function updateAccountToggleVisibility() {
         wrapper.style.display = '';
     }
     const t5008Header = document.getElementById('t5008-col-header');
-    if (t5008Header) t5008Header.style.display = singleAccount ? '' : 'none';
+    if (t5008Header) t5008Header.style.display = '';
+    const t3Header = document.getElementById('t3-col-header');
+    if (t3Header) t3Header.style.display = (singleAccount && filterInfo.account_type_name === 'Regular') ? '' : 'none';
 }
 
-async function showT5008(year, acctId) {
+async function showT5008(year, target) {
+    // target: {memberId: X} 或 {accountIds: [X, ...]}
     const el = document.getElementById('t5008Modal');
     const existing = bootstrap.Modal.getInstance(el);
     if (existing) existing.dispose();
@@ -1315,69 +1385,288 @@ async function showT5008(year, acctId) {
     new bootstrap.Modal(el).show();
 
     try {
-        const resp = await fetch(`/api/v1/families/1/reports/annual-analysis/t5008?account_id=${acctId}&year=${year}`);
+        let url;
+        if (target.memberId) {
+            url = `/api/v1/families/1/reports/annual-analysis/t5008?member_id=${target.memberId}&year=${year}`;
+        } else {
+            const ids = target.accountIds || [];
+            url = `/api/v1/families/1/reports/annual-analysis/t5008?account_ids=${ids.join(',')}&year=${year}`;
+        }
+        const resp = await fetch(url);
         const data = await resp.json();
         if (!data.success) {
             document.getElementById('t5008Body').innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
             return;
         }
-        if (!data.records.length) {
+
+        const allGroups = (data.groups || []).filter(g => g.records && g.records.length > 0);
+        if (!allGroups.length) {
             document.getElementById('t5008Body').innerHTML = '<p class="text-muted text-center py-3">该年度没有卖出交易。</p>';
             return;
         }
-        // 汇率统一用4位小数，保证显示值和计算结果一致
+
+        // 汇率统一用4位小数
         const fxRate = data.annual_usd_cad_rate ? Math.round(data.annual_usd_cad_rate * 10000) / 10000 : null;
+        const multiGroups = allGroups.length > 1;
 
         const fmtAmt = (val, currency) => {
-            if (currency === 'USD' && fxRate) {
-                const cad = val * fxRate;
-                return `$${cad.toFixed(2)} ($${val.toFixed(2)})`;
-            }
+            if (currency === 'USD' && fxRate) return `$${(val * fxRate).toFixed(2)} ($${val.toFixed(2)})`;
             return `$${val.toFixed(2)}`;
         };
 
-        // 合计分CAD和USD分别累计
-        let totalProceedsCad = 0, totalAcbCad = 0, totalGainCad = 0;
-        let html = `<div class="table-responsive"><table class="table table-sm table-hover">
-            <thead class="table-light"><tr>
-                <th>日期</th><th>股票</th><th class="text-end">数量</th>
-                <th class="text-end">成本基础(ACB)</th><th class="text-end">卖出金额</th>
-                <th class="text-end">收益/亏损</th><th>币种</th>
-            </tr></thead><tbody>`;
-        for (const r of data.records) {
-            const rate = r.currency === 'USD' && fxRate ? fxRate : 1;
-            totalProceedsCad += r.proceeds * rate;
-            totalAcbCad += r.acb * rate;
-            totalGainCad += r.gain * rate;
-            const gainCls = r.gain >= 0 ? 'text-success' : 'text-danger';
-            const sign = r.gain >= 0 ? '+' : '';
-            const gainFmt = r.currency === 'USD' && fxRate
-                ? `${sign}$${(r.gain * fxRate).toFixed(2)} (${sign}$${r.gain.toFixed(2)})`
-                : `${sign}$${r.gain.toFixed(2)}`;
-            html += `<tr>
-                <td>${r.date}</td>
-                <td><strong>${r.symbol}</strong></td>
-                <td class="text-end">${r.quantity}</td>
-                <td class="text-end">${fmtAmt(r.acb, r.currency)}</td>
-                <td class="text-end">${fmtAmt(r.proceeds, r.currency)}</td>
-                <td class="text-end ${gainCls}">${gainFmt}</td>
-                <td>${r.currency}${r.currency === 'USD' && fxRate ? ` <small class="text-muted">(×${fxRate.toFixed(4)})</small>` : ''}</td>
-            </tr>`;
+        const buildRocTooltip = (r, t3All) => {
+            const parts = r.roc_applied_years.map(x => `$${x.amount.toFixed(2)}(${String(x.year).slice(-2)})`).join(' - ');
+            let tip = `$${r.acb.toFixed(2)} = $${r.original_acb.toFixed(2)} - ${parts}`;
+            tip += '&lt;br&gt;─────────────────';
+            const allRecs = (t3All && t3All[r.symbol]) || [];
+            tip += '&lt;br&gt;T3 Box42 全部记录:';
+            if (allRecs.length) {
+                allRecs.forEach(rec => {
+                    const note = rec.notes ? ` (${rec.notes})` : '';
+                    tip += `&lt;br&gt;$${rec.amount.toFixed(2)}(${rec.year})${note}`;
+                    if (rec.breakdown && rec.breakdown.length > 0) {
+                        rec.breakdown.forEach(b => {
+                            tip += `&lt;br&gt;&nbsp;&nbsp;${b.account_name}: $${b.amount.toFixed(2)}`;
+                        });
+                    }
+                });
+            } else {
+                tip += '&lt;br&gt;(无记录)';
+            }
+            return tip.replace(/"/g, '&quot;');
+        };
+
+        const buildGroupTable = (group) => {
+            const records = group.records;
+            const t3All = group.t3_all_records;
+            const multiAcct = new Set(records.map(r => r.account_id)).size > 1;
+            const acctHeader = multiAcct ? '<th>账户</th>' : '';
+            const colSpan = multiAcct ? 8 : 7;
+            let totalProceedsCad = 0, totalAcbCad = 0, totalGainCad = 0;
+
+            let rows = '';
+            for (const r of records) {
+                const rate = r.currency === 'USD' && fxRate ? fxRate : 1;
+                totalProceedsCad += r.proceeds * rate;
+                totalAcbCad     += r.acb * rate;
+                totalGainCad    += r.gain * rate;
+                const gainCls = r.gain >= 0 ? 'text-success' : 'text-danger';
+                const sign    = r.gain >= 0 ? '+' : '';
+                const gainFmt = r.currency === 'USD' && fxRate
+                    ? `${sign}$${(r.gain * fxRate).toFixed(2)} (${sign}$${r.gain.toFixed(2)})`
+                    : `${sign}$${r.gain.toFixed(2)}`;
+                const rocMarker = r.roc_adjusted
+                    ? ` <span class="text-warning fw-bold" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${buildRocTooltip(r, t3All)}">(*)</span>`
+                    : '';
+                const acctCell = multiAcct ? `<td class="text-muted small">${r.account_name}</td>` : '';
+                const acbCell = r.joint_acb
+                    ? `<td class="text-end text-danger fw-bold">${fmtAmt(r.acb, r.currency)}${rocMarker}</td>`
+                    : `<td class="text-end">${fmtAmt(r.acb, r.currency)}${rocMarker}</td>`;
+                rows += `<tr>
+                    <td>${r.date}</td>
+                    <td><strong>${r.symbol}</strong></td>
+                    <td class="text-end">${r.quantity}</td>
+                    ${acbCell}
+                    <td class="text-end">${fmtAmt(r.proceeds, r.currency)}</td>
+                    <td class="text-end ${gainCls}">${gainFmt}</td>
+                    <td>${r.currency}${r.currency === 'USD' && fxRate ? ` <small class="text-muted">(×${fxRate.toFixed(4)})</small>` : ''}</td>
+                    ${acctCell}
+                </tr>`;
+            }
+            const totalCls  = totalGainCad >= 0 ? 'text-success' : 'text-danger';
+            const totalSign = totalGainCad >= 0 ? '+' : '';
+            const rateNote  = fxRate ? ` <small class="text-muted fw-normal">USD已按年度平均汇率 ${fxRate.toFixed(4)} 换算</small>` : '';
+            const totalAcctCell = multiAcct ? '<td></td>' : '';
+
+            return `<div class="table-responsive"><table class="table table-sm table-hover mb-1">
+                <thead class="table-light"><tr>
+                    <th>日期</th><th>股票</th><th class="text-end">数量</th>
+                    <th class="text-end">成本基础(ACB)</th><th class="text-end">卖出金额</th>
+                    <th class="text-end">收益/亏损</th><th>币种</th>${acctHeader}
+                </tr></thead>
+                <tbody>${rows}</tbody>
+                <tfoot class="table-light fw-bold"><tr>
+                    <td colspan="3">合计(CAD)${rateNote}</td>
+                    <td class="text-end">$${totalAcbCad.toFixed(2)}</td>
+                    <td class="text-end">$${totalProceedsCad.toFixed(2)}</td>
+                    <td class="text-end ${totalCls}">${totalSign}$${totalGainCad.toFixed(2)}</td>
+                    <td></td>${totalAcctCell}
+                </tr></tfoot>
+            </table></div>`;
+        };
+
+        let html = '';
+        for (const group of allGroups) {
+            if (multiGroups) {
+                html += `<h6 class="text-secondary fw-semibold mt-3 mb-1">${group.label}</h6>`;
+            }
+            html += buildGroupTable(group);
         }
-        const totalCls = totalGainCad >= 0 ? 'text-success' : 'text-danger';
-        const totalSign = totalGainCad >= 0 ? '+' : '';
-        const rateNote = fxRate ? ` <small class="text-muted fw-normal">USD已按年度平均汇率 ${fxRate.toFixed(4)} 换算</small>` : '';
-        html += `</tbody><tfoot class="table-light fw-bold"><tr>
-            <td colspan="3">合计(CAD)${rateNote}</td>
-            <td class="text-end">$${totalAcbCad.toFixed(2)}</td>
-            <td class="text-end">$${totalProceedsCad.toFixed(2)}</td>
-            <td class="text-end ${totalCls}">${totalSign}$${totalGainCad.toFixed(2)}</td>
-            <td></td>
-        </tr></tfoot></table></div>
-        <p class="text-muted small mt-2 mb-0">* 成本基础按平均成本法(ACB)计算；USD金额格式：CAD（USD）</p>`;
-        document.getElementById('t5008Body').innerHTML = html;
+        html += `<p class="text-muted small mt-2 mb-0">* 成本基础按平均成本法(ACB)计算；USD金额格式：CAD（USD）<br>(*) 该笔成本基础已含T3 Box42(Return of Capital)调减</p>`;
+
+        const t5008Body = document.getElementById('t5008Body');
+        t5008Body.innerHTML = html;
+        t5008Body.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+            const ex = bootstrap.Tooltip.getInstance(el);
+            if (ex) ex.dispose();
+            new bootstrap.Tooltip(el, {trigger: 'hover', html: true, sanitize: false, customClass: 'tooltip-roc'});
+        });
     } catch (e) {
         document.getElementById('t5008Body').innerHTML = '<div class="alert alert-danger">请求失败</div>';
+    }
+}
+
+// T3 Box 42
+let t3CurrentSymbol = null;
+let t3CurrentYear = null;
+let t3CurrentRecordId = null;
+let t3DataCache = {};   // keyed "year:SYMBOL" -> {amount, notes}
+let t3BySymbol = {};    // keyed "SYMBOL" -> [{year, amount, notes}, ...] sorted by year desc
+
+async function loadAllT3Records() {
+    const acctId = filterInfo.account_id || accountId;
+    if (!acctId || filterInfo.account_type_name !== 'Regular') return;
+    try {
+        const resp = await fetch(`/api/v1/accounts/${acctId}/t3-box42`);
+        const data = await resp.json();
+        t3DataCache = {};
+        t3BySymbol = {};
+        if (data.success) {
+            for (const rec of data.records) {
+                t3DataCache[`${rec.year}:${rec.stock}`] = {amount: rec.box42_amount, notes: rec.notes};
+                if (!t3BySymbol[rec.stock]) t3BySymbol[rec.stock] = [];
+                t3BySymbol[rec.stock].push({year: rec.year, amount: rec.box42_amount, notes: rec.notes});
+            }
+            // 每个symbol按年份降序排列
+            for (const sym of Object.keys(t3BySymbol)) {
+                t3BySymbol[sym].sort((a, b) => b.year - a.year);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load T3 records', e);
+    }
+}
+
+async function showT3Modal(symbol, year) {
+    t3CurrentSymbol = symbol;
+    t3CurrentYear = year;
+    t3CurrentRecordId = null;
+
+    const el = document.getElementById('t3Modal');
+    const existing = bootstrap.Modal.getInstance(el);
+    if (existing) existing.dispose();
+
+    // 填写只读信息
+    document.getElementById('t3AccountName').textContent = filterInfo.account_type_name || '';
+    document.getElementById('t3Stock').textContent = symbol;
+
+    // 构建年度选项：yearlyHoldings里有的年度 + 当前年度前一年，默认去年
+    const prevYear = new Date().getFullYear() - 1;
+    const availableYears = new Set(Object.keys(yearlyHoldings).map(Number));
+    availableYears.add(prevYear);
+    const sortedYears = Array.from(availableYears).sort((a, b) => b - a);
+
+    const sel = document.getElementById('t3Year');
+    sel.innerHTML = sortedYears.map(y => `<option value="${y}">${y}</option>`).join('');
+    sel.value = sortedYears.includes(year) ? year : prevYear;
+
+    document.getElementById('t3Amount').value = '';
+    document.getElementById('t3Notes').value = '';
+    document.getElementById('t3DeleteBtn').style.display = 'none';
+    document.getElementById('t3Error').textContent = '';
+
+    new bootstrap.Modal(el).show();
+    await loadT3Record();
+}
+
+async function loadT3Record() {
+    const acctId = filterInfo.account_id || accountId;
+    const yr = parseInt(document.getElementById('t3Year').value, 10);
+    if (!acctId || !t3CurrentSymbol) return;
+
+    try {
+        const resp = await fetch(`/api/v1/accounts/${acctId}/t3-box42?stock=${encodeURIComponent(t3CurrentSymbol)}`);
+        const data = await resp.json();
+        if (!data.success) return;
+        const rec = data.records.find(r => r.year === yr);
+        if (rec) {
+            t3CurrentRecordId = rec.id;
+            document.getElementById('t3Amount').value = rec.box42_amount;
+            document.getElementById('t3Notes').value = rec.notes || '';
+            document.getElementById('t3DeleteBtn').style.display = '';
+        } else {
+            t3CurrentRecordId = null;
+            document.getElementById('t3Amount').value = '';
+            document.getElementById('t3Notes').value = '';
+            document.getElementById('t3DeleteBtn').style.display = 'none';
+        }
+    } catch (e) {
+        console.error('Failed to load T3 record', e);
+    }
+}
+
+async function saveT3Record() {
+    const acctId = filterInfo.account_id || accountId;
+    const yr = parseInt(document.getElementById('t3Year').value, 10);
+    const amtStr = document.getElementById('t3Amount').value.trim();
+    const notes = document.getElementById('t3Notes').value.trim();
+    const errEl = document.getElementById('t3Error');
+    errEl.textContent = '';
+
+    if (amtStr === '' || isNaN(parseFloat(amtStr))) {
+        errEl.textContent = '请输入有效的金额';
+        return;
+    }
+
+    const amount = parseFloat(amtStr);
+
+    try {
+        // 金额为0时，若已有记录则删除，否则直接关闭
+        if (amount === 0) {
+            if (t3CurrentRecordId) {
+                const resp = await fetch(`/api/v1/accounts/${acctId}/t3-box42/${t3CurrentRecordId}`, {method: 'DELETE'});
+                const data = await resp.json();
+                if (!data.success) { errEl.textContent = data.error || '删除失败'; return; }
+            }
+        } else {
+            const resp = await fetch(`/api/v1/accounts/${acctId}/t3-box42`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({stock: t3CurrentSymbol, year: yr, box42_amount: amount, notes})
+            });
+            const data = await resp.json();
+            if (!data.success) { errEl.textContent = data.error || '保存失败'; return; }
+        }
+        // 刷新缓存并重新渲染持仓表
+        await loadAllT3Records();
+        renderYearlyHoldingsTable(yr);
+        bootstrap.Modal.getInstance(document.getElementById('t3Modal')).hide();
+    } catch (e) {
+        errEl.textContent = '请求失败';
+    }
+}
+
+async function deleteT3Record() {
+    if (!t3CurrentRecordId) return;
+    const acctId = filterInfo.account_id || accountId;
+    const errEl = document.getElementById('t3Error');
+    errEl.textContent = '';
+    const yr = parseInt(document.getElementById('t3Year').value, 10);
+
+    if (!confirm(`确认删除 ${t3CurrentSymbol} 的T3 Box 42记录？`)) return;
+
+    try {
+        const resp = await fetch(`/api/v1/accounts/${acctId}/t3-box42/${t3CurrentRecordId}`, {method: 'DELETE'});
+        const data = await resp.json();
+        if (!data.success) {
+            errEl.textContent = data.error || '删除失败';
+            return;
+        }
+        await loadAllT3Records();
+        renderYearlyHoldingsTable(yr);
+        bootstrap.Modal.getInstance(document.getElementById('t3Modal')).hide();
+    } catch (e) {
+        errEl.textContent = '请求失败';
     }
 }
 </script>
@@ -1391,6 +1680,58 @@ async function showT5008(year, acctId) {
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="t5008Body">
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- T3 Box 42 Modal -->
+<div class="modal fade" id="t3Modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">T3 Box 42 — Return of Capital</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3 row">
+                    <label class="col-sm-4 col-form-label text-muted">账户类型</label>
+                    <div class="col-sm-8 d-flex align-items-center">
+                        <span id="t3AccountName" class="fw-bold"></span>
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label class="col-sm-4 col-form-label text-muted">股票</label>
+                    <div class="col-sm-8 d-flex align-items-center">
+                        <span id="t3Stock" class="fw-bold"></span>
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label class="col-sm-4 col-form-label" for="t3Year">年度</label>
+                    <div class="col-sm-8">
+                        <select class="form-select" id="t3Year" onchange="loadT3Record()"></select>
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label class="col-sm-4 col-form-label" for="t3Amount">Box 42 金额 (CAD)</label>
+                    <div class="col-sm-8">
+                        <input type="number" class="form-control" id="t3Amount" step="0.01" min="0" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="mb-3 row">
+                    <label class="col-sm-4 col-form-label" for="t3Notes">备注</label>
+                    <div class="col-sm-8">
+                        <input type="text" class="form-control" id="t3Notes" maxlength="500" placeholder="可选">
+                    </div>
+                </div>
+                <div id="t3Error" style="font-size:0.9em; min-height:1.2em;"></div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <button type="button" class="btn btn-outline-danger btn-sm" id="t3DeleteBtn" style="display:none;" onclick="deleteT3Record()">删除</button>
+                <div>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveT3Record()">保存</button>
+                </div>
             </div>
         </div>
     </div>

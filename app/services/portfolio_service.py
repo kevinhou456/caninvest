@@ -581,7 +581,8 @@ class PortfolioService:
 
         def build_tx_stats(transactions: List[Transaction],
                            ids_filter: Optional[Iterable[int]] = None,
-                           ownership: Optional[Dict[int, Decimal]] = None) -> Dict:
+                           ownership: Optional[Dict[int, Decimal]] = None,
+                           include_details: bool = False) -> Dict:
             stats = {
                 'transaction_count': 0,
                 'buy_amount': Decimal('0'),
@@ -598,6 +599,8 @@ class PortfolioService:
                 'deposit_usd': Decimal('0'),
                 'withdrawal_cad': Decimal('0'),
                 'withdrawal_usd': Decimal('0'),
+                'deposit_list': [],
+                'withdrawal_list': [],
             }
 
             ids_set = set(ids_filter) if ids_filter else None
@@ -645,6 +648,13 @@ class PortfolioService:
                         stats['deposit_cad'] += value
                     else:
                         stats['deposit_usd'] += value
+                    if include_details:
+                        stats['deposit_list'].append({
+                            'date': tx.trade_date.isoformat(),
+                            'amount': float(amount),
+                            'currency': tx_currency,
+                            'notes': tx.notes or '',
+                        })
                 elif tx_type == 'WITHDRAWAL' and amount:
                     value = amount * proportion
                     stats['withdrawal_amount'] += value
@@ -652,6 +662,13 @@ class PortfolioService:
                         stats['withdrawal_cad'] += value
                     else:
                         stats['withdrawal_usd'] += value
+                    if include_details:
+                        stats['withdrawal_list'].append({
+                            'date': tx.trade_date.isoformat(),
+                            'amount': float(amount),
+                            'currency': tx_currency,
+                            'notes': tx.notes or '',
+                        })
             return stats
 
         def build_row(year: int,
@@ -675,6 +692,8 @@ class PortfolioService:
                 'sell_amount': float(tx_stats['sell_amount']),
                 'deposit_amount': float(tx_stats['deposit_amount']),
                 'withdrawal_amount': float(tx_stats['withdrawal_amount']),
+                'deposit_list': tx_stats.get('deposit_list', []),
+                'withdrawal_list': tx_stats.get('withdrawal_list', []),
                 'annual_usd_cad_rate': annual_rate,
                 'currency_breakdown': {
                     'total_assets_cad': float(metrics_end.get('total_assets', {}).get('cad_only', 0.0)),
@@ -798,8 +817,10 @@ class PortfolioService:
                 ownership_map=ownership_map if ownership_map else None
             )
 
+            is_single_account = bool(selected_account_id and len(account_ids) == 1)
             tx_stats = build_tx_stats(year_transactions, ids_filter=account_ids,
-                                      ownership=ownership_map if ownership_map else None)
+                                      ownership=ownership_map if ownership_map else None,
+                                      include_details=is_single_account)
 
             annual_rate = float(annual_exchange_rates.get(year)) if annual_exchange_rates.get(year) else None
             annual_data.append(build_row(year, metrics_end, metrics_prev, tx_stats, annual_rate, None))
@@ -906,6 +927,7 @@ class PortfolioService:
                                 'member_name': member.name,
                                 'member_id': member.id,
                                 'account_type': type_name,
+                                'account_ids': type_account_ids,
                                 'is_member_account_type_row': True
                             }
                             annual_data.append(build_row(year, metrics_end_type, metrics_prev_type, type_tx_stats, annual_rate, extra_type))

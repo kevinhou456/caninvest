@@ -187,7 +187,7 @@ def _normalize_cache_params(params: dict) -> dict:
 
 
 # 每次修改 portfolio_service 计算逻辑时手动递增，使所有旧缓存自动失效
-_CACHE_SCHEMA_VERSION = 4
+_CACHE_SCHEMA_VERSION = 5
 
 
 def _build_analysis_cache_key(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],
@@ -274,6 +274,25 @@ def _is_analysis_cache_fresh(cache: ReportAnalysisCache, account_ids: List[int],
         return False
 
     return True
+
+
+def invalidate_report_cache_for_account(account_id: int):
+    """删除所有包含指定账户的 ReportAnalysisCache 记录。
+    用于交易记录被删除时（max updated_at 不会变化，无法靠时间戳自动失效）。
+    account_ids_json 格式为排好序的整数列表，如 [1,3,7]，匹配方式：
+    完整匹配 [id]、开头 [id,、结尾 ,id]、中间 ,id,
+    """
+    aid = str(account_id)
+    ReportAnalysisCache.query.filter(
+        db.or_(
+            ReportAnalysisCache.account_id == account_id,
+            ReportAnalysisCache.account_ids_json == f'[{aid}]',
+            ReportAnalysisCache.account_ids_json.like(f'[{aid},%'),
+            ReportAnalysisCache.account_ids_json.like(f'%,{aid}]'),
+            ReportAnalysisCache.account_ids_json.like(f'%,{aid},%'),
+        )
+    ).delete(synchronize_session=False)
+    db.session.commit()
 
 
 def _dump_cache_payload(payload: dict) -> str:
@@ -773,18 +792,26 @@ def get_family_annual_analysis(family_id):
             _store_analysis_cache(
                 'annual', family_id, member_id, account_id, account_ids, params, analysis_data, cache, cache_key
             )
-        
+
+        # 获取单账户的类型名称（用于前端判断是否显示T3按钮）
+        account_type_name = None
+        if account_id:
+            _acct = Account.query.get(account_id)
+            if _acct and _acct.account_type:
+                account_type_name = _acct.account_type.name
+
         return jsonify({
             'family': family.to_dict(),
             'filter_info': {
                 'member_id': member_id,
                 'account_id': account_id,
                 'account_count': len(account_ids),
-            'account_type': account_type
+                'account_type': account_type,
+                'account_type_name': account_type_name,
             },
             'analysis': analysis_data
         })
-        
+
     except Exception as e:
         return jsonify({
             'success': False,
@@ -792,93 +819,377 @@ def get_family_annual_analysis(family_id):
         }), 500
 
 
-@bp.route('/families/<int:family_id>/reports/annual-analysis/t5008', methods=['GET'])
-def get_t5008_data(family_id):
-    """获取指定账户指定年份的T5008数据（平均成本法ACB）"""
-    Family.query.get_or_404(family_id)
-    account_id = request.args.get('account_id', type=int)
-    year = request.args.get('year', type=int)
-    if not account_id or not year:
-        return jsonify({'success': False, 'error': 'account_id and year are required'}), 400
+def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_name_map):
+    """
+    对给定账户列表计算T5008记录（合并平均成本法ACB）。
+    返回 (records, t3_all_records)。
+    """
+    from app.models.t3_box42 import T3Box42
 
-    account = Account.query.get_or_404(account_id)
-
-    year_start = date(year, 1, 1)
-    year_end = date(year, 12, 31)
-
-    # 获取该年所有SELL交易
     sell_txs = Transaction.query.filter(
-        Transaction.account_id == account_id,
+        Transaction.account_id.in_(account_ids_list),
         Transaction.type == 'SELL',
         Transaction.trade_date >= year_start,
         Transaction.trade_date <= year_end
     ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
 
     if not sell_txs:
-        return jsonify({'success': True, 'records': [], 'year': year, 'account_name': account.name})
+        return [], {}
 
     symbols = list({tx.stock for tx in sell_txs})
-
     records = []
+    t3_all_records = {}
+
     for symbol in symbols:
-        # 拉取该账户该股票截至年末的所有交易（按时间顺序）
         all_txs = Transaction.query.filter(
-            Transaction.account_id == account_id,
+            Transaction.account_id.in_(account_ids_list),
             Transaction.stock == symbol,
             Transaction.trade_date <= year_end
-        ).order_by(
-            Transaction.trade_date.asc(),
-            Transaction.id.asc()
-        ).all()
+        ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
 
-        # 平均成本法（ACB）模拟
-        total_shares = 0.0
-        total_cost = 0.0  # 持仓总成本（含手续费）
+        roc_raw = T3Box42.query.filter(
+            T3Box42.account_id.in_(account_ids_list),
+            T3Box42.stock == symbol
+        ).order_by(T3Box42.year.asc()).all()
+        roc_by_year: dict = {}
+        for r in roc_raw:
+            if r.year not in roc_by_year:
+                roc_by_year[r.year] = {'amount': 0.0, 'notes': [], 'account_ids': set(), 'per_account': {}}
+            roc_by_year[r.year]['amount'] += float(r.box42_amount)
+            roc_by_year[r.year]['account_ids'].add(r.account_id)
+            roc_by_year[r.year]['per_account'][r.account_id] = float(r.box42_amount)
+            if r.notes:
+                roc_by_year[r.year]['notes'].append(r.notes)
 
+        class _RocRecord:
+            def __init__(self, yr, amt, notes_list, acct_ids):
+                self.year = yr
+                self.box42_amount = amt
+                self.notes = '; '.join(notes_list) if notes_list else ''
+                self.account_ids = acct_ids  # 贡献该年度ROC的账户集合
+
+        roc_records = [
+            _RocRecord(yr, d['amount'], d['notes'], d['account_ids'])
+            for yr, d in sorted(roc_by_year.items())
+        ]
+
+        # per_account 金额明细（用于tooltip显示，key为account_id字符串）
+        roc_per_account_by_year = {
+            yr: d['per_account'] for yr, d in roc_by_year.items()
+        }
+
+        events = []
         for tx in all_txs:
-            if tx.type == 'BUY':
-                qty = float(tx.quantity)
-                cost = qty * float(tx.price) + float(tx.fee or 0)
-                total_shares += qty
-                total_cost += cost
-            elif tx.type == 'SELL':
-                sell_qty = float(tx.quantity)
-                proceeds = float(tx.net_amount)
-                # 每股平均成本
-                avg_cost_per_share = (total_cost / total_shares) if total_shares > 0 else 0.0
-                acb = avg_cost_per_share * sell_qty
-                # 更新持仓
-                total_shares -= sell_qty
-                total_cost -= acb
-                if total_shares < 1e-9:
-                    total_shares = 0.0
-                    total_cost = 0.0
+            events.append((tx.trade_date, tx.id, 0, 'TX', tx, 0.0, 0))
+        for roc in roc_records:
+            key = _roc_insertion_sort_key(all_txs, roc.year)
+            events.append((key[0], key[1], key[2], 'ROC', None, float(roc.box42_amount), roc.year))
+        events.sort(key=lambda e: (e[0], e[1], e[2]))
 
-                if tx.trade_date >= year_start:
-                    gain = proceeds - acb
-                    records.append({
-                        'date': tx.trade_date.isoformat(),
-                        'symbol': symbol,
-                        'quantity': sell_qty,
-                        'proceeds': round(proceeds, 2),
-                        'acb': round(acb, 2),
-                        'gain': round(gain, 2),
-                        'currency': tx.currency or 'CAD',
-                    })
+        total_shares = 0.0
+        total_cost = 0.0
+        total_cost_no_roc = 0.0
+        roc_applied = False
+        roc_events_in_period = []
+        buy_accounts_in_period: set = set()  # 当前持仓周期内有过买入的账户集合
+        roc_joint_in_period = False           # 当前持仓周期内是否有多账户联合ROC
+
+        # 建立 roc_year -> account_ids 的快查表
+        roc_year_accounts = {r.year: r.account_ids for r in roc_records}
+
+        for ev_date, ev_id, ev_sub, etype, tx, roc_amount, roc_year in events:
+            if etype == 'ROC':
+                if total_shares > 1e-9:
+                    total_cost = max(0.0, total_cost - roc_amount)
+                    roc_applied = True
+                    roc_events_in_period.append({'year': roc_year, 'amount': roc_amount})
+                    if len(roc_year_accounts.get(roc_year, set())) > 1:
+                        roc_joint_in_period = True
+            elif etype == 'TX':
+                if tx.type == 'BUY':
+                    qty = float(tx.quantity)
+                    cost = qty * float(tx.price) + float(tx.fee or 0)
+                    total_shares += qty
+                    total_cost += cost
+                    total_cost_no_roc += cost
+                    buy_accounts_in_period.add(tx.account_id)
+                elif tx.type == 'SELL':
+                    sell_qty = float(tx.quantity)
+                    proceeds = float(tx.net_amount)
+                    avg_cost_per_share = (total_cost / total_shares) if total_shares > 0 else 0.0
+                    acb = avg_cost_per_share * sell_qty
+                    original_acb = ((total_cost_no_roc / total_shares) * sell_qty) if total_shares > 0 else 0.0
+                    this_sell_roc_adjusted = roc_applied
+                    this_sell_roc_years = list(roc_events_in_period)
+                    # 本持仓周期内有多个账户贡献买入或ROC → ACB为跨账户联合计算
+                    joint_acb = len(buy_accounts_in_period) > 1 or roc_joint_in_period
+                    total_shares -= sell_qty
+                    total_cost -= acb
+                    total_cost_no_roc -= original_acb
+                    if total_shares < 1e-9:
+                        total_shares = 0.0
+                        total_cost = 0.0
+                        total_cost_no_roc = 0.0
+                        roc_applied = False
+                        roc_events_in_period = []
+                        buy_accounts_in_period = set()
+                        roc_joint_in_period = False
+                    if tx.trade_date >= year_start:
+                        gain = proceeds - acb
+                        records.append({
+                            'date': tx.trade_date.isoformat(),
+                            'symbol': symbol,
+                            'quantity': sell_qty,
+                            'proceeds': round(proceeds, 2),
+                            'acb': round(acb, 2),
+                            'original_acb': round(original_acb, 2),
+                            'gain': round(gain, 2),
+                            'currency': tx.currency or 'CAD',
+                            'roc_adjusted': this_sell_roc_adjusted,
+                            'roc_applied_years': this_sell_roc_years,
+                            'account_id': tx.account_id,
+                            'account_name': account_name_map.get(tx.account_id, ''),
+                            'joint_acb': joint_acb,
+                        })
+
+        t3_all_records[symbol] = [
+            {
+                'year': r.year,
+                'amount': float(r.box42_amount),
+                'notes': r.notes or '',
+                # 多账户时附上各账户明细：[{account_name, amount}, ...]
+                'breakdown': [
+                    {'account_name': account_name_map.get(aid, str(aid)), 'amount': amt}
+                    for aid, amt in sorted(
+                        roc_per_account_by_year.get(r.year, {}).items(),
+                        key=lambda x: account_name_map.get(x[0], str(x[0]))
+                    )
+                ] if len(roc_per_account_by_year.get(r.year, {})) > 1 else [],
+            }
+            for r in roc_records
+        ]
 
     records.sort(key=lambda r: (r['symbol'], r['date']))
+    return records, t3_all_records
+
+
+def _roc_insertion_sort_key(all_txs_sorted, roc_year):
+    """
+    计算T3 Box42 ROC事件在ACB模拟中的插入排序键。
+
+    - 若roc_year年末持仓=0（年内清仓）：
+        - 找清仓前最后一笔BUY
+        - 若该BUY在roc_year内 → 插在该BUY之后：(buy_date, buy_id, 1)
+        - 否则（跨年持仓）→ 插在roc_year 1月1日最前：(Jan1, -1, 0)
+    - 若年末持仓≠0 → 插在12月31日所有交易之后：(Dec31, MAX, 1)
+    """
+    year_end = date(roc_year, 12, 31)
+    last_buy = None
+    running_shares = 0.0
+    final_clearance_last_buy = None
+
+    for tx in all_txs_sorted:
+        if tx.trade_date > year_end:
+            break
+        if tx.type == 'BUY':
+            running_shares += float(tx.quantity)
+            last_buy = tx
+        elif tx.type == 'SELL':
+            running_shares -= float(tx.quantity)
+            if running_shares < 1e-9:
+                running_shares = 0.0
+                final_clearance_last_buy = last_buy
+                last_buy = None
+
+    if running_shares < 1e-9:
+        # 年末已清仓
+        if final_clearance_last_buy and final_clearance_last_buy.trade_date.year == roc_year:
+            return (final_clearance_last_buy.trade_date, final_clearance_last_buy.id, 1)
+        else:
+            return (date(roc_year, 1, 1), -1, 0)
+    else:
+        # 年末仍有持仓，插在12月31日所有交易之后
+        return (date(roc_year, 12, 31), 10 ** 9, 1)
+
+
+@bp.route('/families/<int:family_id>/reports/annual-analysis/t5008', methods=['GET'])
+def get_t5008_data(family_id):
+    """
+    获取T5008数据，响应统一返回 groups 列表，每个 group 对应一种账户类型。
+    调用方式：
+      - ?member_id=X&year=Y   → 按该成员的非税收优惠账户类型分组（每组一张表）
+      - ?account_ids=1,2&year=Y / ?account_id=1&year=Y → 单组，兼容旧调用
+    """
+    from app.models.member import Member
+    Family.query.get_or_404(family_id)
+    year = request.args.get('year', type=int)
+    if not year:
+        return jsonify({'success': False, 'error': 'year is required'}), 400
+
+    year_start = date(year, 1, 1)
+    year_end   = date(year, 12, 31)
 
     from app.services.currency_service import currency_service
     annual_rate = currency_service.get_annual_average_rate(year, 'USD', 'CAD')
     annual_rate_float = float(annual_rate) if annual_rate else None
 
-    return jsonify({
-        'success': True,
-        'records': records,
-        'year': year,
-        'account_name': account.name,
-        'annual_usd_cad_rate': annual_rate_float,
-    })
+    member_id_param = request.args.get('member_id', type=int)
+
+    if member_id_param:
+        # ── 按成员分组模式 ──────────────────────────────────────────
+        member = Member.query.get_or_404(member_id_param)
+        memberships = AccountMember.query.filter_by(member_id=member_id_param).all()
+        all_account_ids = [am.account_id for am in memberships]
+        accounts_obj = {a.id: a for a in Account.query.filter(Account.id.in_(all_account_ids)).all()}
+
+        # 按所有权人组合分组（跳过税收优惠账户）
+        # 同一组合的账户合并ACB计算，不同组合各自独立
+        from app.models.member import Member as MemberModel
+        all_am = AccountMember.query.filter(AccountMember.account_id.in_(all_account_ids)).all()
+        all_mid_set = {am.member_id for am in all_am}
+        members_lookup = {m.id: m for m in MemberModel.query.filter(MemberModel.id.in_(all_mid_set)).all()}
+
+        # account_id -> frozenset of member_ids
+        acct_owners: dict = {}
+        for am in all_am:
+            acct_owners.setdefault(am.account_id, set()).add(am.member_id)
+
+        groups_map: dict = {}   # frozenset(member_ids) -> [account_id, ...]
+        for aid in all_account_ids:
+            acct = accounts_obj.get(aid)
+            if not acct:
+                continue
+            if acct.account_type and acct.account_type.tax_advantaged:
+                continue
+            owners_key = frozenset(acct_owners.get(aid, {member_id_param}))
+            groups_map.setdefault(owners_key, []).append(aid)
+
+        # 排序：独有账户（仅本人）在前，联名账户按共有人名字排序在后
+        def _owners_sort_key(item):
+            owners_key, _ = item
+            is_joint = len(owners_key) > 1
+            partner_names = sorted(
+                members_lookup[mid].name for mid in owners_key
+                if mid != member_id_param and mid in members_lookup
+            )
+            return (1 if is_joint else 0, partner_names)
+
+        groups = []
+        for owners_key, group_ids in sorted(groups_map.items(), key=_owners_sort_key):
+            name_map = {aid: accounts_obj[aid].name for aid in group_ids if aid in accounts_obj}
+            recs, t3 = _compute_t5008_for_accounts(group_ids, year_start, year_end, name_map)
+            # 生成标签
+            if len(owners_key) == 1:
+                label = '个人账户'
+            else:
+                partner_names = sorted(
+                    members_lookup[mid].name for mid in owners_key
+                    if mid != member_id_param and mid in members_lookup
+                )
+                label = '联合 (' + ', '.join(partner_names) + ')'
+            groups.append({'label': label, 'records': recs, 't3_all_records': t3})
+
+        return jsonify({
+            'success': True,
+            'year': year,
+            'title': member.name,
+            'annual_usd_cad_rate': annual_rate_float,
+            'groups': groups,
+        })
+
+    else:
+        # ── 指定账户模式（兼容旧调用）──────────────────────────────
+        account_ids_param = request.args.get('account_ids', '')
+        account_id_param  = request.args.get('account_id', type=int)
+        if account_ids_param:
+            try:
+                account_ids_list = [int(x.strip()) for x in account_ids_param.split(',') if x.strip()]
+            except ValueError:
+                return jsonify({'success': False, 'error': 'Invalid account_ids'}), 400
+        elif account_id_param:
+            account_ids_list = [account_id_param]
+        else:
+            return jsonify({'success': False, 'error': 'member_id or account_id(s) is required'}), 400
+
+        accounts_obj = {a.id: a for a in Account.query.filter(Account.id.in_(account_ids_list)).all()}
+        account_name_map = {aid: accounts_obj[aid].name for aid in account_ids_list if aid in accounts_obj}
+
+        label_param = request.args.get('label', '')
+        if label_param:
+            group_label = label_param
+        elif len(account_ids_list) == 1:
+            group_label = account_name_map.get(account_ids_list[0], '')
+        else:
+            group_label = ' / '.join(account_name_map.get(aid, str(aid)) for aid in account_ids_list)
+
+        recs, t3 = _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_name_map)
+
+        return jsonify({
+            'success': True,
+            'year': year,
+            'title': group_label,
+            'annual_usd_cad_rate': annual_rate_float,
+            'groups': [{'label': group_label, 'records': recs, 't3_all_records': t3}],
+        })
+
+
+@bp.route('/accounts/<int:account_id>/t3-box42', methods=['GET'])
+def get_t3_box42(account_id):
+    """获取账户某股票的T3 Box42记录（或所有记录）"""
+    from app.models.t3_box42 import T3Box42
+    Account.query.get_or_404(account_id)
+    stock = request.args.get('stock')
+    query = T3Box42.query.filter_by(account_id=account_id)
+    if stock:
+        query = query.filter_by(stock=stock.upper())
+    records = query.order_by(T3Box42.year.desc()).all()
+    return jsonify({'success': True, 'records': [r.to_dict() for r in records]})
+
+
+@bp.route('/accounts/<int:account_id>/t3-box42', methods=['POST'])
+def save_t3_box42(account_id):
+    """新增或更新T3 Box42记录"""
+    from app.models.t3_box42 import T3Box42
+    Account.query.get_or_404(account_id)
+    data = request.get_json() or {}
+    stock = (data.get('stock') or '').upper()
+    year = data.get('year')
+    amount = data.get('box42_amount')
+    if not stock or not year or amount is None:
+        return jsonify({'success': False, 'error': 'stock, year, box42_amount are required'}), 400
+    try:
+        year = int(year)
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid year or amount'}), 400
+
+    record = T3Box42.query.filter_by(account_id=account_id, stock=stock, year=year).first()
+    if record:
+        record.box42_amount = amount
+        record.notes = data.get('notes', record.notes)
+        record.updated_at = datetime.utcnow()
+    else:
+        record = T3Box42(
+            account_id=account_id,
+            stock=stock,
+            year=year,
+            box42_amount=amount,
+            currency=data.get('currency', 'CAD'),
+            notes=data.get('notes'),
+        )
+        db.session.add(record)
+    db.session.commit()
+    return jsonify({'success': True, 'record': record.to_dict()})
+
+
+@bp.route('/accounts/<int:account_id>/t3-box42/<int:record_id>', methods=['DELETE'])
+def delete_t3_box42(account_id, record_id):
+    """删除T3 Box42记录"""
+    from app.models.t3_box42 import T3Box42
+    record = T3Box42.query.filter_by(id=record_id, account_id=account_id).first_or_404()
+    db.session.delete(record)
+    db.session.commit()
+    return jsonify({'success': True})
 
 
 @bp.route('/families/<int:family_id>/reports/annual-analysis/exchange-rates', methods=['POST'])

@@ -3017,6 +3017,10 @@ def export_transactions():
 
                 writer.writeheader()
                 for txn in transactions:
+                    if txn.quantity and txn.price:
+                        total = float(txn.quantity * txn.price + (txn.fee or 0))
+                    else:
+                        total = float(txn.amount) if txn.amount else 0
                     writer.writerow({
                         'Date': txn.trade_date.isoformat(),
                         'Symbol': txn.stock or '',
@@ -3025,7 +3029,7 @@ def export_transactions():
                         'Quantity': float(txn.quantity) if txn.quantity else 0,
                         'Price': float(txn.price) if txn.price else 0,
                         'Fee': float(txn.fee) if txn.fee else 0,
-                        'Total': float(txn.quantity * txn.price + txn.fee) if txn.quantity and txn.price else 0,
+                        'Total': total,
                         'Amount': float(txn.amount) if txn.amount else 0,
                         'Currency': txn.currency or 'CAD',
                         'Notes': txn.notes or ''
@@ -3065,6 +3069,12 @@ def delete_transaction(transaction_id):
         try:
             from app.services.performance_cache_service import performance_cache_service
             performance_cache_service.invalidate_from_date(acct_id, trade_date)
+        except Exception:
+            pass
+
+        try:
+            from app.api.reports import invalidate_report_cache_for_account
+            invalidate_report_cache_for_account(acct_id)
         except Exception:
             pass
 
@@ -3227,6 +3237,12 @@ def delete_account_transactions(account_id):
         try:
             from app.services.performance_cache_service import performance_cache_service
             performance_cache_service.invalidate_account(account_id)
+        except Exception:
+            pass
+
+        try:
+            from app.api.reports import invalidate_report_cache_for_account
+            invalidate_report_cache_for_account(account_id)
         except Exception:
             pass
 

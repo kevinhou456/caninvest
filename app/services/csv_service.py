@@ -633,16 +633,20 @@ class CSVTransactionService:
 
             writer.writeheader()
             for txn in transactions:
+                if txn.quantity and txn.price:
+                    total = float(txn.quantity * txn.price + (txn.fee or 0))
+                else:
+                    total = float(txn.amount) if txn.amount else 0
                 writer.writerow({
                     'Date': txn.trade_date.isoformat(),
-                    'Symbol': txn.stock or '',  # 存取款等交易可能没有股票代码
-                    'Name': txn.stock or '',    # 存取款等交易可能没有股票名称
-                    'Type': txn.type,          # 使用txn.type而不是txn.transaction_type
+                    'Symbol': txn.stock or '',
+                    'Name': txn.stock or '',
+                    'Type': txn.type,
                     'Quantity': float(txn.quantity) if txn.quantity else 0,
                     'Price': float(txn.price) if txn.price else 0,
                     'Fee': float(txn.fee) if txn.fee else 0,
-                    'Total': float(txn.quantity * txn.price + txn.fee) if txn.quantity and txn.price else 0,  # 计算股票交易总额
-                    'Amount': float(txn.amount) if txn.amount else 0,  # 存取款、分红、利息的金额
+                    'Total': total,
+                    'Amount': float(txn.amount) if txn.amount else 0,
                     'Currency': txn.currency or 'CAD',
                     'Notes': txn.notes or ''
                 })
