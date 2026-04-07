@@ -187,7 +187,7 @@ def _normalize_cache_params(params: dict) -> dict:
 
 
 # 每次修改 portfolio_service 计算逻辑时手动递增，使所有旧缓存自动失效
-_CACHE_SCHEMA_VERSION = 5
+_CACHE_SCHEMA_VERSION = 6
 
 
 def _build_analysis_cache_key(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],
@@ -847,6 +847,15 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
             Transaction.trade_date <= year_end
         ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
 
+        # 确定该股票的货币，并为 USD 股票预取每日汇率
+        symbol_currency = (all_txs[0].currency or 'CAD').upper() if all_txs else 'CAD'
+        fx_by_date: dict = {}  # date -> float (USD->CAD), 仅 USD 股票使用
+        if symbol_currency == 'USD':
+            usd_dates = list({tx.trade_date for tx in all_txs if tx.type in ('BUY', 'SELL')})
+            if usd_dates:
+                raw_fx = currency_service.get_rates_for_dates(usd_dates, 'USD', 'CAD')
+                fx_by_date = {d: float(r) for d, r in raw_fx.items()}
+
         roc_raw = T3Box42.query.filter(
             T3Box42.account_id.in_(account_ids_list),
             T3Box42.stock == symbol
@@ -886,19 +895,25 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
             events.append((key[0], key[1], key[2], 'ROC', None, float(roc.box42_amount), roc.year))
         events.sort(key=lambda e: (e[0], e[1], e[2]))
 
+        # total_cost 始终以 CAD 累计（USD 股票每笔按当日汇率转换）
+        # T3 ROC 永远是 CAD，直接加减不需转换
         total_shares = 0.0
-        total_cost = 0.0
-        total_cost_no_roc = 0.0
+        total_cost = 0.0       # CAD
+        total_cost_no_roc = 0.0  # CAD
         roc_applied = False
         roc_events_in_period = []
         buy_accounts_in_period: set = set()  # 当前持仓周期内有过买入的账户集合
         roc_joint_in_period = False           # 当前持仓周期内是否有多账户联合ROC
+        # USD 股票额外跟踪（用于显示原始美元金额和汇率 tooltip）
+        total_cost_usd = 0.0    # 仅 USD 股票
+        buy_log: list = []      # [{date, qty, price_usd, fee_usd, fx_rate, cost_cad}]
 
         # 建立 roc_year -> account_ids 的快查表
         roc_year_accounts = {r.year: r.account_ids for r in roc_records}
 
         for ev_date, ev_id, ev_sub, etype, tx, roc_amount, roc_year in events:
             if etype == 'ROC':
+                # T3 ROC 始终为 CAD，total_cost 也是 CAD，直接扣减
                 if total_shares > 1e-9:
                     total_cost = max(0.0, total_cost - roc_amount)
                     roc_applied = True
@@ -908,14 +923,42 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
             elif etype == 'TX':
                 if tx.type == 'BUY':
                     qty = float(tx.quantity)
-                    cost = qty * float(tx.price) + float(tx.fee or 0)
+                    price_native = float(tx.price)
+                    fee_native = float(tx.fee or 0)
+                    cost_native = qty * price_native + fee_native
+                    if symbol_currency == 'USD':
+                        fx = fx_by_date.get(tx.trade_date, 1.35)
+                        cost = cost_native * fx
+                        total_cost_usd += cost_native
+                        buy_log.append({
+                            'date': tx.trade_date.isoformat(),
+                            'qty': qty,
+                            'price_usd': round(price_native, 4),
+                            'fee_usd': round(fee_native, 2),
+                            'fx_rate': round(fx, 4),
+                            'cost_cad': round(cost, 2),
+                        })
+                    else:
+                        cost = cost_native
                     total_shares += qty
                     total_cost += cost
                     total_cost_no_roc += cost
                     buy_accounts_in_period.add(tx.account_id)
                 elif tx.type == 'SELL':
                     sell_qty = float(tx.quantity)
-                    proceeds = float(tx.net_amount)
+                    proceeds_native = float(tx.net_amount)
+                    if symbol_currency == 'USD':
+                        fx_sell = fx_by_date.get(tx.trade_date, 1.35)
+                        proceeds = proceeds_native * fx_sell
+                        acb_usd_val = (total_cost_usd / total_shares) * sell_qty if total_shares > 0 else 0.0
+                        total_cost_usd -= acb_usd_val
+                        acb_buy_snapshot = list(buy_log)
+                    else:
+                        fx_sell = None
+                        proceeds = proceeds_native
+                        acb_usd_val = None
+                        acb_buy_snapshot = []
+                    # ACB 和 proceeds 均为 CAD
                     avg_cost_per_share = (total_cost / total_shares) if total_shares > 0 else 0.0
                     acb = avg_cost_per_share * sell_qty
                     original_acb = ((total_cost_no_roc / total_shares) * sell_qty) if total_shares > 0 else 0.0
@@ -930,12 +973,15 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
                         total_shares = 0.0
                         total_cost = 0.0
                         total_cost_no_roc = 0.0
+                        total_cost_usd = 0.0
+                        buy_log = []
                         roc_applied = False
                         roc_events_in_period = []
                         buy_accounts_in_period = set()
                         roc_joint_in_period = False
                     if tx.trade_date >= year_start:
                         gain = proceeds - acb
+                        out_currency = 'CAD' if symbol_currency == 'USD' else (tx.currency or 'CAD')
                         records.append({
                             'date': tx.trade_date.isoformat(),
                             'symbol': symbol,
@@ -944,7 +990,13 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
                             'acb': round(acb, 2),
                             'original_acb': round(original_acb, 2),
                             'gain': round(gain, 2),
-                            'currency': tx.currency or 'CAD',
+                            'currency': out_currency,
+                            'original_currency': symbol_currency,
+                            # USD 股票额外字段
+                            'proceeds_usd': round(proceeds_native, 2) if symbol_currency == 'USD' else None,
+                            'sell_fx_rate': round(fx_sell, 4) if fx_sell else None,
+                            'acb_usd': round(acb_usd_val, 2) if acb_usd_val is not None else None,
+                            'acb_buy_log': acb_buy_snapshot,
                             'roc_adjusted': this_sell_roc_adjusted,
                             'roc_applied_years': this_sell_roc_years,
                             'account_id': tx.account_id,

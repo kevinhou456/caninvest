@@ -1062,6 +1062,7 @@ def overview():
                              current_period=time_period,
                              member_id=member_id,
                              account_id=account_id,
+                             account_type=account_type,
                              account_ids=account_ids,
                              accounts=accounts,
                              current_member=current_member,
@@ -1096,6 +1097,7 @@ def overview():
                              current_period='all_time',
                              member_id=None,
                              account_id=None,
+                             account_type=None,
                              account_ids=[],
                              accounts=accounts,
                              current_member=None,
@@ -2771,7 +2773,10 @@ def annual_stats():
                          title=_('Annual Statistics'),
                          annual_data=annual_data,
                          current_year=current_year,
-                         exchange_rates=exchange_rates)
+                         exchange_rates=exchange_rates,
+                         current_account_id=request.args.get('account_id', type=int),
+                         current_member_id=request.args.get('member_id', type=int),
+                         current_account_type=request.args.get('account_type'))
 
 
 

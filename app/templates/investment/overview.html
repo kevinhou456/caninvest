@@ -436,7 +436,7 @@
                                             {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
                                         </div>
                                         <div>
-                                            <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
+                                            <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id, account_type=account_type) }}" class="text-decoration-none">
                                                 <strong>{{ holding['symbol'] }}</strong>
                                             </a>
                                             <br><small class="text-muted">{{ holding['sector'] or 'Unknown' }}</small>
@@ -658,7 +658,7 @@
                                              style="color: {{ 'black' if holding['currency'] == 'CAD' else 'white' }};">
                                             {% if holding['currency'] == 'CAD' %}C${% else %}${% endif %}
                                         </div>
-                                        <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id) }}" class="text-decoration-none">
+                                        <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id, account_type=account_type) }}" class="text-decoration-none">
                                             <strong>{{ holding['symbol'] }}</strong>
                                         </a>
                                     </div>

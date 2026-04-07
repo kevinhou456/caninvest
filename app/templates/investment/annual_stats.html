@@ -1123,7 +1123,12 @@ function renderYearlyHoldingsTable(year) {
         tr.dataset.realized = item.realized_gain || 0;
         tr.dataset.divint = divInt;
         tr.dataset.returnPercent = item.return_rate || 0;
-        const stockDetailUrl = `{{ url_for('main.stock_detail', stock_symbol='__SYMBOL__', member_id=member_id, account_id=account_id) }}`.replace('__SYMBOL__', item.symbol || '');
+        const _sym = encodeURIComponent(item.symbol || '');
+        const _qs = new URLSearchParams();
+        if (accountId) _qs.set('account_id', accountId);
+        if (memberId) _qs.set('member_id', memberId);
+        if (accountType) _qs.set('account_type', accountType);
+        const stockDetailUrl = `/stock/${_sym}` + (_qs.toString() ? '?' + _qs.toString() : '');
 
         const t3Cell = (() => {
             if (!(filterInfo.account_type_name === 'Regular' && item.symbol)) return `<td></td>`;
@@ -1414,6 +1419,23 @@ async function showT5008(year, target) {
             return `$${val.toFixed(2)}`;
         };
 
+        const buildAcbTooltip = (r) => {
+            if (r.original_currency !== 'USD' || !r.acb_buy_log || !r.acb_buy_log.length) return '';
+            let tip = '买入记录 (成本 CAD):';
+            r.acb_buy_log.forEach(b => {
+                const fee = b.fee_usd > 0 ? ` +手续费$${b.fee_usd.toFixed(2)}` : '';
+                tip += `&lt;br&gt;${b.date}: ${b.qty}股 @$${b.price_usd.toFixed(4)}USD${fee} × ${b.fx_rate.toFixed(4)} = $${b.cost_cad.toFixed(2)}CAD`;
+            });
+            return tip.replace(/"/g, '&quot;');
+        };
+
+        const buildProceedsTooltip = (r) => {
+            if (r.original_currency !== 'USD' || r.proceeds_usd == null) return '';
+            let tip = `卖出日汇率: ${r.sell_fx_rate ? r.sell_fx_rate.toFixed(4) : '-'}`;
+            tip += `&lt;br&gt;$${r.proceeds_usd.toFixed(2)} USD × ${r.sell_fx_rate ? r.sell_fx_rate.toFixed(4) : '-'} = $${r.proceeds.toFixed(2)} CAD`;
+            return tip.replace(/"/g, '&quot;');
+        };
+
         const buildRocTooltip = (r, t3All) => {
             const parts = r.roc_applied_years.map(x => `$${x.amount.toFixed(2)}(${String(x.year).slice(-2)})`).join(' - ');
             let tip = `$${r.acb.toFixed(2)} = $${r.original_acb.toFixed(2)} - ${parts}`;
@@ -1446,36 +1468,55 @@ async function showT5008(year, target) {
 
             let rows = '';
             for (const r of records) {
-                const rate = r.currency === 'USD' && fxRate ? fxRate : 1;
-                totalProceedsCad += r.proceeds * rate;
-                totalAcbCad     += r.acb * rate;
-                totalGainCad    += r.gain * rate;
+                // 所有金额已是 CAD（USD 股票按当日汇率转换）
+                totalProceedsCad += r.proceeds;
+                totalAcbCad     += r.acb;
+                totalGainCad    += r.gain;
                 const gainCls = r.gain >= 0 ? 'text-success' : 'text-danger';
                 const sign    = r.gain >= 0 ? '+' : '';
-                const gainFmt = r.currency === 'USD' && fxRate
-                    ? `${sign}$${(r.gain * fxRate).toFixed(2)} (${sign}$${r.gain.toFixed(2)})`
-                    : `${sign}$${r.gain.toFixed(2)}`;
+                const gainFmt = `${sign}$${r.gain.toFixed(2)}`;
+
+                // USD 股票：显示 CAD (USD)，否则只显示 CAD
+                const fmtUsd = (cad, usd) => usd != null
+                    ? `$${cad.toFixed(2)} <span class="text-success small">($${usd.toFixed(2)})</span>`
+                    : `$${cad.toFixed(2)}`;
+
                 const rocMarker = r.roc_adjusted
                     ? ` <span class="text-warning fw-bold" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${buildRocTooltip(r, t3All)}">(*)</span>`
                     : '';
                 const acctCell = multiAcct ? `<td class="text-muted small">${r.account_name}</td>` : '';
-                const acbCell = r.joint_acb
-                    ? `<td class="text-end text-danger fw-bold">${fmtAmt(r.acb, r.currency)}${rocMarker}</td>`
-                    : `<td class="text-end">${fmtAmt(r.acb, r.currency)}${rocMarker}</td>`;
+
+                // 成本格：可能含 ROC 标记 + USD tooltip
+                const acbTipAttr = r.original_currency === 'USD' && r.acb_buy_log && r.acb_buy_log.length
+                    ? ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${buildAcbTooltip(r)}"`
+                    : '';
+                const acbContent = fmtUsd(r.acb, r.acb_usd) + rocMarker;
+                const acbCls = r.joint_acb ? 'text-end text-danger fw-bold' : 'text-end';
+                const acbCell = `<td class="${acbCls}"${acbTipAttr}>${acbContent}</td>`;
+
+                // 卖出金额格：USD tooltip
+                const proceedsTipAttr = r.original_currency === 'USD' && r.proceeds_usd != null
+                    ? ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${buildProceedsTooltip(r)}"`
+                    : '';
+                const proceedsCell = `<td class="text-end"${proceedsTipAttr}>${fmtUsd(r.proceeds, r.proceeds_usd)}</td>`;
+
+                const usdBadge = r.original_currency === 'USD'
+                    ? ' <span class="bg-success rounded-circle d-inline-flex align-items-center justify-content-center text-white" style="width:16px;height:16px;font-size:9px;font-weight:600;vertical-align:middle;">$</span>'
+                    : '';
                 rows += `<tr>
                     <td>${r.date}</td>
-                    <td><strong>${r.symbol}</strong></td>
+                    <td><strong>${r.symbol}</strong>${usdBadge}</td>
                     <td class="text-end">${r.quantity}</td>
                     ${acbCell}
-                    <td class="text-end">${fmtAmt(r.proceeds, r.currency)}</td>
+                    ${proceedsCell}
                     <td class="text-end ${gainCls}">${gainFmt}</td>
-                    <td>${r.currency}${r.currency === 'USD' && fxRate ? ` <small class="text-muted">(×${fxRate.toFixed(4)})</small>` : ''}</td>
+                    <td>${r.original_currency === 'USD' ? 'USD→CAD' : r.currency}</td>
                     ${acctCell}
                 </tr>`;
             }
             const totalCls  = totalGainCad >= 0 ? 'text-success' : 'text-danger';
             const totalSign = totalGainCad >= 0 ? '+' : '';
-            const rateNote  = fxRate ? ` <small class="text-muted fw-normal">USD已按年度平均汇率 ${fxRate.toFixed(4)} 换算</small>` : '';
+            const rateNote  = '';
             const totalAcctCell = multiAcct ? '<td></td>' : '';
 
             return `<div class="table-responsive"><table class="table table-sm table-hover mb-1">

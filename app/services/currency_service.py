@@ -9,7 +9,6 @@
 """
 
 import requests
-import yfinance as yf
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Optional, List
@@ -21,21 +20,6 @@ from app import db
 from flask import current_app
 
 logger = logging.getLogger(__name__)
-
-
-def _log_yfinance_call(api_name: str, identifier: str, **kwargs):
-    """Optional debug hook for yfinance FX calls; disabled by default to reduce noise."""
-    try:
-        enabled = bool(current_app.config.get('ENABLE_YFINANCE_DEBUG', False))
-    except Exception:
-        enabled = False
-
-    if not enabled:
-        return
-
-    details = " ".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
-    message = f"[yfinance] {api_name} id={identifier} {details}".strip()
-    logger.debug(message)
 
 
 class ExchangeRate(db.Model):
@@ -125,7 +109,7 @@ class CurrencyService:
             self._cache_expiry[cache_key] = now + timedelta(minutes=5)
             return db_rate
         
-        # 如果数据库没有当日数据，尝试从Yahoo Finance API获取
+        # 如果数据库没有当日数据，从 Bank of Canada Valet API 获取
         api_rate = self._fetch_rate_from_api(from_currency, to_currency)
         if api_rate:
             # 保存到数据库
@@ -155,76 +139,91 @@ class CurrencyService:
         
         return Decimal(str(rate_record.rate)) if rate_record else None
     
+    def _fetch_boc_daily_rates(self, from_currency: str, to_currency: str,
+                               start_date: date, end_date: date) -> Dict[date, Decimal]:
+        """
+        从 Bank of Canada Valet API 批量获取每日汇率。
+        仅支持 USD/CAD（系列 FXUSDCAD）。
+        返回 {date: Decimal}，失败时返回空字典。
+        API 文档: https://www.bankofcanada.ca/valet/docs
+        """
+        if from_currency == to_currency:
+            return {}
+        if set([from_currency, to_currency]) != {'USD', 'CAD'}:
+            logger.warning(f"Bank of Canada API only supports USD/CAD, got {from_currency}/{to_currency}")
+            return {}
+
+        invert = (from_currency == 'CAD')  # FXUSDCAD = 1 USD in CAD; if we want CAD→USD, invert
+        series_id = 'FXUSDCAD'
+        url = f"https://www.bankofcanada.ca/valet/observations/{series_id}/json"
+        params = {'start_date': start_date.isoformat(), 'end_date': end_date.isoformat()}
+
+        try:
+            logger.info(f"Fetching daily rates from Bank of Canada: {start_date} to {end_date}")
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            observations = response.json().get('observations', [])
+
+            result: Dict[date, Decimal] = {}
+            for obs in observations:
+                d_str = obs.get('d')
+                val = (obs.get(series_id) or {}).get('v')
+                if d_str and val is not None:
+                    try:
+                        rate_val = Decimal(str(val))
+                        if invert:
+                            rate_val = (Decimal('1') / rate_val).quantize(Decimal('0.000001'))
+                        else:
+                            rate_val = rate_val.quantize(Decimal('0.000001'))
+                        result[date.fromisoformat(d_str)] = rate_val
+                    except Exception:
+                        pass
+
+            logger.info(f"Bank of Canada returned {len(result)} daily rates")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to fetch daily rates from Bank of Canada: {e}")
+            return {}
+
     def _fetch_rate_from_api(self, from_currency: str, to_currency: str) -> Optional[Decimal]:
         """
-        从Yahoo Finance API获取汇率
-
-        使用Yahoo Finance获取实时汇率数据，支持CAD/USD货币对
+        从 Bank of Canada Valet API 获取最新汇率（recent=1 取最近一个交易日）。
         """
+        if from_currency == to_currency:
+            return Decimal('1.0')
+
+        if set([from_currency, to_currency]) != {'USD', 'CAD'}:
+            logger.warning(f"Bank of Canada API only supports USD/CAD, got {from_currency}/{to_currency}")
+            return self._get_default_rate(from_currency, to_currency)
+
+        invert = (from_currency == 'CAD')
+        series_id = 'FXUSDCAD'
+        url = f"https://www.bankofcanada.ca/valet/observations/{series_id}/json"
+
         try:
-            # 构建货币对代码 (如: CADUSD=X, USDCAD=X)
-            if from_currency == to_currency:
-                return Decimal('1.0')
+            logger.info(f"Fetching current rate from Bank of Canada (recent=1)")
+            response = requests.get(url, params={'recent': 1}, timeout=15)
+            response.raise_for_status()
+            observations = response.json().get('observations', [])
 
-            currency_pair = f"{from_currency}{to_currency}=X"
-            logger.info(f"Attempting to fetch rate for {currency_pair}")
-
-            # 添加调试信息
-            import yfinance
-            logger.info(f"yfinance version: {yfinance.__version__}")
-
-            # 使用Yahoo Finance获取汇率（不使用自定义session，让yfinance自己处理）
-            _log_yfinance_call('Ticker.init', currency_pair)
-            ticker = yf.Ticker(currency_pair)
-            logger.debug(f"Created ticker object for {currency_pair}")
-
-            # 尝试不同的时间段，从最短开始
-            periods = ["1d", "5d", "1mo"]
-            for period in periods:
-                try:
-                    _log_yfinance_call('Ticker.history', currency_pair, period=period)
-                    data = ticker.history(period=period)
-                    logger.debug(f"Data shape: {data.shape if not data.empty else 'empty'}")
-
-                    if not data.empty:
-                        # 获取最新收盘价
-                        latest_rate = data['Close'].iloc[-1]
-                        rate = Decimal(str(round(latest_rate, 6)))
-                        logger.info(f"SUCCESS: Fetched rate from Yahoo Finance: {from_currency}/{to_currency} = {rate} (period: {period})")
-                        return rate
+            if observations:
+                obs = observations[-1]
+                val = (obs.get(series_id) or {}).get('v')
+                if val is not None:
+                    rate_val = Decimal(str(val))
+                    if invert:
+                        rate_val = (Decimal('1') / rate_val).quantize(Decimal('0.000001'))
                     else:
-                        logger.warning(f"Empty data for period {period}")
-                except Exception as inner_e:
-                    logger.error(f"Failed to fetch with period {period}: {str(inner_e)}, type: {type(inner_e).__name__}")
-                    continue
+                        rate_val = rate_val.quantize(Decimal('0.000001'))
+                    obs_date = date.fromisoformat(obs['d']) if obs.get('d') else date.today()
+                    logger.info(f"Bank of Canada current rate ({obs_date}): {from_currency}/{to_currency} = {rate_val}")
+                    return rate_val
 
-            logger.warning(f"No data returned from Yahoo Finance for {currency_pair} with any period")
+            logger.warning("Bank of Canada returned no recent observations")
 
         except Exception as e:
-            logger.error(f"Failed to fetch rate from Yahoo Finance: {str(e)}, type: {type(e).__name__}")
-            import traceback
-            logger.debug(f"Full traceback: {traceback.format_exc()}")
-
-        # 备用方案：尝试反向汇率
-        try:
-            if from_currency != to_currency:
-                reverse_pair = f"{to_currency}{from_currency}=X"
-                logger.info(f"Trying reverse pair: {reverse_pair}")
-
-                _log_yfinance_call('Ticker.init', reverse_pair)
-                ticker = yf.Ticker(reverse_pair)
-                _log_yfinance_call('Ticker.history', reverse_pair, period="1d")
-                data = ticker.history(period="1d")
-
-                if not data.empty:
-                    reverse_rate = data['Close'].iloc[-1]
-                    rate = Decimal('1.0') / Decimal(str(round(reverse_rate, 6)))
-                    logger.info(f"SUCCESS: Fetched reverse rate from Yahoo Finance: {to_currency}/{from_currency} = {reverse_rate}, calculated {from_currency}/{to_currency} = {rate}")
-                    return rate
-                else:
-                    logger.warning(f"Empty data for reverse pair {reverse_pair}")
-        except Exception as e:
-            logger.error(f"Reverse rate fetch also failed: {str(e)}, type: {type(e).__name__}")
+            logger.error(f"Failed to fetch current rate from Bank of Canada: {e}")
 
         return None
     
@@ -435,14 +434,12 @@ class CurrencyService:
             self._cache[cache_key] = db_rate
             return db_rate
 
-        # 如果是当前年份，使用Yahoo Finance计算年初至今平均值
+        # 从 Bank of Canada Valet API 获取年度平均汇率
         if year == current_year:
             rate = self._calculate_current_year_average(from_currency, to_currency)
         else:
-            # 历史年份优先从加拿大银行获取
             rate = self._fetch_annual_rate_from_bank_of_canada(year, from_currency, to_currency)
             if not rate:
-                # 备选方案：通过Yahoo Finance获取历史数据计算
                 rate = self._calculate_historical_year_average(year, from_currency, to_currency)
 
         if rate:
@@ -528,63 +525,29 @@ class CurrencyService:
         return None
 
     def _calculate_current_year_average(self, from_currency: str, to_currency: str) -> Optional[Decimal]:
-        """计算当前年份的年初至今平均汇率（使用Yahoo Finance）"""
-        try:
-            current_year = datetime.now().year
-            start_date = date(current_year, 1, 1)
-            end_date = date.today()
-
-            # 构建货币对代码
-            currency_pair = f"{from_currency}{to_currency}=X"
-
-            logger.info(f"Calculating current year average for {currency_pair}")
-            ticker = yf.Ticker(currency_pair)
-
-            # 获取年初至今的历史数据
-            data = ticker.history(start=start_date, end=end_date, interval="1d")
-
-            if not data.empty and 'Close' in data.columns:
-                # 计算平均收盘价
-                average_rate = data['Close'].mean()
-                rate = Decimal(str(round(average_rate, 6)))
-                logger.info(f"Calculated current year average: {from_currency}/{to_currency} = {rate}")
-                return rate
-            else:
-                logger.warning(f"No data returned from Yahoo Finance for {currency_pair}")
-
-        except Exception as e:
-            logger.error(f"Failed to calculate current year average: {e}")
-
-        return None
+        """计算当前年份的年初至今平均汇率（使用 Bank of Canada Valet API）"""
+        current_year = datetime.now().year
+        start_date = date(current_year, 1, 1)
+        end_date = date.today()
+        daily = self._fetch_boc_daily_rates(from_currency, to_currency, start_date, end_date)
+        if not daily:
+            return None
+        avg = sum(daily.values()) / len(daily)
+        rate = Decimal(str(round(float(avg), 6)))
+        logger.info(f"Current year average ({from_currency}/{to_currency}): {rate}")
+        return rate
 
     def _calculate_historical_year_average(self, year: int, from_currency: str, to_currency: str) -> Optional[Decimal]:
-        """计算历史年份的年度平均汇率（使用Yahoo Finance）"""
-        try:
-            start_date = date(year, 1, 1)
-            end_date = date(year, 12, 31)
-
-            # 构建货币对代码
-            currency_pair = f"{from_currency}{to_currency}=X"
-
-            logger.info(f"Calculating historical year average for {currency_pair} in {year}")
-            ticker = yf.Ticker(currency_pair)
-
-            # 获取历史数据
-            data = ticker.history(start=start_date, end=end_date, interval="1d")
-
-            if not data.empty and 'Close' in data.columns:
-                # 计算平均收盘价
-                average_rate = data['Close'].mean()
-                rate = Decimal(str(round(average_rate, 6)))
-                logger.info(f"Calculated historical year average: {from_currency}/{to_currency} {year} = {rate}")
-                return rate
-            else:
-                logger.warning(f"No historical data for {currency_pair} in {year}")
-
-        except Exception as e:
-            logger.error(f"Failed to calculate historical year average: {e}")
-
-        return None
+        """计算历史年份的年度平均汇率（使用 Bank of Canada Valet API）"""
+        start_date = date(year, 1, 1)
+        end_date = date(year, 12, 31)
+        daily = self._fetch_boc_daily_rates(from_currency, to_currency, start_date, end_date)
+        if not daily:
+            return None
+        avg = sum(daily.values()) / len(daily)
+        rate = Decimal(str(round(float(avg), 6)))
+        logger.info(f"Historical year average {year} ({from_currency}/{to_currency}): {rate}")
+        return rate
 
     def _save_annual_rate_to_db(self, year: int, from_currency: str, to_currency: str, rate: Decimal):
         """保存年度平均汇率到数据库"""
@@ -637,6 +600,119 @@ class CurrencyService:
             result[year] = self.get_annual_average_rate(year, from_currency, to_currency)
 
         return result
+
+    def get_rates_for_dates(self, dates: List[date], from_currency: str = 'USD', to_currency: str = 'CAD') -> Dict[date, Decimal]:
+        """
+        批量获取多个日期的汇率（用于T5008按日汇率计算）。
+        优先查 exchange_rates 缓存表，缺失则从 Bank of Canada Valet API 批量拉取后一次性写入缓存，
+        最后fallback到年度平均。对于周末/节假日，往前找最近7天内的有效交易日汇率。
+
+        Returns:
+            {date: Decimal} 每个请求日期对应的汇率
+        """
+        if from_currency == to_currency:
+            return {d: Decimal('1.0') for d in dates}
+
+        unique_dates = sorted(set(dates))
+        if not unique_dates:
+            return {}
+
+        min_date = unique_dates[0] - timedelta(days=7)
+        max_date = unique_dates[-1]
+
+        # 1. 批量查缓存表（exchange_rates，排除年度平均）
+        db_records = ExchangeRate.query.filter(
+            ExchangeRate.from_currency == from_currency,
+            ExchangeRate.to_currency == to_currency,
+            ExchangeRate.date >= min_date,
+            ExchangeRate.date <= max_date,
+            ExchangeRate.source != 'ANNUAL_AVERAGE'
+        ).order_by(ExchangeRate.date.asc()).all()
+
+        db_rate_map: Dict[date, Decimal] = {r.date: Decimal(str(r.rate)) for r in db_records}
+
+        def _find_nearest(target: date) -> Optional[Decimal]:
+            """往前找最近7天内已缓存的汇率（处理周末/节假日）"""
+            for delta in range(8):
+                d = target - timedelta(days=delta)
+                if d in db_rate_map:
+                    return db_rate_map[d]
+            return None
+
+        result: Dict[date, Decimal] = {}
+        missing_dates = []
+        for d in unique_dates:
+            r = _find_nearest(d)
+            if r is not None:
+                result[d] = r
+            else:
+                missing_dates.append(d)
+
+        if missing_dates:
+            # 2. 从 Bank of Canada Valet API 批量拉取缺失范围的历史数据
+            newly_fetched: Dict[date, Decimal] = {}
+            fetch_start = min(missing_dates) - timedelta(days=10)
+            fetch_end = max(missing_dates) + timedelta(days=2)
+            fetched = self._fetch_boc_daily_rates(from_currency, to_currency, fetch_start, fetch_end)
+            for fetched_date, rate_val in fetched.items():
+                if fetched_date not in db_rate_map:
+                    db_rate_map[fetched_date] = rate_val
+                    newly_fetched[fetched_date] = rate_val
+
+            # 一次性写入缓存表（单次提交，避免在报表计算中散乱提交）
+            if newly_fetched:
+                self._batch_save_rates_to_cache(from_currency, to_currency, newly_fetched)
+
+            # 重新匹配缺失日期
+            still_missing = []
+            for d in missing_dates:
+                r = _find_nearest(d)
+                if r is not None:
+                    result[d] = r
+                else:
+                    still_missing.append(d)
+            missing_dates = still_missing
+
+        # 3. 最终fallback：年度平均
+        if missing_dates:
+            year_rates: Dict[int, Decimal] = {}
+            for d in missing_dates:
+                if d.year not in year_rates:
+                    annual = self.get_annual_average_rate(d.year, from_currency, to_currency)
+                    year_rates[d.year] = annual or self._get_default_rate(from_currency, to_currency)
+                result[d] = year_rates[d.year]
+                logger.warning(f"Using annual average fallback for {d} ({from_currency}/{to_currency}): {result[d]}")
+
+        return result
+
+    def _batch_save_rates_to_cache(self, from_currency: str, to_currency: str, rates: Dict[date, Decimal]):
+        """将批量获取的历史汇率一次性写入 exchange_rates 缓存表（单次提交）。"""
+        if not rates:
+            return
+        try:
+            # 查出已存在的日期，避免重复插入
+            existing_dates = {
+                r.date for r in ExchangeRate.query.filter(
+                    ExchangeRate.from_currency == from_currency,
+                    ExchangeRate.to_currency == to_currency,
+                    ExchangeRate.date.in_(list(rates.keys())),
+                    ExchangeRate.source != 'ANNUAL_AVERAGE'
+                ).with_entities(ExchangeRate.date).all()
+            }
+            for rate_date, rate in rates.items():
+                if rate_date not in existing_dates:
+                    db.session.add(ExchangeRate(
+                        from_currency=from_currency,
+                        to_currency=to_currency,
+                        rate=rate,
+                        date=rate_date,
+                        source='DAILY_CACHE'
+                    ))
+            db.session.commit()
+            logger.info(f"Cached {len(rates) - len(existing_dates)} daily rates for {from_currency}/{to_currency}")
+        except Exception as e:
+            logger.warning(f"Failed to cache daily rates: {e}")
+            db.session.rollback()
 
     def refresh_annual_rates_from_bank_of_canada(
         self,
