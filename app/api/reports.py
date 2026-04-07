@@ -940,6 +940,13 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
                         })
                     else:
                         cost = cost_native
+                        buy_log.append({
+                            'date': tx.trade_date.isoformat(),
+                            'qty': qty,
+                            'price': round(price_native, 4),
+                            'fee': round(fee_native, 2),
+                            'cost': round(cost, 2),
+                        })
                     total_shares += qty
                     total_cost += cost
                     total_cost_no_roc += cost
@@ -957,7 +964,7 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
                         fx_sell = None
                         proceeds = proceeds_native
                         acb_usd_val = None
-                        acb_buy_snapshot = []
+                        acb_buy_snapshot = list(buy_log)
                     # ACB 和 proceeds 均为 CAD
                     avg_cost_per_share = (total_cost / total_shares) if total_shares > 0 else 0.0
                     acb = avg_cost_per_share * sell_qty

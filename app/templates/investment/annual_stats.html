@@ -104,7 +104,7 @@
                                 <i class="fas fa-sort ms-1 sort-icon"></i>
                             </div>
                         </th>
-                        <th id="t3-col-header" class="text-center" style="display:none;">T3-42</th>
+                        <th id="t3-col-header" class="text-center">T3-42</th>
                         <th class="text-end sortable" data-sort="shares">
                             {{ _('Shares') }}
                             <i class="fas fa-sort ms-1 sort-icon"></i>
@@ -142,6 +142,9 @@
                 <tbody id="yearlyHoldingsTbody">
                     <!-- populated via JS -->
                 </tbody>
+                <tfoot id="yearlyHoldingsTfoot" class="table-secondary fw-bold" style="display:none;">
+                    <!-- populated via JS -->
+                </tfoot>
             </table>
         </div>
         <div id="yearlyHoldingsEmpty" class="text-center py-4 text-muted" style="display: none;">
@@ -1170,17 +1173,14 @@ function renderYearlyHoldingsTable(year) {
                 </div>
             </td>
             ${t3Cell}
-            <td class="text-end">${formatShares(item.shares || 0)}</td>
-            <td class="text-end">
-                $${formatNumber(avgCost || 0, 4)}
-                <br><small class="text-muted">${item.currency || ''}</small>
-            </td>
-            <td class="text-end">$${formatNumber(item.current_price || 0, 2)}</td>
-            <td class="text-end">$${formatNumber(item.current_value || 0, 2)}</td>
-            <td class="text-end ${unrealizedClass}">$${formatNumber(item.unrealized_gain || 0, 2, true)}</td>
+            <td class="text-end">${shares > 0 ? formatShares(shares) : '<span class="text-muted">—</span>'}</td>
+            <td class="text-end">${shares > 0 ? `$${formatNumber(avgCost || 0, 4)}<br><small class="text-muted">${item.currency || ''}</small>` : ''}</td>
+            <td class="text-end">${shares > 0 ? `$${formatNumber(item.current_price || 0, 2)}` : ''}</td>
+            <td class="text-end">${shares > 0 ? `$${formatNumber(item.current_value || 0, 2)}` : ''}</td>
+            <td class="text-end ${unrealizedClass}">${shares > 0 ? `$${formatNumber(item.unrealized_gain || 0, 2, true)}` : ''}</td>
             <td class="text-end ${realizedClass}">$${formatNumber(item.realized_gain || 0, 2, true)}</td>
             <td class="text-end text-success">$${formatNumber(divInt, 2)}</td>
-            <td class="text-end"><span class="badge ${returnClass}">${formatNumber(item.return_rate || 0, 1, true)}%</span></td>
+            <td class="text-end">${shares > 0 ? `<span class="badge ${returnClass}">${formatNumber(item.return_rate || 0, 1, true)}%</span>` : ''}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -1191,6 +1191,40 @@ function renderYearlyHoldingsTable(year) {
         if (existing) existing.dispose();
         new bootstrap.Tooltip(el, {trigger: 'hover', html: true, sanitize: false});
     });
+
+    // 合计行（含 CAD/USD 分项）
+    const tfoot = document.getElementById('yearlyHoldingsTfoot');
+    if (tfoot) {
+        let totalValue = 0, totalUnrealized = 0, totalRealized = 0, totalDivInt = 0;
+        let cadValue = 0, cadUnrealized = 0, cadRealized = 0, cadDivInt = 0;
+        let usdValue = 0, usdUnrealized = 0, usdRealized = 0, usdDivInt = 0;
+        rows.forEach(item => {
+            const isCad = (item.currency || 'USD') === 'CAD';
+            const v  = parseFloat(item.current_value || 0);
+            const ur = parseFloat(item.unrealized_gain || 0);
+            const re = parseFloat(item.realized_gain || 0);
+            const di = parseFloat(item.dividends || 0) + parseFloat(item.interest || 0);
+            totalValue      += v;  totalUnrealized += ur;  totalRealized += re;  totalDivInt += di;
+            if (isCad) { cadValue += v; cadUnrealized += ur; cadRealized += re; cadDivInt += di; }
+            else        { usdValue += v; usdUnrealized += ur; usdRealized += re; usdDivInt += di; }
+        });
+        const unrealizedCls = totalUnrealized >= 0 ? 'text-success' : 'text-danger';
+        const realizedCls   = totalRealized   >= 0 ? 'text-success' : 'text-danger';
+        const bd = (cad, usd, sign = false) =>
+            `<br><small class="text-muted currency-breakdown">CAD: $${formatNumber(cad, 2, sign)} | USD: $${formatNumber(usd, 2, sign)}</small>`;
+        // T3列始终存在：Stock + T3 + Shares + AvgCost + Year-endPrice = 5列，colspan=5合并为"合计"标签
+        tfoot.style.display = '';
+        tfoot.innerHTML = `<tr>
+            <td colspan="5" class="text-end pe-2">合计</td>
+            <td class="text-end">$${formatNumber(totalValue, 2)}${bd(cadValue, usdValue)}</td>
+            <td class="text-end ${unrealizedCls}">$${formatNumber(totalUnrealized, 2, true)}${bd(cadUnrealized, usdUnrealized, true)}</td>
+            <td class="text-end ${realizedCls}">$${formatNumber(totalRealized, 2, true)}${bd(cadRealized, usdRealized, true)}</td>
+            <td class="text-end text-success">$${formatNumber(totalDivInt, 2)}${bd(cadDivInt, usdDivInt)}</td>
+            <td></td>
+        </tr>`;
+        // 同步当前 currency-breakdown 显示状态
+        updateCurrencyBreakdownVisibility();
+    }
 
     initYearlyHoldingsSorting();
 }
@@ -1376,8 +1410,7 @@ function updateAccountToggleVisibility() {
     }
     const t5008Header = document.getElementById('t5008-col-header');
     if (t5008Header) t5008Header.style.display = '';
-    const t3Header = document.getElementById('t3-col-header');
-    if (t3Header) t3Header.style.display = (singleAccount && filterInfo.account_type_name === 'Regular') ? '' : 'none';
+    // T3 列始终可见
 }
 
 async function showT5008(year, target) {
@@ -1458,17 +1491,101 @@ async function showT5008(year, target) {
             return tip.replace(/"/g, '&quot;');
         };
 
+        const buildSubTable = (r, t3All) => {
+            const isUsd = r.original_currency === 'USD';
+            const buys = r.acb_buy_log || [];
+            const t3Recs = (t3All && t3All[r.symbol]) || [];
+
+            const subBg = 'background-color:#d6eaf8;';
+            const subHeadBg = 'background-color:#b8d9f0;';
+
+            // 卖出记录
+            let sellHtml;
+            if (isUsd) {
+                const priceUsd = r.proceeds_usd != null && r.quantity ? (r.proceeds_usd / r.quantity) : null;
+                const fxStr = r.sell_fx_rate ? r.sell_fx_rate.toFixed(4) : '-';
+                const procUsdStr = r.proceeds_usd != null ? `$${r.proceeds_usd.toFixed(2)}` : '-';
+                const priceUsdStr = priceUsd != null ? `$${priceUsd.toFixed(4)}` : '-';
+                sellHtml = `<table class="table table-sm table-bordered mb-0" style="font-size:0.82em;${subBg}">
+                    <thead style="${subHeadBg}"><tr><th>卖出日期</th><th class="text-end">数量</th><th class="text-end">单价(USD)</th><th class="text-end">合计(USD)</th><th class="text-end">汇率(当日)</th><th class="text-end">合计(CAD)</th></tr></thead>
+                    <tbody><tr style="${subBg}"><td>${r.date}</td><td class="text-end">${r.quantity}</td><td class="text-end">${priceUsdStr}</td><td class="text-end">${procUsdStr}</td><td class="text-end">${fxStr}</td><td class="text-end">$${r.proceeds.toFixed(2)}</td></tr></tbody>
+                </table>`;
+            } else {
+                const priceCad = r.quantity ? (r.proceeds / r.quantity) : null;
+                const priceCadStr = priceCad != null ? `$${priceCad.toFixed(4)}` : '-';
+                sellHtml = `<table class="table table-sm table-bordered mb-0" style="font-size:0.82em;${subBg}">
+                    <thead style="${subHeadBg}"><tr><th>卖出日期</th><th class="text-end">数量</th><th class="text-end">单价(CAD)</th><th class="text-end">合计(CAD)</th></tr></thead>
+                    <tbody><tr style="${subBg}"><td>${r.date}</td><td class="text-end">${r.quantity}</td><td class="text-end">${priceCadStr}</td><td class="text-end">$${r.proceeds.toFixed(2)}</td></tr></tbody>
+                </table>`;
+            }
+
+            // 买入记录
+            let buyHtml = '';
+            if (buys.length) {
+                if (isUsd) {
+                    buyHtml = `<table class="table table-sm table-bordered mb-0" style="font-size:0.82em;${subBg}">
+                        <thead style="${subHeadBg}"><tr><th>买入日期</th><th class="text-end">数量</th><th class="text-end">价格(USD)</th><th class="text-end">手续费(USD)</th><th class="text-end">汇率</th><th class="text-end">成本(CAD)</th></tr></thead><tbody>`;
+                    buys.forEach(b => {
+                        buyHtml += `<tr style="${subBg}"><td>${b.date}</td><td class="text-end">${b.qty}</td><td class="text-end">$${b.price_usd.toFixed(4)}</td><td class="text-end">$${b.fee_usd.toFixed(2)}</td><td class="text-end">${b.fx_rate.toFixed(4)}</td><td class="text-end">$${b.cost_cad.toFixed(2)}</td></tr>`;
+                    });
+                } else {
+                    buyHtml = `<table class="table table-sm table-bordered mb-0" style="font-size:0.82em;${subBg}">
+                        <thead style="${subHeadBg}"><tr><th>买入日期</th><th class="text-end">数量</th><th class="text-end">价格</th><th class="text-end">手续费</th><th class="text-end">成本</th></tr></thead><tbody>`;
+                    buys.forEach(b => {
+                        buyHtml += `<tr style="${subBg}"><td>${b.date}</td><td class="text-end">${b.qty}</td><td class="text-end">$${b.price.toFixed(4)}</td><td class="text-end">$${b.fee.toFixed(2)}</td><td class="text-end">$${b.cost.toFixed(2)}</td></tr>`;
+                    });
+                }
+                buyHtml += '</tbody></table>';
+            } else {
+                buyHtml = '<p class="text-muted small mb-0">无买入记录</p>';
+            }
+
+            // T3 记录
+            let t3Html = '';
+            if (t3Recs.length) {
+                t3Html = `<table class="table table-sm table-bordered mb-0 mt-2" style="font-size:0.82em;${subBg}">
+                    <thead style="${subHeadBg}"><tr><th>年份</th><th class="text-end">金额(CAD)</th><th>备注</th></tr></thead><tbody>`;
+                t3Recs.forEach(rec => {
+                    t3Html += `<tr style="${subBg}"><td>${rec.year}</td><td class="text-end">$${rec.amount.toFixed(2)}</td><td>${rec.notes || ''}</td></tr>`;
+                    if (rec.breakdown && rec.breakdown.length) {
+                        rec.breakdown.forEach(b => {
+                            t3Html += `<tr class="text-muted" style="${subBg}"><td></td><td class="text-end ps-4">${b.account_name}: $${b.amount.toFixed(2)}</td><td></td></tr>`;
+                        });
+                    }
+                });
+                t3Html += '</tbody></table>';
+            }
+
+            return `<div class="p-2 border-top" style="background-color:#d6eaf8;">
+                <div class="mb-2">
+                    <div class="fw-semibold small text-secondary mb-1">卖出记录</div>
+                    ${sellHtml}
+                </div>
+                <div class="row g-3">
+                    <div class="${t3Recs.length ? 'col-md-8' : 'col-12'}">
+                        <div class="fw-semibold small text-secondary mb-1">买入记录（平均成本构成）</div>
+                        ${buyHtml}
+                    </div>
+                    ${t3Recs.length ? `<div class="col-md-4">
+                        <div class="fw-semibold small text-secondary mb-1">T3 Box 42 记录</div>
+                        ${t3Html}
+                    </div>` : ''}
+                </div>
+            </div>`;
+        };
+
+        let _subRowCounter = 0;  // 全局计数器，保证跨组唯一ID
+
         const buildGroupTable = (group) => {
             const records = group.records;
             const t3All = group.t3_all_records;
             const multiAcct = new Set(records.map(r => r.account_id)).size > 1;
             const acctHeader = multiAcct ? '<th>账户</th>' : '';
-            const colSpan = multiAcct ? 8 : 7;
+            const colSpan = multiAcct ? 9 : 8;  // +1 展开列
             let totalProceedsCad = 0, totalAcbCad = 0, totalGainCad = 0;
 
             let rows = '';
             for (const r of records) {
-                // 所有金额已是 CAD（USD 股票按当日汇率转换）
                 totalProceedsCad += r.proceeds;
                 totalAcbCad     += r.acb;
                 totalGainCad    += r.gain;
@@ -1476,7 +1593,6 @@ async function showT5008(year, target) {
                 const sign    = r.gain >= 0 ? '+' : '';
                 const gainFmt = `${sign}$${r.gain.toFixed(2)}`;
 
-                // USD 股票：显示 CAD (USD)，否则只显示 CAD
                 const fmtUsd = (cad, usd) => usd != null
                     ? `$${cad.toFixed(2)} <span class="text-success small">($${usd.toFixed(2)})</span>`
                     : `$${cad.toFixed(2)}`;
@@ -1486,7 +1602,6 @@ async function showT5008(year, target) {
                     : '';
                 const acctCell = multiAcct ? `<td class="text-muted small">${r.account_name}</td>` : '';
 
-                // 成本格：可能含 ROC 标记 + USD tooltip
                 const acbTipAttr = r.original_currency === 'USD' && r.acb_buy_log && r.acb_buy_log.length
                     ? ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${buildAcbTooltip(r)}"`
                     : '';
@@ -1494,7 +1609,6 @@ async function showT5008(year, target) {
                 const acbCls = r.joint_acb ? 'text-end text-danger fw-bold' : 'text-end';
                 const acbCell = `<td class="${acbCls}"${acbTipAttr}>${acbContent}</td>`;
 
-                // 卖出金额格：USD tooltip
                 const proceedsTipAttr = r.original_currency === 'USD' && r.proceeds_usd != null
                     ? ` data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${buildProceedsTooltip(r)}"`
                     : '';
@@ -1503,7 +1617,10 @@ async function showT5008(year, target) {
                 const usdBadge = r.original_currency === 'USD'
                     ? ' <span class="bg-success rounded-circle d-inline-flex align-items-center justify-content-center text-white" style="width:16px;height:16px;font-size:9px;font-weight:600;vertical-align:middle;">$</span>'
                     : '';
-                rows += `<tr>
+
+                const subId = `t5008sub_${_subRowCounter++}`;
+                rows += `<tr style="cursor:pointer" onclick="toggleT5008Sub('${subId}')">
+                    <td class="text-center text-muted" style="width:22px;font-size:0.8em"><span id="arrow-${subId}">▶</span></td>
                     <td>${r.date}</td>
                     <td><strong>${r.symbol}</strong>${usdBadge}</td>
                     <td class="text-end">${r.quantity}</td>
@@ -1512,22 +1629,25 @@ async function showT5008(year, target) {
                     <td class="text-end ${gainCls}">${gainFmt}</td>
                     <td>${r.original_currency === 'USD' ? 'USD→CAD' : r.currency}</td>
                     ${acctCell}
+                </tr>
+                <tr id="${subId}" style="display:none">
+                    <td colspan="${colSpan}" class="p-0">${buildSubTable(r, t3All)}</td>
                 </tr>`;
             }
             const totalCls  = totalGainCad >= 0 ? 'text-success' : 'text-danger';
             const totalSign = totalGainCad >= 0 ? '+' : '';
-            const rateNote  = '';
             const totalAcctCell = multiAcct ? '<td></td>' : '';
 
             return `<div class="table-responsive"><table class="table table-sm table-hover mb-1">
                 <thead class="table-light"><tr>
+                    <th style="width:22px"></th>
                     <th>日期</th><th>股票</th><th class="text-end">数量</th>
                     <th class="text-end">成本基础(ACB)</th><th class="text-end">卖出金额</th>
                     <th class="text-end">收益/亏损</th><th>币种</th>${acctHeader}
                 </tr></thead>
                 <tbody>${rows}</tbody>
                 <tfoot class="table-light fw-bold"><tr>
-                    <td colspan="3">合计(CAD)${rateNote}</td>
+                    <td></td><td colspan="3">合计(CAD)</td>
                     <td class="text-end">$${totalAcbCad.toFixed(2)}</td>
                     <td class="text-end">$${totalProceedsCad.toFixed(2)}</td>
                     <td class="text-end ${totalCls}">${totalSign}$${totalGainCad.toFixed(2)}</td>
@@ -1708,6 +1828,21 @@ async function deleteT3Record() {
         bootstrap.Modal.getInstance(document.getElementById('t3Modal')).hide();
     } catch (e) {
         errEl.textContent = '请求失败';
+    }
+}
+
+// 全局：展开/折叠 T5008 子表格
+function toggleT5008Sub(id) {
+    const sub = document.getElementById(id);
+    const arrow = document.getElementById('arrow-' + id);
+    if (!sub) return;
+    const hidden = sub.style.display === 'none';
+    sub.style.display = hidden ? '' : 'none';
+    arrow.textContent = hidden ? '▼' : '▶';
+    if (hidden) {
+        sub.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+            if (!bootstrap.Tooltip.getInstance(el)) new bootstrap.Tooltip(el, {sanitize: false});
+        });
     }
 }
 </script>
