@@ -1810,12 +1810,12 @@ def transactions():
         page = request.args.get('page', 1, type=int)
         account_id = request.args.get('account_id', type=int)
         member_id = request.args.get('member_id', type=int)  # 新增成员筛选
-        type_filter = request.args.get('type')
+        type_filter = request.args.get('type')  # 逗号分隔的多类型，如 "BUY,SELL"
         stock_symbol = request.args.get('stock')  # 股票筛选
-        
+
         # 构建查询
         query = Transaction.query
-        
+
         # 如果指定了成员ID，获取该成员的所有账户
         if member_id:
             member_accounts = db.session.query(Account.id).join(AccountMember).filter(
@@ -1829,9 +1829,11 @@ def transactions():
                 query = query.filter(Transaction.id == -1)
         elif account_id:
             query = query.filter(Transaction.account_id == account_id)
-            
+
         if type_filter:
-            query = query.filter(Transaction.type == type_filter)
+            types = [t.strip().upper() for t in type_filter.split(',') if t.strip()]
+            if types:
+                query = query.filter(Transaction.type.in_(types))
         if stock_symbol:
             query = query.filter(Transaction.stock.contains(stock_symbol.upper()))
         

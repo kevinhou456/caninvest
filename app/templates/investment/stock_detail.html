@@ -111,7 +111,11 @@
                         <i class="fas fa-list me-2"></i>{{ _('Transaction History') }}
                     </h5>
                     <div class="d-flex align-items-center gap-3">
-                        <span class="badge bg-primary">{{ transactions|length }} {{ _('transactions') }}</span>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="tradeOnlyFilter" onchange="applyTradeOnlyFilter()">
+                            <label class="form-check-label small" for="tradeOnlyFilter">{{ _('Trade Only') }}</label>
+                        </div>
+                        <span class="badge bg-primary" id="txnCountBadge">{{ transactions|length }} {{ _('transactions') }}</span>
                     </div>
                 </div>
                 <div class="card-body p-0">
@@ -877,6 +881,20 @@ function handleEditNotesSubmit(event) {
         console.error('Error:', error);
         alert('{{ _("Failed to update notes") }}');
     });
+}
+
+function applyTradeOnlyFilter() {
+    const tradeOnly = document.getElementById('tradeOnlyFilter').checked;
+    const rows = document.querySelectorAll('#transactionTable tbody tr');
+    let visible = 0;
+    rows.forEach(row => {
+        const type = (row.dataset.type || '').toUpperCase();
+        const show = !tradeOnly || type === 'BUY' || type === 'SELL';
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    const badge = document.getElementById('txnCountBadge');
+    if (badge) badge.textContent = visible + ' {{ _("transactions") }}';
 }
 
 // Table sorting functionality for transaction table

@@ -47,16 +47,15 @@
     </div>
 </div>
 
-<!-- Stock Symbol Filter -->
+<!-- Filters -->
 <div class="mb-3">
-    <div class="row">
-        <div class="col-md-6">
+    <div class="row g-2 align-items-start">
+        <!-- 股票代码 -->
+        <div class="col-md-5">
             <div class="input-group">
-                <span class="input-group-text">
-                    <i class="fas fa-filter"></i>
-                </span>
-                <input type="text" class="form-control" id="stockFilter" placeholder="筛选股票代码 (如: AAPL, TD.TO)" 
-                       value="{{ request.args.get('stock', '') }}" 
+                <span class="input-group-text"><i class="fas fa-filter"></i></span>
+                <input type="text" class="form-control" id="stockFilter" placeholder="筛选股票代码 (如: AAPL, TD.TO)"
+                       value="{{ request.args.get('stock', '') }}"
                        onkeyup="filterTransactions(event)">
                 {% if request.args.get('stock') %}
                 <button class="btn btn-outline-secondary" type="button" onclick="clearStockFilter()">
@@ -65,6 +64,39 @@
                 {% endif %}
             </div>
             <small class="form-text text-muted">支持输入股票代码的一部分进行筛选</small>
+        </div>
+        <!-- 类型多选 -->
+        <div class="col-md-4">
+            <div class="dropdown" id="typeFilterDropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle w-100 text-start" type="button"
+                        id="typeFilterBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                    <i class="fas fa-tag me-1"></i><span id="typeFilterLabel">所有类型</span>
+                </button>
+                <ul class="dropdown-menu p-2" style="min-width:180px;" id="typeFilterMenu">
+                    <li>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="typeAll" value="ALL" checked>
+                            <label class="form-check-label fw-bold" for="typeAll">All</label>
+                        </div>
+                    </li>
+                    <li><hr class="dropdown-divider my-1"></li>
+                    {% set type_options = [('BUY','Buy','success'),('SELL','Sell','danger'),('DIVIDEND','分红','primary'),('INTEREST','利息','info'),('DEPOSIT','存入','secondary'),('WITHDRAWAL','取出','warning'),('FEE','费用','dark')] %}
+                    {% for val, label, color in type_options %}
+                    <li>
+                        <div class="form-check">
+                            <input class="form-check-input type-check" type="checkbox" id="type{{ val }}" value="{{ val }}">
+                            <label class="form-check-label" for="type{{ val }}">
+                                <span class="badge bg-{{ color }}">{{ label }}</span>
+                            </label>
+                        </div>
+                    </li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li class="px-1">
+                        <button class="btn btn-primary btn-sm w-100" onclick="applyTypeFilter()">应用</button>
+                    </li>
+                </ul>
+            </div>
         </div>
     </div>
 </div>
@@ -148,17 +180,18 @@
 {% if transactions.pages > 1 %}
 <nav class="mt-4">
     <ul class="pagination justify-content-center">
+        {% set pg_args = {'account_id': request.args.get('account_id'), 'stock': request.args.get('stock'), 'type': request.args.get('type')} %}
         {% if transactions.has_prev %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.prev_num, account_id=request.args.get('account_id'), stock=request.args.get('stock')) }}">{{ _('Previous') }}</a>
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.prev_num, **pg_args) }}">{{ _('Previous') }}</a>
             </li>
         {% endif %}
-        
+
         {% for page_num in transactions.iter_pages() %}
             {% if page_num %}
                 {% if page_num != transactions.page %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('main.transactions', page=page_num, account_id=request.args.get('account_id'), stock=request.args.get('stock')) }}">{{ page_num }}</a>
+                        <a class="page-link" href="{{ url_for('main.transactions', page=page_num, **pg_args) }}">{{ page_num }}</a>
                     </li>
                 {% else %}
                     <li class="page-item active">
@@ -171,10 +204,10 @@
                 </li>
             {% endif %}
         {% endfor %}
-        
+
         {% if transactions.has_next %}
             <li class="page-item">
-                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.next_num, account_id=request.args.get('account_id'), stock=request.args.get('stock')) }}">{{ _('Next') }}</a>
+                <a class="page-link" href="{{ url_for('main.transactions', page=transactions.next_num, **pg_args) }}">{{ _('Next') }}</a>
             </li>
         {% endif %}
     </ul>
@@ -336,46 +369,84 @@ function handleEditTransactionSubmit(event) {
 
 // Removed - now using unified import interface
 
-// Stock symbol filter functions
+// ── 股票代码筛选 ──────────────────────────────────────
 function filterTransactions(event) {
-    // Check if Enter key was pressed or it's from input event
-    if (event.type === 'keyup' && event.key !== 'Enter') {
-        return;
-    }
-    
+    if (event.type === 'keyup' && event.key !== 'Enter') return;
     const stockSymbol = document.getElementById('stockFilter').value.trim();
     const currentUrl = new URL(window.location);
-    
-    if (stockSymbol) {
-        currentUrl.searchParams.set('stock', stockSymbol);
-    } else {
-        currentUrl.searchParams.delete('stock');
-    }
-    
-    // Keep existing parameters (account_id, page, etc.)
-    currentUrl.searchParams.delete('page'); // Reset to first page
-    
+    if (stockSymbol) currentUrl.searchParams.set('stock', stockSymbol);
+    else currentUrl.searchParams.delete('stock');
+    currentUrl.searchParams.delete('page');
     window.location.href = currentUrl.toString();
 }
 
 function clearStockFilter() {
     const currentUrl = new URL(window.location);
     currentUrl.searchParams.delete('stock');
-    currentUrl.searchParams.delete('page'); // Reset to first page
-    
+    currentUrl.searchParams.delete('page');
     window.location.href = currentUrl.toString();
 }
 
-// Auto-submit on Enter key
+// ── 类型多选筛选 ──────────────────────────────────────
+const TYPE_LABELS = {BUY:'Buy', SELL:'Sell', DIVIDEND:'分红', INTEREST:'利息', DEPOSIT:'存入', WITHDRAWAL:'取出', FEE:'费用'};
+
+function initTypeFilter() {
+    const activeTypes = new Set(
+        ('{{ request.args.get("type", "") }}'.split(',').map(s => s.trim()).filter(Boolean))
+    );
+    const allBox = document.getElementById('typeAll');
+    const boxes  = document.querySelectorAll('.type-check');
+
+    // 默认全选；有 URL 参数时只选对应项
+    if (activeTypes.size === 0) {
+        allBox.checked = true;
+        boxes.forEach(b => b.checked = true);
+    } else {
+        boxes.forEach(b => { b.checked = activeTypes.has(b.value); });
+        allBox.checked = [...boxes].every(b => b.checked);
+    }
+    updateTypeLabel();
+
+    // All：勾选=全选，取消=全不选
+    allBox.addEventListener('change', () => {
+        boxes.forEach(b => b.checked = allBox.checked);
+        updateTypeLabel();
+    });
+    // 单项：同步 All 状态
+    boxes.forEach(b => b.addEventListener('change', () => {
+        allBox.checked = [...boxes].every(x => x.checked);
+        updateTypeLabel();
+    }));
+}
+
+function updateTypeLabel() {
+    const selected = [...document.querySelectorAll('.type-check:checked')].map(b => TYPE_LABELS[b.value] || b.value);
+    const label = document.getElementById('typeFilterLabel');
+    if (selected.length === 0) label.textContent = '所有类型';
+    else if (selected.length <= 2) label.textContent = selected.join(', ');
+    else label.textContent = `已选 ${selected.length} 种`;
+}
+
+function applyTypeFilter() {
+    const allBox  = document.getElementById('typeAll');
+    const selected = [...document.querySelectorAll('.type-check:checked')].map(b => b.value);
+    const currentUrl = new URL(window.location);
+    // 全选或没选都视为不筛选，删除 type 参数
+    if (allBox.checked || selected.length === 0) currentUrl.searchParams.delete('type');
+    else currentUrl.searchParams.set('type', selected.join(','));
+    currentUrl.searchParams.delete('page');
+    window.location.href = currentUrl.toString();
+}
+
+// ── 初始化 ────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     const stockFilterInput = document.getElementById('stockFilter');
     if (stockFilterInput) {
         stockFilterInput.addEventListener('keyup', function(event) {
-            if (event.key === 'Enter') {
-                filterTransactions(event);
-            }
+            if (event.key === 'Enter') filterTransactions(event);
         });
     }
+    initTypeFilter();
 });
 
 </script>
