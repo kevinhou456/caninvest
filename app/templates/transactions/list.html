@@ -301,20 +301,74 @@ function deleteTransaction(transactionId) {
     }
 }
 
+function handleEditTypeChange() {
+    const type = document.getElementById('editType').value;
+    const isStock      = ['BUY', 'SELL'].includes(type);
+    const isIncomeStock = ['DIVIDEND', 'INTEREST'].includes(type);
+    const isCash       = ['DEPOSIT', 'WITHDRAWAL', 'FEE'].includes(type);
+
+    // 股票代码
+    const stockSec = document.getElementById('editStockSection');
+    const stockReq = document.getElementById('editStockRequired');
+    const stockInput = document.getElementById('editStock');
+    stockSec.style.display = (isStock || isIncomeStock) ? '' : 'none';
+    stockInput.required = isStock || isIncomeStock;
+    if (isCash) stockInput.value = '';
+
+    // 数量 / 单价
+    const qtySec  = document.getElementById('editQuantitySection');
+    const priceSec = document.getElementById('editPriceSection');
+    const qtyInput = document.getElementById('editQuantity');
+    const priceInput = document.getElementById('editPrice');
+    const qtyReq   = document.getElementById('editQuantityRequired');
+    const priceReq = document.getElementById('editPriceRequired');
+
+    qtySec.style.display   = (isStock || isIncomeStock) ? '' : 'none';
+    priceSec.style.display = (isStock || isIncomeStock) ? '' : 'none';
+    qtyInput.required   = isStock;
+    priceInput.required = isStock;
+    qtyReq.style.display   = isStock ? '' : 'none';
+    priceReq.style.display = isStock ? '' : 'none';
+
+    if (isIncomeStock) {
+        document.getElementById('editQuantityLabel').textContent = '{{ _("Shares (optional)") }}';
+        document.getElementById('editPriceLabel').textContent    = '{{ _("Per Share (optional)") }}';
+    } else {
+        document.getElementById('editQuantityLabel').textContent = '{{ _("Quantity") }}';
+        document.getElementById('editPriceLabel').textContent    = '{{ _("Price per Share") }}';
+    }
+
+    // 金额
+    const amtSec   = document.getElementById('editAmountSection');
+    const amtInput = document.getElementById('editAmount');
+    const amtLabel = document.getElementById('editAmountLabel');
+    amtSec.style.display = (isIncomeStock || isCash) ? '' : 'none';
+    amtInput.required    = (isIncomeStock || isCash);
+    const amtLabels = {DIVIDEND:'分红金额', INTEREST:'利息金额', DEPOSIT:'存入金额', WITHDRAWAL:'取出金额', FEE:'费用金额'};
+    if (amtLabels[type]) amtLabel.textContent = amtLabels[type];
+}
+
 function openEditTransactionModal(transaction) {
     const modal = new bootstrap.Modal(document.getElementById('editTransactionModal'));
-    
+
     document.getElementById('editTransactionId').value = transaction.id;
-    document.getElementById('editTradeDate').value = transaction.trade_date;
-    document.getElementById('editType').value = transaction.type;
-    document.getElementById('editStock').value = transaction.stock;
-    document.getElementById('editQuantity').value = transaction.quantity;
-    document.getElementById('editPrice').value = transaction.price;
-    document.getElementById('editCurrency').value = transaction.currency;
-    document.getElementById('editFee').value = transaction.fee;
-    document.getElementById('editAccountId').value = transaction.account_id;
-    document.getElementById('editNotes').value = transaction.notes || '';
-    
+    document.getElementById('editTradeDate').value     = transaction.trade_date;
+    document.getElementById('editType').value          = transaction.type;
+    document.getElementById('editAccountId').value     = transaction.account_id;
+    document.getElementById('editCurrency').value      = transaction.currency;
+    document.getElementById('editFee').value           = transaction.fee || 0;
+    document.getElementById('editNotes').value         = transaction.notes || '';
+
+    // 先触发字段显隐
+    handleEditTypeChange();
+
+    // 再填值
+    document.getElementById('editStock').value    = transaction.stock || '';
+    document.getElementById('editQuantity').value = transaction.quantity || '';
+    document.getElementById('editPrice').value    = transaction.price || '';
+    // amount 字段：从 transaction.amount 填入
+    document.getElementById('editAmount').value   = transaction.amount || '';
+
     modal.show();
 }
 
@@ -330,6 +384,7 @@ function handleEditTransactionSubmit(event) {
         stock: formData.get('stock'),
         quantity: formData.get('quantity'),
         price: formData.get('price'),
+        amount: formData.get('amount'),
         currency: formData.get('currency'),
         fee: formData.get('fee'),
         account_id: formData.get('account_id'),
@@ -469,83 +524,83 @@ document.addEventListener('DOMContentLoaded', function() {
             <form onsubmit="handleEditTransactionSubmit(event)">
                 <div class="modal-body">
                     <input type="hidden" id="editTransactionId" name="transaction_id">
-                    
-                    <div class="row">
+
+                    <div class="row mb-3">
                         <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editTradeDate" class="form-label">{{ _('Trade Date') }} <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" id="editTradeDate" name="trade_date" required>
-                            </div>
+                            <label for="editTradeDate" class="form-label">{{ _('Trade Date') }} <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" id="editTradeDate" name="trade_date" required>
                         </div>
                         <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editType" class="form-label">{{ _('Transaction Type') }} <span class="text-danger">*</span></label>
-                                <select class="form-select" id="editType" name="type" required>
-                                    <option value="">{{ _('Select Type') }}</option>
+                            <label for="editType" class="form-label">{{ _('Transaction Type') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="editType" name="type" required onchange="handleEditTypeChange()">
+                                <option value="">{{ _('Select Type') }}</option>
+                                <optgroup label="{{ _('Stock Transactions') }}">
                                     <option value="BUY">{{ _('Buy') }}</option>
                                     <option value="SELL">{{ _('Sell') }}</option>
-                                </select>
-                            </div>
+                                </optgroup>
+                                <optgroup label="{{ _('Income') }}">
+                                    <option value="DIVIDEND">分红</option>
+                                    <option value="INTEREST">利息</option>
+                                </optgroup>
+                                <optgroup label="{{ _('Cash Transactions') }}">
+                                    <option value="DEPOSIT">存入</option>
+                                    <option value="WITHDRAWAL">取出</option>
+                                    <option value="FEE">费用</option>
+                                </optgroup>
+                            </select>
                         </div>
                     </div>
-                    
-                    <div class="row">
+
+                    <div class="row mb-3">
+                        <!-- 股票代码：BUY/SELL/DIVIDEND/INTEREST 显示 -->
+                        <div class="col-md-6" id="editStockSection">
+                            <label for="editStock" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger" id="editStockRequired">*</span></label>
+                            <input type="text" class="form-control" id="editStock" name="stock" placeholder="AAPL">
+                        </div>
                         <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editStock" class="form-label">{{ _('Stock Symbol') }} <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="editStock" name="stock" placeholder="AAPL" required>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editAccountId" class="form-label">{{ _('Account') }} <span class="text-danger">*</span></label>
-                                <select class="form-select" id="editAccountId" name="account_id" required>
-                                    <option value="">{{ _('Select Account') }}</option>
-                                    {% for account in accounts %}
-                                    <option value="{{ account.id }}">{{ account.name }} ({{ account.account_type.name if account.account_type else 'Unknown' }})</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
+                            <label for="editAccountId" class="form-label">{{ _('Account') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="editAccountId" name="account_id" required>
+                                <option value="">{{ _('Select Account') }}</option>
+                                {% for account in accounts %}
+                                <option value="{{ account.id }}">{{ account.name }} ({{ account.account_type.name if account.account_type else 'Unknown' }})</option>
+                                {% endfor %}
+                            </select>
                         </div>
                     </div>
-                    
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="editQuantity" class="form-label">{{ _('Quantity') }} <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="editQuantity" name="quantity" step="0.0001" min="0" required>
-                            </div>
+
+                    <div class="row mb-3">
+                        <!-- 数量：BUY/SELL 必填，DIVIDEND/INTEREST 可选 -->
+                        <div class="col-md-3" id="editQuantitySection">
+                            <label for="editQuantity" class="form-label"><span id="editQuantityLabel">{{ _('Quantity') }}</span> <span class="text-danger" id="editQuantityRequired">*</span></label>
+                            <input type="number" class="form-control" id="editQuantity" name="quantity" step="0.0001" min="0">
                         </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="editPrice" class="form-label">{{ _('Price per Share') }} <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="editPrice" name="price" step="0.01" min="0" required>
-                            </div>
+                        <!-- 单价：BUY/SELL 必填，DIVIDEND/INTEREST 可选 -->
+                        <div class="col-md-3" id="editPriceSection">
+                            <label for="editPrice" class="form-label"><span id="editPriceLabel">{{ _('Price per Share') }}</span> <span class="text-danger" id="editPriceRequired">*</span></label>
+                            <input type="number" class="form-control" id="editPrice" name="price" step="0.0001" min="0">
                         </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="editCurrency" class="form-label">{{ _('Currency') }} <span class="text-danger">*</span></label>
-                                <select class="form-select" id="editCurrency" name="currency" required>
-                                    <option value="">{{ _('Select Currency') }}</option>
-                                    <option value="USD">USD</option>
-                                    <option value="CAD">CAD</option>
-                                </select>
-                            </div>
+                        <!-- 金额：非BUY/SELL 时显示 -->
+                        <div class="col-md-3" id="editAmountSection" style="display:none;">
+                            <label for="editAmount" class="form-label"><span id="editAmountLabel">{{ _('Amount') }}</span> <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="editAmount" name="amount" step="0.01" min="0">
                         </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="editFee" class="form-label">{{ _('Transaction Fee') }}</label>
-                                <input type="number" class="form-control" id="editFee" name="fee" step="0.01" min="0" value="0">
-                            </div>
+                        <div class="col-md-3">
+                            <label for="editCurrency" class="form-label">{{ _('Currency') }} <span class="text-danger">*</span></label>
+                            <select class="form-select" id="editCurrency" name="currency" required>
+                                <option value="">{{ _('Select Currency') }}</option>
+                                <option value="USD">USD</option>
+                                <option value="CAD">CAD</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="editFee" class="form-label">{{ _('Transaction Fee') }}</label>
+                            <input type="number" class="form-control" id="editFee" name="fee" step="0.01" min="0" value="0">
                         </div>
                     </div>
-                    
+
                     <div class="mb-3">
                         <label for="editNotes" class="form-label">{{ _('Notes') }}</label>
-                        <textarea class="form-control" id="editNotes" name="notes" rows="3" placeholder="{{ _('Optional notes...') }}"></textarea>
+                        <textarea class="form-control" id="editNotes" name="notes" rows="2" placeholder="{{ _('Optional notes...') }}"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
