@@ -187,7 +187,7 @@ def _normalize_cache_params(params: dict) -> dict:
 
 
 # 每次修改 portfolio_service 计算逻辑时手动递增，使所有旧缓存自动失效
-_CACHE_SCHEMA_VERSION = 6
+_CACHE_SCHEMA_VERSION = 8
 
 
 def _build_analysis_cache_key(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],

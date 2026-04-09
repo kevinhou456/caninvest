@@ -599,8 +599,14 @@ class PortfolioService:
                 'deposit_usd': Decimal('0'),
                 'withdrawal_cad': Decimal('0'),
                 'withdrawal_usd': Decimal('0'),
+                'deposit_usd_daily_cad': Decimal('0'),   # USD转CAD（按发生日汇率）
+                'withdrawal_usd_daily_cad': Decimal('0'),
+                'deposit_usd_no_rate': Decimal('0'),     # 无日汇率、前端用年度汇率兜底
+                'withdrawal_usd_no_rate': Decimal('0'),
                 'deposit_list': [],
                 'withdrawal_list': [],
+                '_usd_deposits': [],    # 内部：[(trade_date, value_usd)]
+                '_usd_withdrawals': [],
             }
 
             ids_set = set(ids_filter) if ids_filter else None
@@ -648,6 +654,7 @@ class PortfolioService:
                         stats['deposit_cad'] += value
                     else:
                         stats['deposit_usd'] += value
+                        stats['_usd_deposits'].append((tx.trade_date, value))
                     if include_details:
                         stats['deposit_list'].append({
                             'date': tx.trade_date.isoformat(),
@@ -662,6 +669,7 @@ class PortfolioService:
                         stats['withdrawal_cad'] += value
                     else:
                         stats['withdrawal_usd'] += value
+                        stats['_usd_withdrawals'].append((tx.trade_date, value))
                     if include_details:
                         stats['withdrawal_list'].append({
                             'date': tx.trade_date.isoformat(),
@@ -669,6 +677,42 @@ class PortfolioService:
                             'currency': tx_currency,
                             'notes': tx.notes or '',
                         })
+
+            # 按发生日汇率换算 USD 存取款 → CAD
+            usd_dates_dep = [d for d, _ in stats['_usd_deposits']]
+            usd_dates_wdw = [d for d, _ in stats['_usd_withdrawals']]
+            all_usd_dates = list(set(usd_dates_dep + usd_dates_wdw))
+            if all_usd_dates:
+                daily_rates = currency_service.get_rates_for_dates(all_usd_dates, 'USD', 'CAD')
+                for trade_date, val_usd in stats['_usd_deposits']:
+                    rate = daily_rates.get(trade_date)
+                    if rate:
+                        stats['deposit_usd_daily_cad'] += val_usd * Decimal(str(rate))
+                    else:
+                        stats['deposit_usd_no_rate'] += val_usd  # 兜底：前端用年度汇率
+                for trade_date, val_usd in stats['_usd_withdrawals']:
+                    rate = daily_rates.get(trade_date)
+                    if rate:
+                        stats['withdrawal_usd_daily_cad'] += val_usd * Decimal(str(rate))
+                    else:
+                        stats['withdrawal_usd_no_rate'] += val_usd
+
+            # 把日汇率写回 deposit_list / withdrawal_list（供 tooltip 显示）
+            if all_usd_dates:
+                from datetime import date as _date
+                for entry in stats['deposit_list']:
+                    if entry['currency'] == 'USD':
+                        d = _date.fromisoformat(entry['date'])
+                        rate = daily_rates.get(d)
+                        entry['fx_rate'] = float(rate) if rate else None
+                for entry in stats['withdrawal_list']:
+                    if entry['currency'] == 'USD':
+                        d = _date.fromisoformat(entry['date'])
+                        rate = daily_rates.get(d)
+                        entry['fx_rate'] = float(rate) if rate else None
+
+            del stats['_usd_deposits']
+            del stats['_usd_withdrawals']
             return stats
 
         def build_row(year: int,
@@ -708,8 +752,12 @@ class PortfolioService:
                     'sell_usd': float(tx_stats['sell_usd']),
                     'deposit_cad': float(tx_stats['deposit_cad']),
                     'deposit_usd': float(tx_stats['deposit_usd']),
+                    'deposit_usd_daily_cad': float(tx_stats.get('deposit_usd_daily_cad', 0)),
+                    'deposit_usd_no_rate': float(tx_stats.get('deposit_usd_no_rate', 0)),
                     'withdrawal_cad': float(tx_stats['withdrawal_cad']),
                     'withdrawal_usd': float(tx_stats['withdrawal_usd']),
+                    'withdrawal_usd_daily_cad': float(tx_stats.get('withdrawal_usd_daily_cad', 0)),
+                    'withdrawal_usd_no_rate': float(tx_stats.get('withdrawal_usd_no_rate', 0)),
                     'dividends_cad': metric_delta(metrics_end, metrics_prev, 'dividends', 'cad_only'),
                     'dividends_usd': metric_delta(metrics_end, metrics_prev, 'dividends', 'usd_only'),
                     'interest_cad': metric_delta(metrics_end, metrics_prev, 'interest', 'cad_only'),
@@ -817,10 +865,9 @@ class PortfolioService:
                 ownership_map=ownership_map if ownership_map else None
             )
 
-            is_single_account = bool(selected_account_id and len(account_ids) == 1)
             tx_stats = build_tx_stats(year_transactions, ids_filter=account_ids,
                                       ownership=ownership_map if ownership_map else None,
-                                      include_details=is_single_account)
+                                      include_details=True)  # 始终收集存取款明细（供tooltip显示汇率）
 
             annual_rate = float(annual_exchange_rates.get(year)) if annual_exchange_rates.get(year) else None
             annual_data.append(build_row(year, metrics_end, metrics_prev, tx_stats, annual_rate, None))

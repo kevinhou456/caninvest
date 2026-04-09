@@ -889,8 +889,13 @@ function updateAnnualTable() {
         const annualRate = item.annual_usd_cad_rate || 1.0;
         const realizedGainTotal = (currencyBreakdown.realized_gain_cad || 0) + (currencyBreakdown.realized_gain_usd || 0) * annualRate;
         const combinedIncomeTotal = combinedIncomeCad + combinedIncomeUsd * annualRate;
-        const depositsTotal = (currencyBreakdown.deposit_cad || 0) + (currencyBreakdown.deposit_usd || 0) * annualRate;
-        const withdrawalsTotal = (currencyBreakdown.withdrawal_cad || 0) + (currencyBreakdown.withdrawal_usd || 0) * annualRate;
+        // USD存取款：优先用发生日汇率，无日汇率的部分用年度汇率兜底
+        const depositsTotal = (currencyBreakdown.deposit_cad || 0)
+            + (currencyBreakdown.deposit_usd_daily_cad || 0)
+            + (currencyBreakdown.deposit_usd_no_rate || 0) * annualRate;
+        const withdrawalsTotal = (currencyBreakdown.withdrawal_cad || 0)
+            + (currencyBreakdown.withdrawal_usd_daily_cad || 0)
+            + (currencyBreakdown.withdrawal_usd_no_rate || 0) * annualRate;
 
         // 显示年份、账户类型或成员名称
         let displayYear;
@@ -921,9 +926,13 @@ function updateAnnualTable() {
         }
 
         const buildFlowTooltip = (list) => {
-            if (!singleAcct || !list || !list.length) return '';
+            if (!list || !list.length) return '';
             const lines = list.map(r => {
-                const line = `${r.date}: $${r.amount.toFixed(2)} ${r.currency}`;
+                let line = `${r.date}: $${r.amount.toFixed(2)} ${r.currency}`;
+                if (r.currency === 'USD' && r.fx_rate != null) {
+                    const cad = r.amount * r.fx_rate;
+                    line += ` × ${r.fx_rate.toFixed(4)} = $${cad.toFixed(2)} CAD`;
+                }
                 return r.notes ? `${line} (${r.notes})` : line;
             }).join('&lt;br&gt;');
             return ` data-bs-toggle="tooltip" data-bs-placement="left" data-bs-html="true" data-bs-title="${lines.replace(/"/g, '&quot;')}"`;
