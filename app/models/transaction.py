@@ -196,7 +196,6 @@ class Transaction(db.Model):
                     'total_sold_value': 0,
                     'realized_gain': 0,
                     'transactions': 0,
-                    'buy_lots': []  # 存储买入批次，用于FIFO计算
                 }
             
             stock_data = portfolio[tx.stock]
@@ -207,65 +206,22 @@ class Transaction(db.Model):
                 stock_data['total_cost'] += tx.net_amount
                 stock_data['total_bought_shares'] += float(tx.quantity)
                 stock_data['total_bought_value'] += tx.net_amount
-                
-                # 记录买入批次（用于FIFO计算）
-                stock_data['buy_lots'].append({
-                    'quantity': float(tx.quantity),
-                    'cost_per_share': tx.net_amount / float(tx.quantity) if tx.quantity > 0 else 0,
-                    'total_cost': tx.net_amount
-                })
-                
+
             elif tx.type == 'SELL':
-                # 卖出交易
-                stock_data['total_shares'] -= float(tx.quantity)
-                stock_data['total_sold_shares'] += float(tx.quantity)
-                stock_data['total_sold_value'] += tx.net_amount
-                
-                # FIFO方式计算已实现收益和调整持仓成本
-                remaining_to_sell = float(tx.quantity)
+                # 卖出交易（使用平均成本法ACB）
                 sell_proceeds = tx.net_amount
-                cost_basis = 0
-                
-                # 从最早的买入批次开始卖出
-                while remaining_to_sell > 0 and stock_data['buy_lots']:
-                    lot = stock_data['buy_lots'][0]
-                    
-                    if lot['quantity'] <= remaining_to_sell:
-                        # 完全卖出这个批次
-                        sold_from_lot = lot['quantity']
-                        cost_from_lot = lot['total_cost']
-                        
-                        remaining_to_sell -= sold_from_lot
-                        cost_basis += cost_from_lot
-                        
-                        # 从持仓成本中减去这个批次的成本
-                        stock_data['total_cost'] -= cost_from_lot
-                        
-                        # 移除这个批次
-                        stock_data['buy_lots'].pop(0)
-                        
-                    else:
-                        # 部分卖出这个批次
-                        sold_from_lot = remaining_to_sell
-                        cost_per_share = lot['cost_per_share']
-                        cost_from_lot = sold_from_lot * cost_per_share
-                        
-                        cost_basis += cost_from_lot
-                        
-                        # 从持仓成本中减去卖出部分的成本
-                        stock_data['total_cost'] -= cost_from_lot
-                        
-                        # 更新批次剩余数量和成本
-                        lot['quantity'] -= sold_from_lot
-                        lot['total_cost'] -= cost_from_lot
-                        
-                        remaining_to_sell = 0
-                
-                # 计算这次卖出的已实现收益（按比例分配）
-                if stock_data['total_sold_shares'] > 0:
-                    # 这次卖出的已实现收益 = 卖出收入 - 成本基础
-                    trade_realized_gain = sell_proceeds - cost_basis
-                    stock_data['realized_gain'] += trade_realized_gain
+                qty = float(tx.quantity)
+                stock_data['total_sold_shares'] += qty
+                stock_data['total_sold_value'] += sell_proceeds
+
+                # ACB: 用平均成本计算成本基础
+                if stock_data['total_shares'] > 0:
+                    avg_cost = stock_data['total_cost'] / stock_data['total_shares']
+                    cost_basis = avg_cost * qty
+                    stock_data['total_cost'] -= cost_basis
+                    stock_data['realized_gain'] += sell_proceeds - cost_basis
+
+                stock_data['total_shares'] -= qty
             
             stock_data['transactions'] += 1
         
@@ -275,14 +231,9 @@ class Transaction(db.Model):
                 stock_data['average_cost'] = stock_data['total_cost'] / stock_data['total_shares']
             else:
                 stock_data['average_cost'] = 0
-                
-            # 清理buy_lots字段（不需要返回给前端）
-            if 'buy_lots' in stock_data:
-                del stock_data['buy_lots']
-                
-            # 如果是已清仓股票，已实现收益已经在卖出过程中计算完成
+
+            # 如果是已清仓股票，确保总成本为0
             if stock_data['total_shares'] == 0 and stock_data['total_sold_shares'] > 0:
-                # 对于完全清仓的股票，确保总成本为0
                 stock_data['total_cost'] = 0
         
         return portfolio

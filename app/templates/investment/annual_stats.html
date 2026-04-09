@@ -18,6 +18,10 @@
             <button type="button" class="btn btn-light btn-sm me-3" id="fetchAnnualRatesBtn">
                 <i class="fas fa-sync-alt me-1"></i>{{ _('Fetch Annual Average FX') }}
             </button>
+            <div class="d-flex align-items-center me-3">
+                <label for="annualYearSelect" class="text-white me-2 mb-0 small">{{ _('Year') }}</label>
+                <select class="form-select form-select-sm" id="annualYearSelect" style="min-width:90px;"></select>
+            </div>
             <div class="form-check form-switch text-white mb-0 me-3" id="accountBreakdownWrapper">
                 <input class="form-check-input" type="checkbox" id="toggleAccountBreakdown">
                 <label class="form-check-label" for="toggleAccountBreakdown">{{ _('Separate by Account') }}</label>
@@ -155,11 +159,11 @@
 
 <!-- Charts Row -->
 <div class="row mb-4">
-    <!-- Combined Assets Chart (Total + Members) -->
-    <div class="col-lg-6">
+    <!-- Combined Assets Chart -->
+    <div class="col-12">
         <div class="card shadow mb-4">
             <div class="card-header py-3 bg-primary">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets & Members Breakdown') }}</h6>
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets Breakdown') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="height: 400px;">
@@ -169,11 +173,11 @@
         </div>
     </div>
 
-    <!-- Enhanced Returns Breakdown Chart (Total + Members) -->
-    <div class="col-lg-6">
+    <!-- Enhanced Returns Breakdown Chart -->
+    <div class="col-12">
         <div class="card shadow mb-4">
             <div class="card-header py-3 bg-success">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Returns Breakdown & Members') }}</h6>
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Returns') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="height: 400px;">
@@ -327,6 +331,7 @@ let yearlyHoldings = {};
 let selectedYear = null;
 let separateByAccount = false;
 let filterInfo = {};
+let categoryChartData = {};  // {year: {category_name: {value, color}}}
 
 const familyId = {{ (current_family.id if current_family else 1) | tojson }};
 const memberId = {{ (current_member_id if current_member_id else None) | tojson }};
@@ -388,11 +393,10 @@ function loadAnnualAnalysis() {
             if (data.analysis) {
                 annualData = data.analysis.annual_data || [];
                 yearlyHoldings = data.analysis.yearly_holdings || {};
+                categoryChartData = data.analysis.category_chart_data || {};
                 filterInfo = data.filter_info || {};
-                updateCombinedAssetsChart();
-                updateEnhancedReturnsChart();
                 updateAnnualTable();
-                updateYearlyHoldingsUI();
+                updateYearlyHoldingsUI();  // 内部设置 selectedYear 并联动图表
                 document.getElementById('loading-spinner').style.display = 'none';
                 updateAccountToggleVisibility();
                 // 异步加载T3数据并刷新持仓表
@@ -494,134 +498,46 @@ function updateCombinedAssetsChart() {
         combinedAssetsChart.destroy();
     }
 
-    // Get main data (exclude detail rows and member rows)
-    const mainData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row).sort((a, b) => a.year - b.year);
+    const year = selectedYear;
+    const yearMap = (categoryChartData[year] || {});
+    const categories = Object.keys(yearMap);
 
-    // Get member data
-    const memberData = annualData.filter(item => item.is_member_row);
-
-    // Get all years
-    const allYears = [...new Set([...mainData, ...memberData].map(item => item.year))].sort((a, b) => a - b);
-
-    // Prepare datasets
-    const datasets = [];
-
-    // Add total assets dataset
-    const totalAssetsData = allYears.map(year => {
-        const yearData = mainData.find(item => item.year === year);
-        return yearData ? yearData.total_assets : 0;
-    });
-
-    datasets.push({
-        label: '{{ _("Total Assets") }}',
-        data: totalAssetsData,
-        backgroundColor: 'rgba(78, 115, 223, 0.9)',
-        borderColor: 'rgba(78, 115, 223, 1)',
-        borderWidth: 2
-    });
-
-    // Add member datasets if available
-    if (memberData.length > 0) {
-        // Group member data by member
-        const memberGroups = {};
-        memberData.forEach(item => {
-            if (!memberGroups[item.member_name]) {
-                memberGroups[item.member_name] = [];
-            }
-            memberGroups[item.member_name].push(item);
-        });
-
-        const memberColors = ['#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69'];
-        let colorIndex = 0;
-
-        Object.keys(memberGroups).forEach(memberName => {
-            const memberYearData = memberGroups[memberName];
-            const color = memberColors[colorIndex % memberColors.length];
-
-            // Convert hex to rgba for transparency
-            const hexToRgb = (hex) => {
-                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-                return result ? {
-                    r: parseInt(result[1], 16),
-                    g: parseInt(result[2], 16),
-                    b: parseInt(result[3], 16)
-                } : null;
-            };
-
-            const rgb = hexToRgb(color);
-            const bgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.7)` : color;
-
-            const assetsData = allYears.map(year => {
-                const yearData = memberYearData.find(item => item.year === year);
-                return yearData ? yearData.total_assets : 0;
-            });
-
-            datasets.push({
-                label: memberName,
-                data: assetsData,
-                backgroundColor: bgColor,
-                borderColor: color,
-                borderWidth: 1
-            });
-
-            colorIndex++;
-        });
+    if (!categories.length) {
+        combinedAssetsChart = null;
+        return;
     }
+
+    const labels = categories;
+    const datasets = [{
+        label: '{{ _("Total Assets") }}' + ' ' + year,
+        data: categories.map(c => yearMap[c].value || 0),
+        backgroundColor: categories.map(c => (yearMap[c].color || '#adb5bd') + 'cc'),
+        borderColor: categories.map(c => yearMap[c].color || '#adb5bd'),
+        borderWidth: 1
+    }];
 
     combinedAssetsChart = new Chart(ctx, {
         type: 'bar',
-        data: {
-            labels: allYears,
-            datasets: datasets
-        },
+        data: { labels, datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            elements: {
-                bar: {
-                    categoryPercentage: 0.8,
-                    barPercentage: 0.9
-                }
-            },
             scales: {
-                x: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '{{ _("Year") }}'
-                    }
-                },
+                x: { title: { display: true, text: String(year) } },
                 y: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '{{ _("Assets ($)") }}'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return '$' + value.toLocaleString();
-                        }
-                    }
+                    title: { display: true, text: '{{ _("Assets ($)") }}' },
+                    ticks: { callback: v => '$' + v.toLocaleString() }
                 }
             },
             plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
-                        }
-                    }
-                },
-                legend: {
-                    display: true,
-                    position: 'top'
-                }
+                tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString() } },
+                legend: { display: false }
             }
         }
     });
 }
 
-// Update enhanced returns breakdown chart (Total + Members breakdown)
+// Update annual returns chart (by category for selected year)
 function updateEnhancedReturnsChart() {
     const ctx = document.getElementById('enhancedReturnsChart').getContext('2d');
 
@@ -629,182 +545,56 @@ function updateEnhancedReturnsChart() {
         enhancedReturnsChart.destroy();
     }
 
-    // Get main data (exclude detail rows and member rows)
-    const mainData = [...annualData].filter(item => !item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row).sort((a, b) => a.year - b.year);
+    const year = selectedYear;
+    const yearMap = categoryChartData[year] || {};
+    // 排除"现金"分类（无盈利/分红意义）
+    const categories = Object.keys(yearMap).filter(c => c !== '现金');
 
-    // Get member data
-    const memberData = annualData.filter(item => item.is_member_row);
-
-    // Get all years
-    const allYears = [...new Set([...mainData, ...memberData].map(item => item.year))].sort((a, b) => a - b);
-
-    // Prepare datasets
-    const datasets = [];
-
-    // Add total breakdown datasets
-    const totalRealizedGains = allYears.map(year => {
-        const yearData = mainData.find(item => item.year === year);
-        return yearData ? (yearData.annual_realized_gain || 0) : 0;
-    });
-
-    const totalUnrealizedGains = allYears.map(year => {
-        const yearData = mainData.find(item => item.year === year);
-        return yearData ? (yearData.annual_unrealized_gain || 0) : 0;
-    });
-
-    const totalDividendsAndInterest = allYears.map(year => {
-        const yearData = mainData.find(item => item.year === year);
-        return yearData ? ((yearData.annual_dividends || 0) + (yearData.annual_interest || 0)) : 0;
-    });
-
-    datasets.push(
-        {
-            label: '{{ _("Total Realized Gains") }}',
-            data: totalRealizedGains,
-            backgroundColor: 'rgba(28, 200, 138, 0.9)',
-            borderColor: 'rgba(28, 200, 138, 1)',
-            borderWidth: 2
-        },
-        {
-            label: '{{ _("Total Unrealized Gains") }}',
-            data: totalUnrealizedGains,
-            backgroundColor: 'rgba(54, 162, 235, 0.9)',
-            borderColor: 'rgba(54, 162, 235, 1)',
-            borderWidth: 2
-        },
-        {
-            label: '{{ _("Total Div+Int") }}',
-            data: totalDividendsAndInterest,
-            backgroundColor: 'rgba(255, 206, 86, 0.9)',
-            borderColor: 'rgba(255, 206, 86, 1)',
-            borderWidth: 2
-        }
-    );
-
-    // Add member total returns datasets if available
-    if (memberData.length > 0) {
-        // Group member data by member
-        const memberGroups = {};
-        memberData.forEach(item => {
-            if (!memberGroups[item.member_name]) {
-                memberGroups[item.member_name] = [];
-            }
-            memberGroups[item.member_name].push(item);
-        });
-
-        const memberColors = ['#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69'];
-        let colorIndex = 0;
-
-        Object.keys(memberGroups).forEach(memberName => {
-            const memberYearData = memberGroups[memberName];
-            const color = memberColors[colorIndex % memberColors.length];
-
-            // Convert hex to rgba for transparency
-            const hexToRgb = (hex) => {
-                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-                return result ? {
-                    r: parseInt(result[1], 16),
-                    g: parseInt(result[2], 16),
-                    b: parseInt(result[3], 16)
-                } : null;
-            };
-
-            const rgb = hexToRgb(color);
-            const bgColor = rgb ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)` : color;
-
-            // Total returns = realized + unrealized + dividends + interest
-            const memberTotalReturns = allYears.map(year => {
-                const yearData = memberYearData.find(item => item.year === year);
-                if (!yearData) return 0;
-                return (yearData.annual_realized_gain || 0) +
-                       (yearData.annual_unrealized_gain || 0) +
-                       (yearData.annual_dividends || 0) +
-                       (yearData.annual_interest || 0);
-            });
-
-            datasets.push({
-                label: `${memberName} {{ _("Total Returns") }}`,
-                data: memberTotalReturns,
-                backgroundColor: bgColor,
-                borderColor: color,
-                borderWidth: 1
-            });
-
-            colorIndex++;
-        });
+    if (!categories.length) {
+        enhancedReturnsChart = null;
+        return;
     }
+
+    const colors = categories.map(c => yearMap[c].color || '#adb5bd');
+
+    const datasets = [
+        {
+            label: '{{ _("Realized Gain") }}',
+            data: categories.map(c => yearMap[c].realized_gain || 0),
+            backgroundColor: colors.map(col => col + 'cc'),
+            borderColor: colors,
+            borderWidth: 1
+        },
+        {
+            label: '{{ _("Div + Int") }}',
+            data: categories.map(c => yearMap[c].dividends || 0),
+            backgroundColor: colors.map(col => col + '66'),
+            borderColor: colors,
+            borderWidth: 1,
+            borderDash: [4, 2]
+        }
+    ];
 
     enhancedReturnsChart = new Chart(ctx, {
         type: 'bar',
-        data: {
-            labels: allYears,
-            datasets: datasets
-        },
+        data: { labels: categories, datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            elements: {
-                bar: {
-                    categoryPercentage: 0.8,
-                    barPercentage: 0.9
-                }
-            },
             scales: {
-                x: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '{{ _("Year") }}'
-                    }
-                },
+                x: { title: { display: true, text: String(year) } },
                 y: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '{{ _("Returns ($)") }}'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return '$' + value.toLocaleString();
-                        }
-                    }
+                    title: { display: true, text: '{{ _("Returns ($)") }}' },
+                    ticks: { callback: v => '$' + v.toLocaleString() }
                 }
             },
             plugins: {
                 tooltip: {
                     mode: 'index',
                     intersect: false,
-                    callbacks: {
-                        label: function(context) {
-                            const value = context.parsed.y;
-                            const label = context.dataset.label;
-
-                            if (label === '{{ _("Total Div+Int") }}') {
-                                const yearIndex = context.dataIndex;
-                                const yearData = mainData.find(item => item.year === allYears[yearIndex]);
-                                if (yearData) {
-                                    const dividends = yearData.annual_dividends || 0;
-                                    const interest = yearData.annual_interest || 0;
-                                    return label + ': $' + value.toLocaleString() +
-                                           ' ({{ _("Div") }}: $' + dividends.toLocaleString() +
-                                           ', {{ _("Int") }}: $' + interest.toLocaleString() + ')';
-                                }
-                            }
-                            return label + ': $' + value.toLocaleString();
-                        },
-                        footer: function(tooltipItems) {
-                            let total = 0;
-                            tooltipItems.forEach(function(tooltipItem) {
-                                total += tooltipItem.parsed.y;
-                            });
-                            return '{{ _("Combined Total") }}: $' + total.toLocaleString();
-                        }
-                    }
+                    callbacks: { label: ctx => ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString() }
                 },
-                legend: {
-                    display: true,
-                    position: 'top'
-                }
+                legend: { display: true, position: 'top' }
             }
         }
     });
@@ -1073,8 +863,9 @@ function getAvailableYearsForHoldings() {
 
 function updateYearlyHoldingsUI() {
     const card = document.getElementById('yearlyHoldingsCard');
-    const select = document.getElementById('yearlyHoldingsSelect');
-    if (!card || !select) return;
+    const holdingsSelect = document.getElementById('yearlyHoldingsSelect');
+    const annualSelect = document.getElementById('annualYearSelect');
+    if (!card || !holdingsSelect) return;
 
     const years = getAvailableYearsForHoldings();
     if (!years.length) {
@@ -1083,24 +874,40 @@ function updateYearlyHoldingsUI() {
     }
 
     card.style.display = 'block';
-    select.innerHTML = '';
-    years.forEach(year => {
-        const option = document.createElement('option');
-        option.value = year;
-        option.textContent = year;
-        select.appendChild(option);
+
+    // 同步填充两个下拉框
+    [holdingsSelect, annualSelect].forEach(sel => {
+        if (!sel) return;
+        sel.innerHTML = '';
+        years.forEach(year => {
+            const option = document.createElement('option');
+            option.value = year;
+            option.textContent = year;
+            sel.appendChild(option);
+        });
     });
 
     if (!selectedYear || !years.includes(selectedYear)) {
         selectedYear = years[0];
     }
-    select.value = selectedYear;
-    select.onchange = (e) => {
+    holdingsSelect.value = selectedYear;
+    if (annualSelect) annualSelect.value = selectedYear;
+
+    // 联动：任一下拉框变化，同步另一个并刷新图表和持仓表
+    const onYearChange = (e) => {
         selectedYear = parseInt(e.target.value, 10);
+        holdingsSelect.value = selectedYear;
+        if (annualSelect) annualSelect.value = selectedYear;
         renderYearlyHoldingsTable(selectedYear);
+        updateCombinedAssetsChart();
+        updateEnhancedReturnsChart();
     };
+    holdingsSelect.onchange = onYearChange;
+    if (annualSelect) annualSelect.onchange = onYearChange;
 
     renderYearlyHoldingsTable(selectedYear);
+    updateCombinedAssetsChart();
+    updateEnhancedReturnsChart();
 }
 
 function renderYearlyHoldingsTable(year) {

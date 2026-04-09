@@ -4,6 +4,41 @@
 
 **⚠️ 重要：所有资产计算必须使用统一函数，禁止重复实现计算逻辑**
 **⚠️ 重要：代码一定要模块化，不要有重复代码，一定要易于维护**
+**⚠️ 重要：整个系统统一使用平均成本法（ACB / Average Cost Basis），严禁使用 FIFO**
+
+## 成本计算方法：平均成本法（ACB）
+
+### 规则
+- 全系统所有股票的成本计算**只能用平均成本法（ACB）**，不允许使用 FIFO（先进先出）
+- 买入时：`总成本 += 净买入金额`，`持仓数量 += 买入数量`
+- 卖出时：`成本基础 = (总成本 / 持仓数量) × 卖出数量`，然后 `总成本 -= 成本基础`
+- 已实现收益：`卖出净收入 - 成本基础`
+
+### 正确示例
+```python
+# 买入
+current_shares += quantity
+total_cost += net_cost  # quantity * price + fee
+
+# 卖出
+if current_shares > 0:
+    avg_cost = total_cost / current_shares
+    cost_basis = avg_cost * quantity
+    total_cost -= cost_basis
+    realized_gain += net_proceeds - cost_basis
+current_shares -= quantity
+```
+
+### 禁止的做法
+- ❌ 使用 `buy_lots` 列表跟踪买入批次
+- ❌ 使用 FIFO 队列（`buy_lots.pop(0)` 等方式）计算成本
+- ❌ 新增任何基于批次的成本计算逻辑
+
+### 已实现的文件（勿改回 FIFO）
+- `app/models/transaction.py` — `get_portfolio_summary()`
+- `app/services/portfolio_service.py` — `_process_transaction_acb()`
+- `app/services/asset_valuation_service.py` — `_calculate_stock_stats()`、`_calculate_stock_statistics()`、`_calculate_stock_realized_gain()`、`_calculate_cost_basis_breakdown()`、`_calculate_realized_gain_for_account()`
+- `app/services/holdings_service.py` — `AccountHolding.add_sell_transaction()`
 
 ## 统一计算架构
 

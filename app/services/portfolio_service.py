@@ -274,7 +274,7 @@ class PortfolioService:
         
         # 处理交易记录，构建FIFO持仓
         for tx in transactions:
-            self._process_transaction_fifo(snapshot, tx)
+            self._process_transaction_acb(snapshot, tx)
         
         # 更新市场数据和股票信息
         self._update_market_data(snapshot)
@@ -282,75 +282,30 @@ class PortfolioService:
         
         return snapshot
 
-    def _process_transaction_fifo(self, snapshot: PositionSnapshot, tx: Transaction):
-        """使用严格的FIFO原则处理交易"""
-        
+    def _process_transaction_acb(self, snapshot: PositionSnapshot, tx: Transaction):
+        """使用平均成本法（ACB）处理交易"""
 
         if tx.type == 'BUY':
-            # 买入：创建新的FIFO批次
-            lot = FIFOLot(
-                quantity=Decimal(str(tx.quantity)),
-                cost_per_share=Decimal(str(tx.price)) + (Decimal(str(tx.fee)) / Decimal(str(tx.quantity)) if tx.quantity > 0 else Decimal('0')),
-                purchase_date=tx.trade_date,
-                total_cost=Decimal(str(tx.net_amount))
-            )
-            snapshot._fifo_lots.append(lot)
-            
-            # 更新持仓统计
-            snapshot.current_shares += lot.quantity
-            snapshot.total_cost += lot.total_cost
-            snapshot.total_bought_shares += lot.quantity
-            snapshot.total_bought_value += lot.total_cost
-            
-            # 更新平均成本
+            net_amount = Decimal(str(tx.net_amount))
+            quantity = Decimal(str(tx.quantity))
+            snapshot.current_shares += quantity
+            snapshot.total_cost += net_amount
+            snapshot.total_bought_shares += quantity
+            snapshot.total_bought_value += net_amount
             if snapshot.current_shares > 0:
                 snapshot.average_cost = snapshot.total_cost / snapshot.current_shares
-        
+
         elif tx.type == 'SELL':
-            # 卖出：使用FIFO原则出售
-            remaining_to_sell = Decimal(str(tx.quantity))
+            quantity = Decimal(str(tx.quantity))
             sell_proceeds = Decimal(str(tx.net_amount))
-            cost_basis = Decimal('0')
-            
-            # 从最早的批次开始卖出
-            while remaining_to_sell > 0 and snapshot._fifo_lots:
-                lot = snapshot._fifo_lots[0]
-                
-                if lot.quantity <= remaining_to_sell:
-                    # 完全卖出这个批次
-                    sold_from_lot = lot.quantity
-                    cost_from_lot = lot.total_cost
-                    
-                    remaining_to_sell -= sold_from_lot
-                    cost_basis += cost_from_lot
-                    snapshot.total_cost -= cost_from_lot
-                    
-                    # 移除这个批次
-                    snapshot._fifo_lots.pop(0)
-                else:
-                    # 部分卖出这个批次
-                    sold_from_lot = remaining_to_sell
-                    cost_from_lot = sold_from_lot * lot.cost_per_share
-                    
-                    cost_basis += cost_from_lot
-                    snapshot.total_cost -= cost_from_lot
-                    
-                    # 更新批次
-                    lot.quantity -= sold_from_lot
-                    lot.total_cost -= cost_from_lot
-                    
-                    remaining_to_sell = Decimal('0')
-            
-            # 更新持仓统计
-            snapshot.current_shares -= Decimal(str(tx.quantity))
-            snapshot.total_sold_shares += Decimal(str(tx.quantity))
+            if snapshot.current_shares > 0:
+                avg_cost = snapshot.total_cost / snapshot.current_shares
+                cost_basis = avg_cost * quantity
+                snapshot.total_cost -= cost_basis
+                snapshot.realized_gain += sell_proceeds - cost_basis
+            snapshot.current_shares -= quantity
+            snapshot.total_sold_shares += quantity
             snapshot.total_sold_value += sell_proceeds
-            
-            # 计算已实现收益
-            realized_gain = sell_proceeds - cost_basis
-            snapshot.realized_gain += realized_gain
-            
-            # 更新平均成本
             if snapshot.current_shares > 0:
                 snapshot.average_cost = snapshot.total_cost / snapshot.current_shares
             else:
@@ -775,6 +730,17 @@ class PortfolioService:
             return row
 
         annual_data: List[Dict] = []
+        category_chart_data: Dict[int, Dict[str, Dict]] = {}  # {year: {category_name: {value, color}}}
+
+        # 构建 symbol → (category_name, color) 查找表（只需一次查询）
+        from app.models.stocks_cache import StocksCache
+        from app.models.stock_category import StockCategory
+        _cat_rows = db.session.query(
+            StocksCache.symbol, StockCategory.name, StockCategory.color
+        ).join(StockCategory, StocksCache.category_id == StockCategory.id).all()
+        symbol_category_map: Dict[str, tuple] = {row.symbol: (row.name, row.color) for row in _cat_rows}
+        # 与 get_comprehensive_portfolio_metrics 使用相同的当前汇率，确保分类合计和总资产口径一致
+        _current_usd_cad = float(asset_service.currency_service.get_current_rate('USD', 'CAD') or 1.0)
 
         def aggregate_holdings(holdings_list: List[Dict]) -> Dict[str, Dict]:
             """按symbol+currency聚合同一股票的多账户数据。"""
@@ -843,6 +809,10 @@ class PortfolioService:
 
             return aggregated
 
+        # 按年存储已按ownership比例缩减后的股票市值 + 总资产，供分类图表缩放和现金计算用
+        year_proportioned_stock: Dict[int, Dict[str, float]] = {}  # {year: {cad, usd}}
+        metrics_by_year: Dict[int, Dict[str, float]] = {}  # {year: {cad: total_assets_cad}}
+
         for year in years:
             year_start = date(year, 1, 1)
             year_end = date(year, 12, 31)
@@ -865,12 +835,22 @@ class PortfolioService:
                 ownership_map=ownership_map if ownership_map else None
             )
 
+            # 保存按比例后的股票市值和总资产（用于后续分类图表缩放和现金计算）
+            year_proportioned_stock[year] = {
+                'cad': float(metrics_end.get('total_assets', {}).get('stock_value_cad', 0) or 0),
+                'usd': float(metrics_end.get('total_assets', {}).get('stock_value_usd', 0) or 0),
+            }
+            metrics_by_year[year] = {
+                'cad': float(metrics_end.get('total_assets', {}).get('cad', 0) or 0),
+            }
+
             tx_stats = build_tx_stats(year_transactions, ids_filter=account_ids,
                                       ownership=ownership_map if ownership_map else None,
                                       include_details=True)  # 始终收集存取款明细（供tooltip显示汇率）
 
             annual_rate = float(annual_exchange_rates.get(year)) if annual_exchange_rates.get(year) else None
             annual_data.append(build_row(year, metrics_end, metrics_prev, tx_stats, annual_rate, None))
+
 
             if include_account_breakdown and account_ids:
                 for acc_id in account_ids:
@@ -1073,6 +1053,48 @@ class PortfolioService:
 
             yearly_holdings[year] = holdings_rows
 
+            # 按股票分类聚合年末持仓市值（用于图表，使用与总资产相同的当前汇率）
+            # 先汇总 holdings_rows 里的原始 CAD/USD 市值（未按比例缩减）
+            raw_cad = sum(float(r.get('current_value', 0) or 0)
+                          for r in holdings_rows if r.get('currency', 'CAD').upper() == 'CAD')
+            raw_usd = sum(float(r.get('current_value', 0) or 0)
+                          for r in holdings_rows if r.get('currency', 'CAD').upper() == 'USD')
+            prop = year_proportioned_stock.get(year, {})
+            # 缩放系数：使分类合计与总资产使用相同的 ownership 比例和汇率
+            scale_cad = (prop.get('cad', raw_cad) / raw_cad) if raw_cad > 0 else 1.0
+            scale_usd = (prop.get('usd', raw_usd) / raw_usd) if raw_usd > 0 else 1.0
+
+            cat_totals: Dict[str, Dict] = {}
+            stock_total_cad = 0.0
+            for row in holdings_rows:
+                sym = row.get('symbol', '')
+                val = float(row.get('current_value', 0) or 0)
+                if val <= 0:
+                    continue
+                is_usd = row.get('currency', 'CAD').upper() == 'USD'
+                scale = scale_usd if is_usd else scale_cad
+                rate = _current_usd_cad if is_usd else 1.0
+                val_cad = val * scale * rate
+                stock_total_cad += val_cad
+                # 各收益指标也按相同比例缩放并转 CAD
+                rg = float(row.get('realized_gain', 0) or 0) * scale * rate
+                ug = float(row.get('unrealized_gain', 0) or 0) * scale * rate
+                div = (float(row.get('dividends', 0) or 0) + float(row.get('interest', 0) or 0)) * scale * rate
+                cat_name, cat_color = symbol_category_map.get(sym, ('其他', '#adb5bd'))
+                if cat_name not in cat_totals:
+                    cat_totals[cat_name] = {'value': 0.0, 'color': cat_color,
+                                            'realized_gain': 0.0, 'unrealized_gain': 0.0, 'dividends': 0.0}
+                cat_totals[cat_name]['value'] += val_cad
+                cat_totals[cat_name]['realized_gain'] += rg
+                cat_totals[cat_name]['unrealized_gain'] += ug
+                cat_totals[cat_name]['dividends'] += div
+            # 加入现金（可能为负数），使得各分类合计 = total_assets
+            total_assets_cad = float(metrics_by_year.get(year, {}).get('cad', 0.0))
+            cash_cad = total_assets_cad - stock_total_cad
+            cat_totals['现金'] = {'value': cash_cad, 'color': '#6c757d',
+                                  'realized_gain': 0.0, 'unrealized_gain': 0.0, 'dividends': 0.0}
+            category_chart_data[year] = cat_totals
+
         total_realized_sum = sum(
             item.get('annual_realized_gain', 0) or 0
             for item in annual_data
@@ -1114,6 +1136,7 @@ class PortfolioService:
             'annual_data': annual_data,
             'chart_data': chart_data,
             'yearly_holdings': yearly_holdings,
+            'category_chart_data': category_chart_data,
             'summary': {
                 'years_covered': len([item for item in annual_data if not item.get('is_member_row') and not item.get('is_member_account_type_row')]),
                 'total_years_gain': sum(item.get('annual_realized_gain', 0) + item.get('annual_unrealized_gain', 0)

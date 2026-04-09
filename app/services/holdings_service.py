@@ -50,80 +50,42 @@ class AccountHolding:
         # 分红信息
         self.total_dividends = Decimal('0')
         
-        # 内部使用的买入批次（FIFO计算）
-        self._buy_lots: List[Dict] = []
-    
     def add_buy_transaction(self, quantity: Decimal, price: Decimal, fee: Decimal, trade_date: date):
         """添加买入交易"""
         net_cost = quantity * price + fee
-        cost_per_share = net_cost / quantity if quantity > 0 else Decimal('0')
-        
+
         # 更新持仓
         self.current_shares += quantity
         self.total_cost += net_cost
-        
+
         # 更新统计
         self.total_bought_shares += quantity
         self.total_bought_value += net_cost
-        
-        # 添加到买入批次
-        self._buy_lots.append({
-            'quantity': quantity,
-            'cost_per_share': cost_per_share,
-            'total_cost': net_cost,
-            'trade_date': trade_date
-        })
-        
+
         # 重新计算平均成本
         self._recalculate_average_cost()
-    
+
     def add_sell_transaction(self, quantity: Decimal, price: Decimal, fee: Decimal, trade_date: date):
-        """添加卖出交易"""
+        """添加卖出交易（使用平均成本法ACB）"""
         net_proceeds = quantity * price - fee
-        
-        # 更新持仓
-        self.current_shares -= quantity
-        
+
         # 更新统计
         self.total_sold_shares += quantity
         self.total_sold_value += net_proceeds
-        
-        # FIFO方式计算已实现收益
-        remaining_to_sell = quantity
-        cost_basis = Decimal('0')
-        
-        while remaining_to_sell > 0 and self._buy_lots:
-            lot = self._buy_lots[0]
-            
-            if lot['quantity'] <= remaining_to_sell:
-                # 完全消耗这个批次
-                sold_from_lot = lot['quantity']
-                cost_from_lot = lot['total_cost']
-                
-                remaining_to_sell -= sold_from_lot
-                cost_basis += cost_from_lot
-                self.total_cost -= cost_from_lot
-                
-                self._buy_lots.pop(0)
-            else:
-                # 部分消耗这个批次
-                sold_from_lot = remaining_to_sell
-                cost_per_share = lot['cost_per_share']
-                cost_from_lot = sold_from_lot * cost_per_share
-                
-                cost_basis += cost_from_lot
-                self.total_cost -= cost_from_lot
-                
-                # 更新批次
-                lot['quantity'] -= sold_from_lot
-                lot['total_cost'] -= cost_from_lot
-                
-                remaining_to_sell = Decimal('0')
-        
-        # 计算这次交易的已实现收益
-        trade_realized_gain = net_proceeds - cost_basis
+
+        # 平均成本法计算已实现收益
+        if self.current_shares > 0:
+            avg_cost = self.total_cost / self.current_shares
+            cost_basis = avg_cost * quantity
+            self.total_cost -= cost_basis
+            trade_realized_gain = net_proceeds - cost_basis
+        else:
+            trade_realized_gain = net_proceeds
+
+        # 更新持仓
+        self.current_shares -= quantity
         self.realized_gain += trade_realized_gain
-        
+
         # 重新计算平均成本
         self._recalculate_average_cost()
     
