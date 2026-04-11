@@ -159,21 +159,39 @@
 
 <!-- Charts Row -->
 <div class="row mb-4">
-    <!-- Combined Assets Chart -->
-    <div class="col-12">
+    <!-- Year-end Holding by Stocks -->
+    <div class="col-xl-6 col-12">
         <div class="card shadow mb-4">
             <div class="card-header py-3 bg-primary">
-                <h6 class="m-0 font-weight-bold text-white">{{ _('Annual Total Assets Breakdown') }}</h6>
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Year-end Holding by Stocks') }}</h6>
             </div>
             <div class="card-body">
                 <div class="chart-area" style="height: 400px;">
-                    <canvas id="combinedAssetsChart"></canvas>
+                    <canvas id="annualStocksChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Enhanced Returns Breakdown Chart -->
+    <!-- Year-end Holding by Category -->
+    <div class="col-xl-6 col-12">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 bg-primary d-flex justify-content-between align-items-center">
+                <h6 class="m-0 font-weight-bold text-white">{{ _('Year-end Holding by Category') }}</h6>
+                <div class="d-flex align-items-center">
+                    <label for="categoryYearSelect" class="text-white me-2 mb-0 small">{{ _('Year') }}</label>
+                    <select class="form-select form-select-sm" id="categoryYearSelect" style="min-width:90px;"></select>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="chart-area" style="height: 400px;">
+                    <canvas id="annualCategoryChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Annual Returns Chart -->
     <div class="col-12">
         <div class="card shadow mb-4">
             <div class="card-header py-3 bg-success">
@@ -322,9 +340,18 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <script>
+if (window.Chart && Chart.register && typeof ChartDataLabels !== 'undefined') {
+    Chart.register(ChartDataLabels);
+}
+
+const CASH_SLICE_COLOR = '#d6d8db';
+const BASE_CHART_COLORS = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69', '#6f42c1', '#e83e8c', '#fd7e14'];
+
 let annualData = [];
-let combinedAssetsChart = null;
+let annualStocksChart = null;
+let annualCategoryChart = null;
 let enhancedReturnsChart = null;
 let showCurrencyBreakdown = false;
 let yearlyHoldings = {};
@@ -490,88 +517,163 @@ async function fetchAnnualExchangeRates() {
     }
 }
 
-// Update combined assets chart (Total + Members)
-function updateCombinedAssetsChart() {
-    const ctx = document.getElementById('combinedAssetsChart').getContext('2d');
-
-    if (combinedAssetsChart) {
-        combinedAssetsChart.destroy();
-    }
-
-    const year = selectedYear;
-    const yearMap = (categoryChartData[year] || {});
-    const categories = Object.keys(yearMap);
-
-    if (!categories.length) {
-        combinedAssetsChart = null;
-        return;
-    }
-
-    const labels = categories;
-    const datasets = [{
-        label: '{{ _("Total Assets") }}' + ' ' + year,
-        data: categories.map(c => yearMap[c].value || 0),
-        backgroundColor: categories.map(c => (yearMap[c].color || '#adb5bd') + 'cc'),
-        borderColor: categories.map(c => yearMap[c].color || '#adb5bd'),
-        borderWidth: 1
-    }];
-
-    combinedAssetsChart = new Chart(ctx, {
-        type: 'bar',
-        data: { labels, datasets },
+// 共用饼图配置生成器（对齐 holdings_analysis 样式）
+function buildPieChartConfig(labels, values, backgroundColors, itemsRef) {
+    return {
+        type: 'pie',
+        data: {
+            labels,
+            datasets: [{
+                data: values,
+                backgroundColor: backgroundColors,
+                hoverBorderColor: 'rgba(234, 236, 244, 1)',
+                borderWidth: 2
+            }]
+        },
+        plugins: [ChartDataLabels],
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: {
-                x: { title: { display: true, text: String(year) } },
-                y: {
-                    title: { display: true, text: '{{ _("Assets ($)") }}' },
-                    ticks: { callback: v => '$' + v.toLocaleString() }
-                }
-            },
+            layout: { padding: { top: 40, bottom: 40, left: 60, right: 60 } },
             plugins: {
-                tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString() } },
-                legend: { display: false }
+                legend: { display: true, position: 'right' },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const val = context.parsed;
+                            const t = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const pct = t > 0 ? (val / t * 100).toFixed(1) : '0.0';
+                            const item = itemsRef[context.dataIndex];
+                            const name = item ? (item.label || item.symbol || item.category || '') : context.label;
+                            return name + ': $' + val.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' (' + pct + '%)';
+                        }
+                    }
+                },
+                datalabels: {
+                    display: true,
+                    color: '#2c3e50',
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    borderColor: '#dee2e6',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    padding: 4,
+                    font: { size: 12, weight: 'bold' },
+                    anchor: 'end',
+                    align: 'end',
+                    offset: 15,
+                    clip: false,
+                    clamp: false,
+                    formatter: function(value, context) {
+                        const t = context.dataset.data.reduce((a, b) => a + b, 0);
+                        if (!t) return '';
+                        return ((value / t) * 100).toFixed(1) + '%';
+                    }
+                }
             }
         }
-    });
+    };
 }
 
-// Update annual returns chart (by category for selected year)
+// Year-end holding by stocks 饼图
+function updateAnnualStocksChart() {
+    const canvasEl = document.getElementById('annualStocksChart');
+    if (!canvasEl) return;
+    const ctx = canvasEl.getContext('2d');
+
+    if (annualStocksChart) { annualStocksChart.destroy(); annualStocksChart = null; }
+
+    const rows = (yearlyHoldings && yearlyHoldings[selectedYear]) ? yearlyHoldings[selectedYear] : [];
+    const stockRows = rows.filter(r => r.symbol && parseFloat(r.current_value || 0) > 0);
+    if (!stockRows.length) return;
+
+    // cash 放最后，其余按市值降序，最多取前10
+    const sorted = stockRows.slice().sort((a, b) => parseFloat(b.current_value || 0) - parseFloat(a.current_value || 0));
+    const displayed = sorted.slice(0, 10);
+
+    const total = displayed.reduce((s, r) => s + parseFloat(r.current_value || 0), 0);
+    const labels = displayed.map(r => {
+        const val = parseFloat(r.current_value || 0);
+        const pct = total > 0 ? (val / total * 100).toFixed(1) : '0.0';
+        return r.symbol + '  ' + pct + '%';
+    });
+    const values = displayed.map(r => parseFloat(r.current_value || 0));
+    const backgroundColors = displayed.map((r, idx) => BASE_CHART_COLORS[idx % BASE_CHART_COLORS.length]);
+    const itemsRef = displayed.map(r => ({ label: r.symbol, symbol: r.symbol }));
+
+    annualStocksChart = new Chart(ctx, buildPieChartConfig(labels, values, backgroundColors, itemsRef));
+}
+
+// Year-end holding by category 饼图
+function updateAnnualCategoryChart() {
+    const canvasEl = document.getElementById('annualCategoryChart');
+    if (!canvasEl) return;
+    const ctx = canvasEl.getContext('2d');
+
+    if (annualCategoryChart) { annualCategoryChart.destroy(); annualCategoryChart = null; }
+
+    const yearMap = (categoryChartData[selectedYear] || {});
+    let entries = Object.entries(yearMap).map(([name, d]) => ({ name, value: d.value || 0, color: d.color }));
+    if (!entries.length) return;
+
+    // 现金放最后
+    const cashIdx = entries.findIndex(e => e.name === '现金');
+    let cashEntry = null;
+    if (cashIdx >= 0) { cashEntry = entries.splice(cashIdx, 1)[0]; }
+    entries.sort((a, b) => b.value - a.value);
+    if (cashEntry) entries.push(cashEntry);
+
+    const total = entries.reduce((s, e) => s + e.value, 0);
+    const labels = entries.map(e => {
+        const pct = total > 0 ? (e.value / total * 100).toFixed(1) : '0.0';
+        return e.name + '  ' + pct + '%';
+    });
+    const values = entries.map(e => e.value);
+    const backgroundColors = entries.map((e, idx) => {
+        if (e.name === '现金') return CASH_SLICE_COLOR;
+        return BASE_CHART_COLORS[idx % BASE_CHART_COLORS.length];
+    });
+    const itemsRef = entries.map(e => ({ label: e.name, category: e.name }));
+
+    annualCategoryChart = new Chart(ctx, buildPieChartConfig(labels, values, backgroundColors, itemsRef));
+}
+
+// Update annual returns chart (by category, 3 bars each: unrealized / realized / div+int)
 function updateEnhancedReturnsChart() {
     const ctx = document.getElementById('enhancedReturnsChart').getContext('2d');
 
     if (enhancedReturnsChart) {
         enhancedReturnsChart.destroy();
+        enhancedReturnsChart = null;
     }
 
     const year = selectedYear;
     const yearMap = categoryChartData[year] || {};
-    // 排除"现金"分类（无盈利/分红意义）
+    // 排除"现金"分类
     const categories = Object.keys(yearMap).filter(c => c !== '现金');
 
-    if (!categories.length) {
-        enhancedReturnsChart = null;
-        return;
-    }
-
-    const colors = categories.map(c => yearMap[c].color || '#adb5bd');
+    if (!categories.length) return;
 
     const datasets = [
         {
+            label: '{{ _("Unrealized Gain") }}',
+            data: categories.map(c => yearMap[c].unrealized_gain || 0),
+            backgroundColor: '#4e73df99',
+            borderColor: '#4e73df',
+            borderWidth: 1
+        },
+        {
             label: '{{ _("Realized Gain") }}',
             data: categories.map(c => yearMap[c].realized_gain || 0),
-            backgroundColor: colors.map(col => col + 'cc'),
-            borderColor: colors,
+            backgroundColor: '#1cc88a99',
+            borderColor: '#1cc88a',
             borderWidth: 1
         },
         {
             label: '{{ _("Div + Int") }}',
             data: categories.map(c => yearMap[c].dividends || 0),
-            backgroundColor: colors.map(col => col + '66'),
-            borderColor: colors,
-            borderWidth: 1,
-            borderDash: [4, 2]
+            backgroundColor: '#f6c23e99',
+            borderColor: '#f6c23e',
+            borderWidth: 1
         }
     ];
 
@@ -585,16 +687,17 @@ function updateEnhancedReturnsChart() {
                 x: { title: { display: true, text: String(year) } },
                 y: {
                     title: { display: true, text: '{{ _("Returns ($)") }}' },
-                    ticks: { callback: v => '$' + v.toLocaleString() }
+                    ticks: { callback: v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) }
                 }
             },
             plugins: {
                 tooltip: {
                     mode: 'index',
                     intersect: false,
-                    callbacks: { label: ctx => ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString() }
+                    callbacks: { label: ctx => ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) }
                 },
-                legend: { display: true, position: 'top' }
+                legend: { display: true, position: 'top' },
+                datalabels: { display: false }
             }
         }
     });
@@ -865,6 +968,7 @@ function updateYearlyHoldingsUI() {
     const card = document.getElementById('yearlyHoldingsCard');
     const holdingsSelect = document.getElementById('yearlyHoldingsSelect');
     const annualSelect = document.getElementById('annualYearSelect');
+    const categorySelect = document.getElementById('categoryYearSelect');
     if (!card || !holdingsSelect) return;
 
     const years = getAvailableYearsForHoldings();
@@ -875,8 +979,8 @@ function updateYearlyHoldingsUI() {
 
     card.style.display = 'block';
 
-    // 同步填充两个下拉框
-    [holdingsSelect, annualSelect].forEach(sel => {
+    // 同步填充所有下拉框
+    [holdingsSelect, annualSelect, categorySelect].forEach(sel => {
         if (!sel) return;
         sel.innerHTML = '';
         years.forEach(year => {
@@ -892,21 +996,26 @@ function updateYearlyHoldingsUI() {
     }
     holdingsSelect.value = selectedYear;
     if (annualSelect) annualSelect.value = selectedYear;
+    if (categorySelect) categorySelect.value = selectedYear;
 
-    // 联动：任一下拉框变化，同步另一个并刷新图表和持仓表
+    // 联动：任一下拉框变化，同步其余并刷新图表和持仓表
     const onYearChange = (e) => {
         selectedYear = parseInt(e.target.value, 10);
         holdingsSelect.value = selectedYear;
         if (annualSelect) annualSelect.value = selectedYear;
+        if (categorySelect) categorySelect.value = selectedYear;
         renderYearlyHoldingsTable(selectedYear);
-        updateCombinedAssetsChart();
+        updateAnnualStocksChart();
+        updateAnnualCategoryChart();
         updateEnhancedReturnsChart();
     };
     holdingsSelect.onchange = onYearChange;
     if (annualSelect) annualSelect.onchange = onYearChange;
+    if (categorySelect) categorySelect.onchange = onYearChange;
 
     renderYearlyHoldingsTable(selectedYear);
-    updateCombinedAssetsChart();
+    updateAnnualStocksChart();
+    updateAnnualCategoryChart();
     updateEnhancedReturnsChart();
 }
 

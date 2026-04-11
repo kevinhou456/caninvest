@@ -1965,6 +1965,23 @@ def save_transaction_record(transaction_id=None, account_id=None, transaction_ty
         
         db.session.commit()
 
+        # 确保有股票代码的交易都写入 StocksCache（用于股票分类功能）
+        if stock and transaction_type in ['BUY', 'SELL', 'DIVIDEND', 'INTEREST']:
+            try:
+                from app.models.stocks_cache import StocksCache
+                existing = StocksCache.query.filter_by(symbol=stock).first()
+                if not existing:
+                    new_stock = StocksCache(
+                        symbol=stock,
+                        name='',
+                        exchange='',
+                        currency=currency
+                    )
+                    db.session.add(new_stock)
+                    db.session.commit()
+            except Exception:
+                pass  # StocksCache 写入失败不影响主流程
+
         # 失效该账户从交易日起的缓存
         try:
             from app.services.performance_cache_service import performance_cache_service
