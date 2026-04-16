@@ -264,21 +264,6 @@ function updatePerformanceChart() {
         }
     ];
 
-    // 各账户细曲线（仅多账户合计视图时显示）
-    accountsBreakdown.forEach((acct, idx) => {
-        const color = ACCOUNT_COLORS[idx % ACCOUNT_COLORS.length];
-        datasets.push({
-            label: acct.account_name,
-            data: acct.performance_series.map(d => d.portfolio || 0),
-            borderColor: color,
-            backgroundColor: 'transparent',
-            borderWidth: 1.2,
-            borderDash: [4, 3],
-            tension: 0.3,
-            fill: false,
-            pointRadius: 0
-        });
-    });
 
     performanceChart = new Chart(ctx, {
         type: 'line',
