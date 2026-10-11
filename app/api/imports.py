@@ -305,11 +305,16 @@ def csv_preview():
                     row_data[col] = str(value)
             preview_data.append(row_data)
         
+        wealthsimple_mapping = get_wealthsimple_activity_mapping(columns)
+
         # 首先尝试通过表头自动匹配已保存的格式
         from app.models.csv_format import CsvFormat
-        auto_matched_format = CsvFormat.find_by_headers(columns)
+        auto_matched_format = None if wealthsimple_mapping else CsvFormat.find_by_headers(columns)
         
-        if auto_matched_format:
+        if wealthsimple_mapping:
+            # Wealthsimple activity exports need dedicated parsing; do not reuse stale manual mappings.
+            suggested_mapping = wealthsimple_mapping
+        elif auto_matched_format:
             # 找到完全匹配的格式，使用保存的映射
             suggested_mapping = auto_matched_format.mappings
         else:
@@ -594,6 +599,9 @@ def import_csv_with_mapping():
         
         meta_file_path = os.path.join(temp_dir, f'{session_id}.json')
         df, _meta = _load_csv_dataframe(temp_file_path, meta_file_path)
+        wealthsimple_mapping = get_wealthsimple_activity_mapping(df.columns.tolist())
+        if wealthsimple_mapping:
+            column_mappings = wealthsimple_mapping
         
         # 处理数据
         transactions_data, processing_errors = process_csv_with_mapping(df, column_mappings)
@@ -764,6 +772,194 @@ def import_csv_with_mapping():
         current_app.logger.exception('import_csv_with_mapping failed')
         return jsonify({'success': False, 'error': f'Import error: {str(e)}'}), 500
 
+def _clean_csv_value(value):
+    """Return a trimmed string for CSV cell values."""
+    try:
+        import pandas as pd
+        if pd.isna(value):
+            return ''
+    except Exception:
+        pass
+
+    value_str = str(value).strip()
+    if value_str.lower() in {'nan', 'none'}:
+        return ''
+    return value_str
+
+
+def _parse_csv_number(value, default=0.0):
+    """Parse a CSV number that may include currency symbols or commas."""
+    value_str = _clean_csv_value(value)
+    if not value_str:
+        return default
+
+    value_str = (
+        value_str
+        .replace('$', '')
+        .replace(',', '')
+        .replace('(', '-')
+        .replace(')', '')
+    )
+    try:
+        return float(value_str)
+    except (TypeError, ValueError):
+        return default
+
+
+def is_wealthsimple_activity_csv(df):
+    """Detect Wealthsimple activity export format."""
+    return get_wealthsimple_activity_mapping(df.columns.tolist()) is not None
+
+
+def _normalize_activity_header(header):
+    return str(header).strip().lower().replace(' ', '_')
+
+
+def _activity_type_columns(headers):
+    """Detect split activity types independently of the broker's other columns."""
+    columns = {_normalize_activity_header(header): header for header in headers}
+    if {'activity_type', 'activity_sub_type'}.issubset(columns):
+        return columns['activity_type'], columns['activity_sub_type']
+    return None
+
+
+def _activity_type_value(row, columns):
+    """Only Trade uses the subtype; dividends and other activities use the parent."""
+    primary, secondary = columns
+    activity_type = _clean_csv_value(row.get(primary)).upper()
+    if activity_type == 'TRADE':
+        return _clean_csv_value(row.get(secondary)).upper()
+    return activity_type
+
+
+def get_wealthsimple_activity_mapping(headers):
+    """Return canonical mappings for Wealthsimple activity export headers."""
+    required_columns = {
+        'transaction_date',
+        'activity_type',
+        'activity_sub_type',
+        'description',
+        'symbol',
+        'currency',
+        'quantity',
+        'unit_price',
+        'commission',
+        'net_cash_amount',
+    }
+    normalized_headers = [
+        _normalize_activity_header(header)
+        for header in headers
+    ]
+    if not required_columns.issubset(set(normalized_headers)):
+        return None
+
+    header_by_normalized = {
+        normalized_header: headers[index]
+        for index, normalized_header in enumerate(normalized_headers)
+    }
+    return {
+        'date': header_by_normalized['transaction_date'],
+        'type': header_by_normalized['activity_type'],
+        'symbol': header_by_normalized['symbol'],
+        'quantity': header_by_normalized['quantity'],
+        'price': header_by_normalized['unit_price'],
+        'currency': header_by_normalized['currency'],
+        'amount': header_by_normalized['net_cash_amount'],
+        'fee': header_by_normalized['commission'],
+        'notes': header_by_normalized['description'],
+    }
+
+
+def process_wealthsimple_activity_csv(df):
+    """Parse Wealthsimple activity CSV without relying on manual column mapping."""
+    df = df.rename(columns=_normalize_activity_header)
+    transactions = []
+    processing_errors = []
+
+    date_samples = [
+        _clean_csv_value(row.get('transaction_date'))
+        for _, row in df.iterrows()
+        if _clean_csv_value(row.get('transaction_date'))
+    ]
+    if date_samples:
+        global _detected_date_format
+        _detected_date_format = detect_date_format(date_samples)
+
+    for index, row in df.iterrows():
+        row_num = index + 2
+
+        date_str = _clean_csv_value(row.get('transaction_date'))
+        trade_date = parse_date(date_str, date_samples)
+        if not trade_date:
+            if date_str:
+                processing_errors.append(f"Row {row_num}: Invalid date '{date_str}'")
+            continue
+
+        activity_type = _clean_csv_value(row.get('activity_type')).upper()
+        description = _clean_csv_value(row.get('description'))
+        description_upper = description.upper()
+        symbol = _clean_csv_value(row.get('symbol')).upper() or None
+        currency = _clean_csv_value(row.get('currency')).upper() or 'USD'
+        quantity = abs(_parse_csv_number(row.get('quantity')))
+        price = abs(_parse_csv_number(row.get('unit_price')))
+        fee = abs(_parse_csv_number(row.get('commission')))
+        net_cash_amount = _parse_csv_number(row.get('net_cash_amount'))
+        amount = abs(net_cash_amount)
+
+        transaction_type = None
+        if activity_type == 'TRADE':
+            transaction_type = parse_transaction_type(
+                _activity_type_value(row, ('activity_type', 'activity_sub_type'))
+            )
+        elif activity_type in {'DIVIDEND', 'INTEREST'}:
+            transaction_type = activity_type
+        elif activity_type == 'TAX':
+            transaction_type = 'WITHDRAWAL'
+        elif activity_type in {'MONEYMOVEMENT', 'MONEY_MOVEMENT'}:
+            if net_cash_amount < 0 or 'WITHDRAW' in description_upper:
+                transaction_type = 'WITHDRAWAL'
+            else:
+                transaction_type = 'DEPOSIT'
+        else:
+            transaction_type = parse_transaction_type(activity_type) or parse_transaction_type(description_upper)
+
+        if not transaction_type:
+            processing_errors.append(f"Row {row_num}: Invalid Wealthsimple activity type '{activity_type}'")
+            continue
+
+        if transaction_type in {'BUY', 'SELL'}:
+            if not symbol:
+                processing_errors.append(f"Row {row_num}: Missing symbol for {transaction_type}")
+                continue
+            if quantity <= 0:
+                processing_errors.append(f"Row {row_num}: Invalid quantity for {transaction_type}")
+                continue
+            if price <= 0:
+                processing_errors.append(f"Row {row_num}: Invalid price for {transaction_type}")
+                continue
+            row_amount = amount if amount > 0 else None
+        else:
+            row_amount = amount
+            if quantity == 0:
+                quantity = amount
+            price = 0
+
+        transactions.append({
+            'row_num': row_num,
+            'trade_date': trade_date,
+            'type': transaction_type,
+            'stock': symbol,
+            'quantity': quantity,
+            'price': price,
+            'amount': row_amount,
+            'currency': currency,
+            'fee': fee,
+            'notes': description,
+        })
+
+    return transactions, processing_errors
+
+
 def process_csv_with_mapping(df, column_mappings):
     """使用用户映射处理CSV数据"""
     global _detected_date_format
@@ -773,6 +969,14 @@ def process_csv_with_mapping(df, column_mappings):
     processing_errors = []
     cash_out_keywords = {'to reg. act.', 'to reg act.', 'to reg act', 'to reg. account', 'to reg account'}
     
+    if is_wealthsimple_activity_csv(df):
+        print("DEBUG: 检测到 Wealthsimple Activity CSV，使用专门的解析器处理")
+        return process_wealthsimple_activity_csv(df)
+
+    activity_columns = _activity_type_columns(df.columns)
+    if activity_columns:
+        # Override stale single-column type mappings, preserving all other choices.
+        column_mappings = dict(column_mappings, type=activity_columns[0])
     
     # 检测是否为描述格式的CSV
     # 方式1: 检查CSV列名是否包含标准描述格式列 (date, transaction, description, amount, balance, currency)
@@ -802,7 +1006,7 @@ def process_csv_with_mapping(df, column_mappings):
         len(set(fields_mapped_to_description) & important_fields) >= 2
     )
     
-    if is_description_format_by_columns or is_description_format_by_mapping:
+    if not activity_columns and (is_description_format_by_columns or is_description_format_by_mapping):
         if is_description_format_by_columns:
             print("DEBUG: 检测到描述格式CSV（按列名），使用专门的解析器处理")
         else:
@@ -852,7 +1056,10 @@ def process_csv_with_mapping(df, column_mappings):
             
             # 交易类型
             if 'type' in column_mappings and column_mappings['type']:
-                raw_type_str = str(row[column_mappings['type']]).strip()
+                raw_type_str = (
+                    _activity_type_value(row, activity_columns) if activity_columns
+                    else str(row[column_mappings['type']]).strip()
+                )
                 type_str = raw_type_str.upper()
                 # 特殊描述关键字：To Reg. Act. 视为提现
                 description_text_for_type = ''
@@ -1231,6 +1438,10 @@ def smart_header_mapping(headers):
     """智能匹配CSV表头"""
     # 标准化表头（去除空格、转小写）
     normalized_headers = [h.strip().lower().replace(' ', '_') for h in headers]
+
+    wealthsimple_mapping = get_wealthsimple_activity_mapping(headers)
+    if wealthsimple_mapping:
+        return wealthsimple_mapping
     
     # 定义不同券商可能的表头映射
     header_patterns = {
@@ -1242,7 +1453,7 @@ def smart_header_mapping(headers):
         'type': [
             'type', 'transaction_type', 'action', 'Operation', 'buy/sell',
             '类型', '交易类型', '操作', 'tipo', 'typ',
-            'order_type', 'trans_type', 'activity','Operation'
+            'order_type', 'trans_type', 'activity','Operation', 'activity_type'
         ],
         'symbol': [
             'symbol', 'stock', 'ticker', 'stock_symbol', 'instrument',
@@ -1296,6 +1507,9 @@ def smart_header_mapping(headers):
     
     # 始终返回mapping，即使没有找到所有必需字段
     # 用户可以在界面上手动调整
+    activity_columns = _activity_type_columns(headers)
+    if activity_columns:
+        mapping['type'] = activity_columns[0]
     return mapping
 
 def process_csv_data(df, header_mapping):

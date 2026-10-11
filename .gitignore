@@ -124,6 +124,7 @@ family_investment.db
 
 # Test and debug files
 test_*.py
+!tests/test_csv_activity_types.py
 debug_*.py
 
 # Duplicate files with numeric suffixes
