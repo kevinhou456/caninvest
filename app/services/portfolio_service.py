@@ -82,6 +82,7 @@ class PositionSnapshot:
     realized_gain: Decimal = Decimal('0')
     total_dividends: Decimal = Decimal('0')
     total_interest: Decimal = Decimal('0')
+    withholding_tax: Decimal = Decimal('0')
     
     # 市场数据
     current_price: Decimal = Decimal('0')
@@ -132,6 +133,8 @@ class PositionSnapshot:
             'total_dividends': float(dividends_dec),
             'interest': float(interest_dec),  # 保持兼容性
             'total_interest': float(interest_dec),
+            'withholding_tax': float(self.withholding_tax),
+            'net_dividends': float(dividends_dec - self.withholding_tax),
             'current_price': float(self.current_price),
             'current_value': float(self.current_value),
             'unrealized_gain': float(self.unrealized_gain),
@@ -315,6 +318,9 @@ class PortfolioService:
             # 分红
             snapshot.total_dividends += Decimal(str(tx.amount or 0))
         
+        elif tx.type == 'TAX':
+            snapshot.withholding_tax += Decimal(str(tx.amount or 0))
+
         elif tx.type == 'INTEREST':
             # 利息
             snapshot.total_interest += Decimal(str(tx.amount or 0))
@@ -685,7 +691,9 @@ class PortfolioService:
                 'annual_unrealized_gain': metric_delta(metrics_end, metrics_prev, 'unrealized_gain', 'cad'),
                 'annual_dividends': dividends_delta,
                 'annual_interest': interest_delta,
-                'annual_income': dividends_delta + interest_delta,
+                'annual_withholding_tax': metric_delta(metrics_end, metrics_prev, 'withholding_tax', 'cad'),
+                'annual_net_dividends': metric_delta(metrics_end, metrics_prev, 'net_dividends', 'cad'),
+                'annual_income': dividends_delta + interest_delta - metric_delta(metrics_end, metrics_prev, 'withholding_tax', 'cad'),
                 'transaction_count': tx_stats['transaction_count'],
                 'buy_amount': float(tx_stats['buy_amount']),
                 'sell_amount': float(tx_stats['sell_amount']),
@@ -713,6 +721,8 @@ class PortfolioService:
                     'withdrawal_usd': float(tx_stats['withdrawal_usd']),
                     'withdrawal_usd_daily_cad': float(tx_stats.get('withdrawal_usd_daily_cad', 0)),
                     'withdrawal_usd_no_rate': float(tx_stats.get('withdrawal_usd_no_rate', 0)),
+                    'withholding_tax_cad': metric_delta(metrics_end, metrics_prev, 'withholding_tax', 'cad_only'),
+                    'withholding_tax_usd': metric_delta(metrics_end, metrics_prev, 'withholding_tax', 'usd_only'),
                     'dividends_cad': metric_delta(metrics_end, metrics_prev, 'dividends', 'cad_only'),
                     'dividends_usd': metric_delta(metrics_end, metrics_prev, 'dividends', 'usd_only'),
                     'interest_cad': metric_delta(metrics_end, metrics_prev, 'interest', 'cad_only'),
@@ -756,7 +766,7 @@ class PortfolioService:
                 'current_shares', 'shares', 'total_cost', 'current_value', 'unrealized_gain',
                 'realized_gain', 'total_dividends', 'total_interest', 'dividends', 'interest',
                 'daily_change_value', 'previous_value', 'total_bought_shares', 'total_sold_shares',
-                'total_bought_value', 'total_sold_value'
+                'total_bought_value', 'total_sold_value', 'withholding_tax', 'net_dividends'
             ]
 
             for holding in holdings_list:
@@ -1027,7 +1037,8 @@ class PortfolioService:
                     unrealized_delta = 0.0
                     holding_unrealized = 0.0
 
-                period_gain = unrealized_delta + realized_delta + dividends_delta + interest_delta
+                tax_delta = float(holding.get('withholding_tax', 0) or 0) - float(prev.get('withholding_tax', 0) or 0)
+                period_gain = unrealized_delta + realized_delta + dividends_delta + interest_delta - tax_delta
 
                 # 以期末成本或总买入额作为回报率基数，避免除零
                 cost_basis = float(holding.get('total_cost', 0) or 0)
@@ -1046,6 +1057,8 @@ class PortfolioService:
                     'current_value': float(holding.get('current_value', 0) or 0) if current_shares > 0 else 0.0,
                     'unrealized_gain': unrealized_delta,
                     'realized_gain': realized_delta,
+                    'withholding_tax': tax_delta,
+                    'net_dividends': dividends_delta - tax_delta,
                     'dividends': dividends_delta,
                     'interest': interest_delta,
                     'return_rate': return_rate
@@ -1079,7 +1092,7 @@ class PortfolioService:
                 # 各收益指标也按相同比例缩放并转 CAD
                 rg = float(row.get('realized_gain', 0) or 0) * scale * rate
                 ug = float(row.get('unrealized_gain', 0) or 0) * scale * rate
-                div = (float(row.get('dividends', 0) or 0) + float(row.get('interest', 0) or 0)) * scale * rate
+                div = (float(row.get('dividends', 0) or 0) + float(row.get('interest', 0) or 0) - float(row.get('withholding_tax', 0) or 0)) * scale * rate
                 cat_name, cat_color = symbol_category_map.get(sym, ('其他', '#adb5bd'))
                 if cat_name not in cat_totals:
                     cat_totals[cat_name] = {'value': 0.0, 'color': cat_color,
@@ -1108,7 +1121,7 @@ class PortfolioService:
         current_total_unrealized = current_metrics.get('unrealized_gain', {}).get('cad', 0.0) or 0.0
 
         total_income_sum = sum(
-            (item.get('annual_dividends', 0) or 0) + (item.get('annual_interest', 0) or 0)
+            (item.get('annual_dividends', 0) or 0) + (item.get('annual_interest', 0) or 0) - (item.get('annual_withholding_tax', 0) or 0)
             for item in annual_data
             if not item.get('is_member_row') and not item.get('is_member_account_type_row') and not item.get('is_account_row')
         )
@@ -1156,6 +1169,34 @@ class PortfolioService:
             'cash_balance': cash_balance_summary
         }
     
+    def _get_report_asset_totals(self, portfolio, account_ids, target_date,
+                                 get_proportion, asset_service, usd_to_cad):
+        """Aggregate core portfolio holdings and cash once, preserving native currencies."""
+        assets = {'CAD': Decimal('0'), 'USD': Decimal('0')}
+        cash = {'CAD': Decimal('0'), 'USD': Decimal('0')}
+        for holding in portfolio.get('current_holdings', []):
+            proportion = get_proportion(holding['account_id'])
+            if proportion <= 0:
+                continue
+            currency = (holding.get('currency') or 'USD').upper()
+            assets[currency] += Decimal(str(holding.get('current_value', 0) or 0)) * proportion
+        for account_id in account_ids:
+            proportion = get_proportion(account_id)
+            if proportion <= 0:
+                continue
+            balance = asset_service.get_cash_balance(account_id, target_date)
+            for currency in cash:
+                cash[currency] += Decimal(str(balance.get(currency.lower(), 0) or 0)) * proportion
+        for currency in assets:
+            assets[currency] += cash[currency]
+        return {
+            'total_assets': float(assets['CAD'] + assets['USD'] * usd_to_cad),
+            'total_assets_cad': float(assets['CAD']),
+            'total_assets_usd': float(assets['USD']),
+            'cash_cad': float(cash['CAD']),
+            'cash_usd': float(cash['USD']),
+        }
+
     def get_quarterly_analysis(self, account_ids: List[int], 
                               years: Optional[List[int]] = None,
                               member_id: Optional[int] = None) -> Dict:
@@ -1236,9 +1277,6 @@ class PortfolioService:
             realized_totals = calculate_realized_totals(portfolio)
             current_holdings = portfolio.get('current_holdings', []) or []
 
-            total_assets_stock_dec = Decimal('0')
-            total_assets_cad = 0.0
-            total_assets_usd = 0.0
             unrealized_gain_cad = 0.0
             unrealized_gain_usd = 0.0
             total_unrealized_dec = Decimal('0')
@@ -1247,40 +1285,22 @@ class PortfolioService:
                 proportion_dec = get_proportion(holding.get('account_id'))
                 if proportion_dec <= 0:
                     continue
-                value_dec = Decimal(str(holding.get('current_value', 0) or 0)) * proportion_dec
                 unrealized_dec = Decimal(str(holding.get('unrealized_gain', 0) or 0)) * proportion_dec
-                total_assets_stock_dec += value_dec
                 total_unrealized_dec += unrealized_dec
                 currency = (holding.get('currency') or 'USD').upper()
                 if currency == 'CAD':
-                    total_assets_cad += float(value_dec)
                     unrealized_gain_cad += float(unrealized_dec)
                 elif currency == 'USD':
-                    total_assets_usd += float(value_dec)
                     unrealized_gain_usd += float(unrealized_dec)
 
-            cash_total_cad_dec = Decimal('0')
-            cash_total_usd_dec = Decimal('0')
-            for account_id in account_ids:
-                proportion_dec = get_proportion(account_id)
-                if proportion_dec <= 0:
-                    continue
-                try:
-                    snapshot = asset_service.get_asset_snapshot(account_id, as_of_date)
-                except Exception:
-                    continue
-                cash_total_cad_dec += Decimal(str(snapshot.cash_balance_cad or 0)) * proportion_dec
-                cash_total_usd_dec += Decimal(str(snapshot.cash_balance_usd or 0)) * proportion_dec
-
-            total_assets_dec = total_assets_stock_dec + cash_total_cad_dec + (cash_total_usd_dec * usd_to_cad_decimal)
-            if cash_total_cad_dec < 0:
-                cash_total_cad_dec = Decimal('0')
-            if cash_total_usd_dec < 0:
-                cash_total_usd_dec = Decimal('0')
-
-            total_assets_float = float(total_assets_dec)
-            total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec)
+            assets = self._get_report_asset_totals(
+                portfolio, account_ids, as_of_date, get_proportion, asset_service, usd_to_cad_decimal
+            )
+            total_assets_float = assets['total_assets']
+            total_assets_cad = assets['total_assets_cad']
+            total_assets_usd = assets['total_assets_usd']
+            cash_total_cad_dec = assets['cash_cad']
+            cash_total_usd_dec = assets['cash_usd']
 
             # Apply current exchange rate to realized and unrealized gains
             total_realized_with_rate = float(realized_totals['cad']) + float(realized_totals['usd']) * float(usd_to_cad_decimal)
@@ -1288,9 +1308,10 @@ class PortfolioService:
 
             total_unrealized_float = float(total_unrealized_dec)
             total_realized_float = float(realized_totals['total'])
+            income = asset_service.get_income_totals(account_ids, as_of_date, ownership_map or None)
             overall_return_percent = 0.0
             if total_assets_float > 0:
-                overall_return_percent = ((total_realized_with_rate + total_unrealized_with_rate) / total_assets_float) * 100
+                overall_return_percent = ((total_realized_with_rate + total_unrealized_with_rate + income['net_income']) / total_assets_float) * 100
 
             return {
                 'total_assets': total_assets_float,
@@ -1304,6 +1325,7 @@ class PortfolioService:
                 'unrealized_gain_usd': unrealized_gain_usd,
                 'cash_cad': float(cash_total_cad_dec),
                 'cash_usd': float(cash_total_usd_dec),
+                **income,
                 'return_percent': overall_return_percent
             }
 
@@ -1386,25 +1408,8 @@ class PortfolioService:
             quarterly_realized_gain_cad_dec = current_realized_totals['cad'] - previous_totals['cad']
             quarterly_realized_gain_usd_dec = current_realized_totals['usd'] - previous_totals['usd']
         
-            total_assets_cad = 0.0
-            total_assets_usd = 0.0
             unrealized_gain_cad = 0.0
             unrealized_gain_usd = 0.0
-            total_assets_stock_dec = Decimal('0')
-        
-            current_holdings = quarter_portfolio.get('current_holdings', [])
-            for holding in current_holdings:
-                proportion_dec = get_proportion(holding.get('account_id'))
-                if proportion_dec <= 0:
-                    continue
-                value_dec = Decimal(str(holding.get('current_value', 0))) * proportion_dec
-                total_assets_stock_dec += value_dec
-                if (holding.get('currency') or '').upper() == 'CAD':
-                    total_assets_cad += float(value_dec)
-                    unrealized_gain_cad += float(Decimal(str(holding.get('unrealized_gain', 0))) * proportion_dec)
-                elif (holding.get('currency') or '').upper() == 'USD':
-                    total_assets_usd += float(value_dec)
-                    unrealized_gain_usd += float(Decimal(str(holding.get('unrealized_gain', 0))) * proportion_dec)
         
             quarter_end_portfolio = self.get_portfolio_summary(
                 account_ids_subset, TimePeriod.CUSTOM, effective_end, effective_end
@@ -1443,33 +1448,16 @@ class PortfolioService:
             unrealized_gain_cad = float(quarter_end_unrealized_cad_dec - quarter_start_unrealized_cad_dec)
             unrealized_gain_usd = float(quarter_end_unrealized_usd_dec - quarter_start_unrealized_usd_dec)
         
-            # 使用统一的 get_cash_balance 获取现金，禁止使用 get_asset_snapshot
-            cash_total_cad_dec = Decimal('0')
-            cash_total_usd_dec = Decimal('0')
+            assets = self._get_report_asset_totals(
+                quarter_portfolio, account_ids_subset, effective_end, get_proportion,
+                asset_service, usd_to_cad_decimal
+            )
+            total_assets_float = assets['total_assets']
+            total_assets_cad = assets['total_assets_cad']
+            total_assets_usd = assets['total_assets_usd']
+            cash_total_cad_dec = assets['cash_cad']
+            cash_total_usd_dec = assets['cash_usd']
 
-            for account_id in account_ids_subset:
-                proportion_dec = get_proportion(account_id)
-                if proportion_dec <= 0:
-                    continue
-                try:
-                    cash_balance = asset_service.get_cash_balance(account_id, effective_end)
-                    cash_total_cad_dec += Decimal(str(cash_balance.get('cad', 0) or 0)) * proportion_dec
-                    cash_total_usd_dec += Decimal(str(cash_balance.get('usd', 0) or 0)) * proportion_dec
-                except Exception:
-                    continue
-
-            # 总资产 = 股票市值 + 现金（统一架构，不使用 snapshot.total_assets）
-            total_assets_dec = total_assets_stock_dec + cash_total_cad_dec + (cash_total_usd_dec * usd_to_cad_decimal)
-
-            if cash_total_cad_dec < 0:
-                cash_total_cad_dec = Decimal('0')
-            if cash_total_usd_dec < 0:
-                cash_total_usd_dec = Decimal('0')
-
-            total_assets_float = float(total_assets_dec)
-            total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec)
-        
             quarterly_realized_gain_cad = float(quarterly_realized_gain_cad_dec)
             quarterly_realized_gain_usd = float(quarterly_realized_gain_usd_dec)
         
@@ -1480,15 +1468,19 @@ class PortfolioService:
             buy_amount_with_rate = buy_cad + buy_usd * float(usd_to_cad_decimal)
             sell_amount_with_rate = sell_cad + sell_usd * float(usd_to_cad_decimal)
         
+            tax = asset_service.get_withholding_tax_totals(account_ids_subset, effective_end, quarter_start, ownership_map or None)
+
             quarterly_return_percent = 0.0
             if total_assets_float > 0:
-                quarterly_return_percent = ((quarterly_realized_gain_with_rate + quarterly_unrealized_gain_with_rate) / total_assets_float) * 100
+                quarterly_return_percent = ((quarterly_realized_gain_with_rate + quarterly_unrealized_gain_with_rate + dividends_with_rate + interest_with_rate - float(tax['total_cad'])) / total_assets_float) * 100
         
             return {
                 'total_assets': total_assets_float,
                 'quarterly_realized_gain': quarterly_realized_gain_with_rate,
                 'quarterly_unrealized_gain': quarterly_unrealized_gain_with_rate,
                 'quarterly_return_percent': quarterly_return_percent,
+                'quarterly_withholding_tax': float(tax['total_cad']),
+                'quarterly_net_dividends': dividends_with_rate - float(tax['total_cad']),
                 'quarterly_dividends': dividends_with_rate,
                 'quarterly_interest': interest_with_rate,
                 'transaction_count': transaction_count,
@@ -1507,6 +1499,8 @@ class PortfolioService:
                     'buy_usd': buy_usd,
                     'sell_cad': sell_cad,
                     'sell_usd': sell_usd,
+                    'withholding_tax_cad': float(tax['cad']),
+                    'withholding_tax_usd': float(tax['usd']),
                     'dividends_cad': dividends_cad,
                     'dividends_usd': dividends_usd,
                     'interest_cad': interest_cad,
@@ -1520,6 +1514,8 @@ class PortfolioService:
                 'quarterly_realized_gain': 0.0,
                 'quarterly_unrealized_gain': 0.0,
                 'quarterly_return_percent': 0.0,
+                'quarterly_withholding_tax': 0.0,
+                'quarterly_net_dividends': 0.0,
                 'quarterly_dividends': 0.0,
                 'quarterly_interest': 0.0,
                 'transaction_count': 0,
@@ -1538,6 +1534,8 @@ class PortfolioService:
                     'buy_usd': 0.0,
                     'sell_cad': 0.0,
                     'sell_usd': 0.0,
+                    'withholding_tax_cad': 0.0,
+                    'withholding_tax_usd': 0.0,
                     'dividends_cad': 0.0,
                     'dividends_usd': 0.0,
                     'interest_cad': 0.0,
@@ -1551,6 +1549,8 @@ class PortfolioService:
                 combined['total_assets'] += metrics.get('total_assets', 0) or 0
                 combined['quarterly_realized_gain'] += metrics.get('quarterly_realized_gain', 0) or 0
                 combined['quarterly_unrealized_gain'] += metrics.get('quarterly_unrealized_gain', 0) or 0
+                combined['quarterly_withholding_tax'] += metrics.get('quarterly_withholding_tax', 0)
+                combined['quarterly_net_dividends'] += metrics.get('quarterly_net_dividends', 0)
                 combined['quarterly_dividends'] += metrics.get('quarterly_dividends', 0) or 0
                 combined['quarterly_interest'] += metrics.get('quarterly_interest', 0) or 0
                 combined['transaction_count'] += metrics.get('transaction_count', 0) or 0
@@ -1563,7 +1563,7 @@ class PortfolioService:
         
             if combined['total_assets'] > 0:
                 combined['quarterly_return_percent'] = (
-                    (combined['quarterly_realized_gain'] + combined['quarterly_unrealized_gain']) /
+                    (combined['quarterly_realized_gain'] + combined['quarterly_unrealized_gain'] + combined['quarterly_dividends'] + combined['quarterly_interest'] - combined['quarterly_withholding_tax']) /
                     combined['total_assets']
                 ) * 100
             else:
@@ -1607,6 +1607,8 @@ class PortfolioService:
                 'quarters_covered': len(quarterly_data),
                 'total_quarters_gain': sum(item['quarterly_realized_gain'] + item['quarterly_unrealized_gain'] 
                                          for item in quarterly_data),
+                'total_withholding_tax': sum(item['quarterly_withholding_tax'] for item in quarterly_data),
+                'total_net_dividends': sum(item['quarterly_net_dividends'] for item in quarterly_data),
                 'total_dividends': sum(item['quarterly_dividends'] for item in quarterly_data),
                 'total_interest': sum(item['quarterly_interest'] for item in quarterly_data),
                 'average_quarterly_return': self._calculate_average_return(quarterly_data, 'quarterly_realized_gain', 'quarterly_unrealized_gain')
@@ -1760,9 +1762,6 @@ class PortfolioService:
             realized_totals = calculate_realized_totals(portfolio)
             current_holdings = portfolio.get('current_holdings', []) or []
 
-            total_assets_stock_dec = Decimal('0')
-            total_assets_cad = 0.0
-            total_assets_usd = 0.0
             unrealized_gain_cad = 0.0
             unrealized_gain_usd = 0.0
             total_unrealized_dec = Decimal('0')
@@ -1771,40 +1770,22 @@ class PortfolioService:
                 proportion_dec = get_proportion(holding.get('account_id'))
                 if proportion_dec <= 0:
                     continue
-                value_dec = Decimal(str(holding.get('current_value', 0) or 0)) * proportion_dec
                 unrealized_dec = Decimal(str(holding.get('unrealized_gain', 0) or 0)) * proportion_dec
-                total_assets_stock_dec += value_dec
                 total_unrealized_dec += unrealized_dec
                 currency = (holding.get('currency') or 'USD').upper()
                 if currency == 'CAD':
-                    total_assets_cad += float(value_dec)
                     unrealized_gain_cad += float(unrealized_dec)
                 elif currency == 'USD':
-                    total_assets_usd += float(value_dec)
                     unrealized_gain_usd += float(unrealized_dec)
 
-            cash_total_cad_dec = Decimal('0')
-            cash_total_usd_dec = Decimal('0')
-            for account_id in account_ids:
-                proportion_dec = get_proportion(account_id)
-                if proportion_dec <= 0:
-                    continue
-                try:
-                    snapshot = asset_service.get_asset_snapshot(account_id, as_of_date)
-                except Exception:
-                    continue
-                cash_total_cad_dec += Decimal(str(snapshot.cash_balance_cad or 0)) * proportion_dec
-                cash_total_usd_dec += Decimal(str(snapshot.cash_balance_usd or 0)) * proportion_dec
-
-            total_assets_dec = total_assets_stock_dec + cash_total_cad_dec + (cash_total_usd_dec * usd_to_cad_decimal)
-            if cash_total_cad_dec < 0:
-                cash_total_cad_dec = Decimal('0')
-            if cash_total_usd_dec < 0:
-                cash_total_usd_dec = Decimal('0')
-
-            total_assets_float = float(total_assets_dec)
-            total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec)
+            assets = self._get_report_asset_totals(
+                portfolio, account_ids, as_of_date, get_proportion, asset_service, usd_to_cad_decimal
+            )
+            total_assets_float = assets['total_assets']
+            total_assets_cad = assets['total_assets_cad']
+            total_assets_usd = assets['total_assets_usd']
+            cash_total_cad_dec = assets['cash_cad']
+            cash_total_usd_dec = assets['cash_usd']
 
             # Apply current exchange rate to realized and unrealized gains
             total_realized_with_rate = float(realized_totals['cad']) + float(realized_totals['usd']) * float(usd_to_cad_decimal)
@@ -1812,9 +1793,10 @@ class PortfolioService:
 
             total_unrealized_float = float(total_unrealized_dec)
             total_realized_float = float(realized_totals['total'])
+            income = asset_service.get_income_totals(account_ids, as_of_date, ownership_map or None)
             overall_return_percent = 0.0
             if total_assets_float > 0:
-                overall_return_percent = ((total_realized_with_rate + total_unrealized_with_rate) / total_assets_float) * 100
+                overall_return_percent = ((total_realized_with_rate + total_unrealized_with_rate + income['net_income']) / total_assets_float) * 100
 
             return {
                 'total_assets': total_assets_float,
@@ -1828,6 +1810,7 @@ class PortfolioService:
                 'unrealized_gain_usd': unrealized_gain_usd,
                 'cash_cad': float(cash_total_cad_dec),
                 'cash_usd': float(cash_total_usd_dec),
+                **income,
                 'return_percent': overall_return_percent
             }
 
@@ -1947,26 +1930,10 @@ class PortfolioService:
             monthly_realized_gain_usd_dec = current_realized_totals['usd'] - previous_realized_totals['usd']
             
             # 计算按货币分组的总资产和浮动收益（含现金）
-            total_assets_cad = 0.0
-            total_assets_usd = 0.0
             unrealized_gain_cad = 0.0
             unrealized_gain_usd = 0.0
             cash_total_cad_dec = Decimal('0')
             cash_total_usd_dec = Decimal('0')
-            total_assets_stock_dec = Decimal('0')
-            total_assets_with_cash_dec = Decimal('0')
-
-            current_holdings = month_portfolio.get('current_holdings', [])
-            for holding in current_holdings:
-                proportion_dec = get_proportion(holding.get('account_id'))
-                value_dec = Decimal(str(holding.get('current_value', 0))) * proportion_dec
-                total_assets_stock_dec += value_dec
-                if (holding.get('currency') or '').upper() == 'CAD':
-                    total_assets_cad += float(value_dec)
-                    unrealized_gain_cad += float(Decimal(str(holding.get('unrealized_gain', 0))) * proportion_dec)
-                elif (holding.get('currency') or '').upper() == 'USD':
-                    total_assets_usd += float(value_dec)
-                    unrealized_gain_usd += float(Decimal(str(holding.get('unrealized_gain', 0))) * proportion_dec)
 
             # 使用统一的 get_portfolio_summary 计算月度增量未实现收益
             month_end_portfolio = self.get_portfolio_summary(
@@ -2016,29 +1983,15 @@ class PortfolioService:
             unrealized_gain_cad = float(month_end_unrealized_cad_dec - month_start_unrealized_cad_dec)
             unrealized_gain_usd = float(month_end_unrealized_usd_dec - month_start_unrealized_usd_dec)
 
-            # 使用统一的 get_cash_balance 获取现金，禁止使用 get_asset_snapshot
-            for account_id in account_ids:
-                proportion_dec = get_proportion(account_id)
-                if proportion_dec <= 0:
-                    continue
-                try:
-                    cash_balance = asset_service.get_cash_balance(account_id, effective_end)
-                    cash_total_cad_dec += Decimal(str(cash_balance.get('cad', 0) or 0)) * proportion_dec
-                    cash_total_usd_dec += Decimal(str(cash_balance.get('usd', 0) or 0)) * proportion_dec
-                except Exception:
-                    continue
-
-            # 总资产 = 股票市值 + 现金（统一架构，不使用 snapshot.total_assets）
-            total_assets_dec = total_assets_stock_dec + cash_total_cad_dec + (cash_total_usd_dec * usd_to_cad_decimal)
-
-            if cash_total_cad_dec < 0:
-                cash_total_cad_dec = Decimal('0')
-            if cash_total_usd_dec < 0:
-                cash_total_usd_dec = Decimal('0')
-
-            total_assets_float = float(total_assets_dec)
-            total_assets_cad += float(cash_total_cad_dec)
-            total_assets_usd += float(cash_total_usd_dec)
+            assets = self._get_report_asset_totals(
+                month_portfolio, account_ids, effective_end, get_proportion,
+                asset_service, usd_to_cad_decimal
+            )
+            total_assets_float = assets['total_assets']
+            total_assets_cad = assets['total_assets_cad']
+            total_assets_usd = assets['total_assets_usd']
+            cash_total_cad_dec = assets['cash_cad']
+            cash_total_usd_dec = assets['cash_usd']
 
             # Apply current exchange rate to all monetary values
             monthly_realized_gain_with_rate = monthly_realized_gain_cad + monthly_realized_gain_usd * float(usd_to_cad_decimal)
@@ -2048,9 +2001,11 @@ class PortfolioService:
             buy_amount_with_rate = buy_cad + buy_usd * float(usd_to_cad_decimal)
             sell_amount_with_rate = sell_cad + sell_usd * float(usd_to_cad_decimal)
 
+            tax = asset_service.get_withholding_tax_totals(account_ids, effective_end, target_start, ownership_map or None)
+
             monthly_return_percent = 0.0
             if total_assets_float > 0:
-                monthly_return_percent = ((monthly_realized_gain_with_rate + monthly_unrealized_gain_with_rate) / total_assets_float) * 100
+                monthly_return_percent = ((monthly_realized_gain_with_rate + monthly_unrealized_gain_with_rate + dividends_with_rate + interest_with_rate - float(tax['total_cad'])) / total_assets_float) * 100
 
             monthly_data.append({
                 'year': target_start.year,
@@ -2060,6 +2015,8 @@ class PortfolioService:
                 'monthly_realized_gain': monthly_realized_gain_with_rate,
                 'monthly_unrealized_gain': monthly_unrealized_gain_with_rate,
                 'monthly_return_percent': monthly_return_percent,
+                'monthly_withholding_tax': float(tax['total_cad']),
+                'monthly_net_dividends': dividends_with_rate - float(tax['total_cad']),
                 'monthly_dividends': dividends_with_rate,
                 'monthly_interest': interest_with_rate,
                 'transaction_count': transaction_count,
@@ -2078,6 +2035,8 @@ class PortfolioService:
                     'buy_usd': buy_usd,
                     'sell_cad': sell_cad,
                     'sell_usd': sell_usd,
+                    'withholding_tax_cad': float(tax['cad']),
+                    'withholding_tax_usd': float(tax['usd']),
                     'dividends_cad': dividends_cad,
                     'dividends_usd': dividends_usd,
                     'interest_cad': interest_cad,
@@ -2093,6 +2052,8 @@ class PortfolioService:
                 'months_covered': len(monthly_data),
                 'total_months_gain': sum(item['monthly_realized_gain'] + item['monthly_unrealized_gain'] 
                                        for item in monthly_data),
+                'total_withholding_tax': sum(item['monthly_withholding_tax'] for item in monthly_data),
+                'total_net_dividends': sum(item['monthly_net_dividends'] for item in monthly_data),
                 'total_dividends': sum(item['monthly_dividends'] for item in monthly_data),
                 'total_interest': sum(item['monthly_interest'] for item in monthly_data),
                 'average_monthly_return': self._calculate_average_return(monthly_data, 'monthly_realized_gain', 'monthly_unrealized_gain')

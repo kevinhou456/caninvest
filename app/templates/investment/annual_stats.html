@@ -768,15 +768,15 @@ function updateAnnualTable() {
         
         // Calculate return rate: annual returns / total assets
         // Note: annual_unrealized_gain is now incremental (yearly change), not cumulative
-        const totalReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
+        const totalReturns = item.annual_realized_gain + item.annual_unrealized_gain + (item.annual_dividends - (item.annual_withholding_tax || 0)) + item.annual_interest;
         // Use total_assets as the base since it represents the investment size for the year
         const returnRate = item.total_assets > 0 ? (totalReturns / item.total_assets) * 100 : 0;
         const returnRateClass = returnRate >= 0 ? 'text-success' : 'text-danger';
 
         // Calculate combined income
-        const combinedIncome = item.annual_dividends + item.annual_interest;
-        const combinedIncomeCad = (currencyBreakdown.dividends_cad || 0) + (currencyBreakdown.interest_cad || 0);
-        const combinedIncomeUsd = (currencyBreakdown.dividends_usd || 0) + (currencyBreakdown.interest_usd || 0);
+        const combinedIncome = (item.annual_dividends - (item.annual_withholding_tax || 0)) + item.annual_interest;
+        const combinedIncomeCad = ((currencyBreakdown.dividends_cad || 0) - (currencyBreakdown.withholding_tax_cad || 0)) + (currencyBreakdown.interest_cad || 0);
+        const combinedIncomeUsd = ((currencyBreakdown.dividends_usd || 0) - (currencyBreakdown.withholding_tax_usd || 0)) + (currencyBreakdown.interest_usd || 0);
 
         // Calculate totals using annual exchange rate for display (*marked fields)
         const annualRate = item.annual_usd_cad_rate || 1.0;
@@ -845,6 +845,7 @@ function updateAnnualTable() {
             </td>
             <td class="text-info">
                 $${formatNumber(combinedIncomeTotal, 2)}*
+                <br><small class="text-muted">税前分红 $${formatNumber(item['annual_dividends'] || 0, 2)} · 预扣税 $${formatNumber(item.annual_withholding_tax || 0, 2)} · 净分红 $${formatNumber(item.annual_net_dividends || 0, 2)}</small>
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(combinedIncomeCad, 2)} | USD: $${formatNumber(combinedIncomeUsd, 2)}</small>
             </td>
             <td class="text-primary"${depositTooltip}>
@@ -880,7 +881,7 @@ function updateAnnualTable() {
             // Accumulate original values for current rate calculation in totals
             totalRealized += item.annual_realized_gain;
             totalUnrealized += item.annual_unrealized_gain;
-            totalIncome += item.annual_dividends + item.annual_interest;
+            totalIncome += (item.annual_dividends - (item.annual_withholding_tax || 0)) + item.annual_interest;
             totalDeposits += (item.deposit_amount || 0);
             totalWithdrawals += (item.withdrawal_amount || 0);
 
@@ -889,8 +890,8 @@ function updateAnnualTable() {
             totalAssetsUsd += (currencyBreakdown.total_assets_usd || 0);
             totalRealizedCad += (currencyBreakdown.realized_gain_cad || 0);
             totalRealizedUsd += (currencyBreakdown.realized_gain_usd || 0);
-            totalIncomeCad += (currencyBreakdown.dividends_cad || 0) + (currencyBreakdown.interest_cad || 0);
-            totalIncomeUsd += (currencyBreakdown.dividends_usd || 0) + (currencyBreakdown.interest_usd || 0);
+            totalIncomeCad += ((currencyBreakdown.dividends_cad || 0) - (currencyBreakdown.withholding_tax_cad || 0)) + (currencyBreakdown.interest_cad || 0);
+            totalIncomeUsd += ((currencyBreakdown.dividends_usd || 0) - (currencyBreakdown.withholding_tax_usd || 0)) + (currencyBreakdown.interest_usd || 0);
             totalDepositsCad += (currencyBreakdown.deposit_cad || 0);
             totalDepositsUsd += (currencyBreakdown.deposit_usd || 0);
             totalWithdrawalsCad += (currencyBreakdown.withdrawal_cad || 0);
@@ -901,7 +902,7 @@ function updateAnnualTable() {
 
         // Calculate totals for overall return rate (only for main rows, not detail rows or member rows)
         if (!item.is_detail_row && !item.is_member_row && !item.is_member_account_type_row && !item.is_account_row) {
-            const itemReturns = item.annual_realized_gain + item.annual_unrealized_gain + item.annual_dividends + item.annual_interest;
+            const itemReturns = item.annual_realized_gain + item.annual_unrealized_gain + (item.annual_dividends - (item.annual_withholding_tax || 0)) + item.annual_interest;
             // Use total_assets as the investment base since annual_unrealized_gain is now incremental
             totalReturnsSum += itemReturns;
             totalInvestmentSum += Math.max(item.total_assets, 0);
@@ -1036,7 +1037,7 @@ function renderYearlyHoldingsTable(year) {
         const unrealizedClass = (item.unrealized_gain || 0) >= 0 ? 'text-success' : 'text-danger';
         const realizedClass = (item.realized_gain || 0) >= 0 ? 'text-success' : 'text-danger';
         const returnClass = (item.return_rate || 0) >= 0 ? 'bg-success' : 'bg-danger';
-        const divInt = (item.dividends || 0) + (item.interest || 0);
+        const divInt = (item.dividends || 0) + (item.interest || 0) - (item.withholding_tax || 0);
         const shares = parseFloat(item.shares || 0);
         const totalCost = parseFloat(item.total_cost || 0);
         const avgCost = item.average_cost != null ? parseFloat(item.average_cost) : (shares > 0 ? totalCost / shares : 0);
@@ -1128,7 +1129,7 @@ function renderYearlyHoldingsTable(year) {
             const v  = parseFloat(item.current_value || 0);
             const ur = parseFloat(item.unrealized_gain || 0);
             const re = parseFloat(item.realized_gain || 0);
-            const di = parseFloat(item.dividends || 0) + parseFloat(item.interest || 0);
+            const di = parseFloat(item.dividends || 0) + parseFloat(item.interest || 0) - parseFloat(item.withholding_tax || 0);
             totalValue      += v;  totalUnrealized += ur;  totalRealized += re;  totalDivInt += di;
             if (isCad) { cadValue += v; cadUnrealized += ur; cadRealized += re; cadDivInt += di; }
             else        { usdValue += v; usdUnrealized += ur; usdRealized += re; usdDivInt += di; }

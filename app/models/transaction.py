@@ -15,7 +15,7 @@ class Transaction(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     trade_date = db.Column(db.Date, nullable=False, comment='交易日期')
-    type = db.Column(db.String(20), nullable=False, comment='交易类型: BUY/SELL/DIVIDEND/INTEREST/DEPOSIT/WITHDRAWAL/FEE')
+    type = db.Column(db.String(20), nullable=False, comment='交易类型: BUY/SELL/DIVIDEND/INTEREST/DEPOSIT/WITHDRAWAL/FEE/TAX')
     stock = db.Column(db.String(20), nullable=True, comment='股票代码')
     quantity = db.Column(db.Numeric(15, 4), nullable=False, comment='交易数量')
     price = db.Column(db.Numeric(15, 4), nullable=False, comment='单股价格')
@@ -67,7 +67,7 @@ class Transaction(db.Model):
                 pass
         else:
             # 股票买卖交易检查所有关键字段，但notes可以不同
-            existing = cls.query.filter_by(
+            query = cls.query.filter_by(
                 account_id=account_id,
                 trade_date=trade_date,
                 type=type,
@@ -76,7 +76,10 @@ class Transaction(db.Model):
                 price=price,
                 currency=currency,
                 fee=fee
-            ).first()
+            )
+            if type in ['DIVIDEND', 'INTEREST', 'FEE', 'TAX']:
+                query = query.filter_by(amount=amount)
+            existing = query.first()
 
             if existing:
                 pass
@@ -110,6 +113,7 @@ class Transaction(db.Model):
             'stock': self.stock,
             'quantity': float(self.quantity),
             'price': float(self.price),
+            'amount': float(self.amount) if self.amount is not None else None,
             'currency': self.currency,
             'fee': float(self.fee),
             'account_id': self.account_id,

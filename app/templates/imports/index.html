@@ -479,6 +479,19 @@ Trade Date,Action,Ticker,Qty,Unit Price,Commission<br>
                 <!-- CSV预览 -->
                 <div class="d-flex align-items-center justify-content-between mb-2">
                     <h6 class="mb-0">{{ _('CSV Preview (first 10 rows)') }}:</h6>
+                    <div class="mb-3">
+                        <label for="taxAmountMode" class="form-label">预扣税金额方向</label>
+                        <select id="taxAmountMode" class="form-select">
+                            <option value="deduction">扣税为正数，退税为负数</option>
+                            <option value="cash_flow">现金流水：扣税为负数，退税为正数</option>
+                        </select>
+                        <small class="text-muted">net_cash_amount 列自动按现金流水方向处理。TAX 不计为提现。</small>
+                        <div class="form-check mt-2">
+                            <input id="dividendsAreNet" class="form-check-input" type="checkbox">
+                            <label for="dividendsAreNet" class="form-check-label">CSV 分红金额已扣税（默认按税前金额导入）</label>
+                        </div>
+                        <small class="text-muted">税后分红需与同日、同股票、同币种的税款明确对应；无法匹配将停止导入。请先核对券商的金额定义。</small>
+                    </div>
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="overwriteRangeCheckbox" checked>
                         <label class="form-check-label" for="overwriteRangeCheckbox">
@@ -815,9 +828,9 @@ function buildColumnMappingTable(csvColumns, suggestedMapping) {
     const requiredFields = [
         { field: 'date', name: '{{ _("Date") }}', required: true },
         { field: 'type', name: '{{ _("Transaction Type") }}', required: true },
-        { field: 'symbol', name: '{{ _("Stock Symbol") }}', required: true },
-        { field: 'quantity', name: '{{ _("Quantity") }}', required: true },
-        { field: 'price', name: '{{ _("Price") }}', required: true },
+        { field: 'symbol', name: '{{ _("Stock Symbol") }}', required: false },
+        { field: 'quantity', name: '{{ _("Quantity") }}', required: false },
+        { field: 'price', name: '{{ _("Price") }}', required: false },
         { field: 'currency', name: '{{ _("Currency") }}', required: true },
         { field: 'amount', name: '{{ _("Amount") }}', required: false }, // Updated with amount field
         { field: 'fee', name: '{{ _("Fee/Commission") }}', required: false },
@@ -978,7 +991,7 @@ function importWithMapping() {
         }
         
         // 检查必需字段
-        const requiredFields = ['date', 'type', 'symbol', 'quantity', 'price', 'currency'];
+        const requiredFields = ['date', 'type', 'currency'];
         if (requiredFields.includes(field) && !csvColumn) {
             hasRequiredFields = false;
             missingFields.push(field);
@@ -1015,6 +1028,8 @@ function importWithMapping() {
         format_name: document.getElementById('formatName').value,
         column_mappings: mappings,
         session_id: csvPreviewData.session_id,
+        tax_amount_mode: document.getElementById('taxAmountMode').value,
+        dividends_are_net: document.getElementById('dividendsAreNet').checked,
         overwrite_range: document.getElementById('overwriteRangeCheckbox')?.checked ?? false,
         extend_to_full_month: (document.getElementById('overwriteRangeCheckbox')?.checked ?? false) &&
             (document.getElementById('extendToFullMonthCheckbox')?.checked ?? false)
@@ -1042,12 +1057,18 @@ function importWithMapping() {
             if (data.skipped_count && data.skipped_count > 0) {
                 message += `\n{{ _("Skipped (duplicates): ") }}${data.skipped_count}`;
             }
+            if (data.ignored_count) {
+                message += `\n已忽略记录（SecurityTransfer / ReturnOfCapital）：${data.ignored_count}`;
+            }
             
             // 如果有矫正的股票代码，显示矫正数量
             if (data.corrected_count && data.corrected_count > 0) {
                 message += `\n{{ _("Stock symbols corrected: ") }}${data.corrected_count}`;
             }
             
+            if (data.errors && data.errors.length) {
+                message += '\n' + data.errors.join('\n');
+            }
             alert(message);
             
             // 如果返回了重定向URL，则跳转到对应账户的交易记录页面
@@ -1057,7 +1078,8 @@ function importWithMapping() {
                 location.reload();
             }
         } else {
-            alert('{{ _("Error importing CSV: ") }}' + (data.error || '{{ _("Unknown error") }}'));
+            const details = data.errors && data.errors.length ? '\n' + data.errors.join('\n') : '';
+            alert('{{ _("Error importing CSV: ") }}' + (data.error || '{{ _("Unknown error") }}') + details);
         }
     })
     .catch(error => {

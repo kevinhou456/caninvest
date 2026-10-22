@@ -292,7 +292,7 @@ function updateMonthlyPerformanceChart() {
     const assets = chartData.map(item => item.total_assets || 0);
     const realizedGains = chartData.map(item => item.monthly_realized_gain || 0);
     const unrealizedGains = chartData.map(item => item.monthly_unrealized_gain || 0);
-    const dividendsAndInterest = chartData.map(item => (item.monthly_dividends || 0) + (item.monthly_interest || 0));
+    const dividendsAndInterest = chartData.map(item => ((item.monthly_dividends - (item.monthly_withholding_tax || 0)) || 0) + (item.monthly_interest || 0));
 
     monthlyPerformanceChart = new Chart(ctx, {
         type: 'bar',
@@ -443,7 +443,7 @@ function updateMonthlyPerformanceChart() {
                                 const label = dp.dataset.label || '';
                                 let valueText = '$' + (dp.parsed.y || 0).toLocaleString();
                                 if (label === '{{ _("Dividends & Interest") }}') {
-                                    const dividends = item.monthly_dividends || 0;
+                                    const dividends = (item.monthly_dividends - (item.monthly_withholding_tax || 0)) || 0;
                                     const interest = item.monthly_interest || 0;
                                     valueText = '$' + (dp.parsed.y || 0).toLocaleString() +
                                         ` ({{ _("Dividends") }}: $${dividends.toLocaleString()}, {{ _("Interest") }}: $${interest.toLocaleString()})`;
@@ -549,7 +549,8 @@ function updateMonthlyTable(currentTotals) {
                 ${formatNumber(returnPercent, 2, true)}%
             </td>
             <td class="text-info">
-                $${formatNumber(item.monthly_dividends, 2)}
+                $${formatNumber((item.monthly_dividends - (item.monthly_withholding_tax || 0)), 2)}
+                <br><small class="text-muted">税前分红 $${formatNumber(item['monthly_dividends'] || 0, 2)} · 预扣税 $${formatNumber(item.monthly_withholding_tax || 0, 2)} · 净分红 $${formatNumber(item.monthly_net_dividends || 0, 2)}</small>
                 <br><small class="text-muted currency-breakdown">CAD: $${formatNumber(currencyBreakdown.dividends_cad || 0, 2)} | USD: $${formatNumber(currencyBreakdown.dividends_usd || 0, 2)}</small>
             </td>
             <td class="text-info">
@@ -574,7 +575,7 @@ function updateMonthlyTable(currentTotals) {
         }
         totalRealized += item.monthly_realized_gain;
         totalUnrealized += item.monthly_unrealized_gain;
-        totalDividends += item.monthly_dividends;
+        totalDividends += (item.monthly_dividends - (item.monthly_withholding_tax || 0));
         totalInterest += item.monthly_interest;
         totalTransactions += item.transaction_count;
         totalBuy += item.buy_amount;
@@ -585,8 +586,8 @@ function updateMonthlyTable(currentTotals) {
         totalRealizedUsd += Number(currencyBreakdown.realized_gain_usd || 0);
         totalUnrealizedCad += Number(currencyBreakdown.unrealized_gain_cad || 0);
         totalUnrealizedUsd += Number(currencyBreakdown.unrealized_gain_usd || 0);
-        totalDividendsCad += Number(currencyBreakdown.dividends_cad || 0);
-        totalDividendsUsd += Number(currencyBreakdown.dividends_usd || 0);
+        totalDividendsCad += Number((currencyBreakdown.dividends_cad || 0) - (currencyBreakdown.withholding_tax_cad || 0));
+        totalDividendsUsd += Number((currencyBreakdown.dividends_usd || 0) - (currencyBreakdown.withholding_tax_usd || 0));
         totalInterestCad += Number(currencyBreakdown.interest_cad || 0);
         totalInterestUsd += Number(currencyBreakdown.interest_usd || 0);
         totalBuyCad += Number(currencyBreakdown.buy_cad || 0);

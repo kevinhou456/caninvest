@@ -187,7 +187,7 @@ def _normalize_cache_params(params: dict) -> dict:
 
 
 # 每次修改 portfolio_service 计算逻辑时手动递增，使所有旧缓存自动失效
-_CACHE_SCHEMA_VERSION = 15
+_CACHE_SCHEMA_VERSION = 17
 
 
 def _build_analysis_cache_key(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],
@@ -276,23 +276,26 @@ def _is_analysis_cache_fresh(cache: ReportAnalysisCache, account_ids: List[int],
     return True
 
 
-def invalidate_report_cache_for_account(account_id: int):
+def invalidate_report_cache_for_account(account_id: int, *, commit: bool = True):
     """删除所有包含指定账户的 ReportAnalysisCache 记录。
     用于交易记录被删除时（max updated_at 不会变化，无法靠时间戳自动失效）。
     account_ids_json 格式为排好序的整数列表，如 [1,3,7]，匹配方式：
     完整匹配 [id]、开头 [id,、结尾 ,id]、中间 ,id,
     """
     aid = str(account_id)
+    # json.dumps normally inserts spaces; also support older compact payloads.
+    account_ids = func.replace(ReportAnalysisCache.account_ids_json, ' ', '')
     ReportAnalysisCache.query.filter(
         db.or_(
             ReportAnalysisCache.account_id == account_id,
-            ReportAnalysisCache.account_ids_json == f'[{aid}]',
-            ReportAnalysisCache.account_ids_json.like(f'[{aid},%'),
-            ReportAnalysisCache.account_ids_json.like(f'%,{aid}]'),
-            ReportAnalysisCache.account_ids_json.like(f'%,{aid},%'),
+            account_ids == f'[{aid}]',
+            account_ids.like(f'[{aid},%'),
+            account_ids.like(f'%,{aid}]'),
+            account_ids.like(f'%,{aid},%'),
         )
     ).delete(synchronize_session=False)
-    db.session.commit()
+    if commit:
+        db.session.commit()
 
 
 def _dump_cache_payload(payload: dict) -> str:

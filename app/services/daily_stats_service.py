@@ -347,9 +347,11 @@ class DailyStatsService:
                 cash_usd += Decimal(str(cash_balance.get('usd', 0) or 0)) * proportion
                 cash_total += Decimal(str(cash_balance.get('total_cad', 0) or 0)) * proportion
 
+            income = self.asset_service.get_income_totals(account_ids, target_date, ownership_map)
+
             # Total assets = stock value + cash total
             total_assets = stock_value_total + cash_total
-            total_return = realized_gain_total + unrealized_gain_total
+            total_return = realized_gain_total + unrealized_gain_total + Decimal(str(income['net_income']))
 
             # Format for Daily Stats service
             combined_data = {

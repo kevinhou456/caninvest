@@ -62,6 +62,7 @@
                                     <option value="DEPOSIT">{{ _('Deposit') }}</option>
                                     <option value="WITHDRAWAL">{{ _('Withdrawal') }}</option>
                                     <option value="DIVIDEND">{{ _('Dividend') }}</option>
+                                    <option value="TAX">分红预扣税 / 退税</option>
                                     <option value="INTEREST">{{ _('Interest') }}</option>
                                 </optgroup>
                             </select>
@@ -133,9 +134,16 @@ function updateModalSummary() {
     const fee = parseFloat(document.getElementById('modal_transaction_fee').value) || 0;
     const type = document.getElementById('modal_transaction_type').value;
     const currency = document.getElementById('modal_currency').value;
+    if (type === 'TAX') {
+        const amount = Number(document.getElementById('modal_amount').value || 0);
+        document.getElementById('modal-summary-content').textContent =
+            (amount < 0 ? '预扣税退回：' : '分红预扣税：') + currency + ' ' + Math.abs(amount).toFixed(2);
+        return;
+    }
+
     
     // For cash transactions, use the amount field
-    if (['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST'].includes(type)) {
+    if (['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST', 'TAX'].includes(type)) {
         const amountValue = parseFloat(document.getElementById('modal_amount').value) || 0;
         if (amountValue > 0) {
             quantity = amountValue;
@@ -313,9 +321,11 @@ function handleTransactionTypeChange() {
     
     // Define transaction type categories
     const needsStockSymbol = ['BUY', 'SELL', 'DIVIDEND', 'INTEREST'].includes(transactionType);
+    const taxAmount = document.getElementById('modal_amount');
+    if (transactionType === 'TAX') taxAmount.removeAttribute('min'); else taxAmount.min = '0';
     const isStockTransaction = ['BUY', 'SELL'].includes(transactionType);
     const isCashTransaction = ['DEPOSIT', 'WITHDRAWAL'].includes(transactionType);
-    const isDividendOrInterest = ['DIVIDEND', 'INTEREST'].includes(transactionType);
+    const isDividendOrInterest = ['DIVIDEND', 'INTEREST', 'TAX'].includes(transactionType);
     
     if (isStockTransaction) {
         // Show stock symbol and quantity/price for BUY/SELL transactions
@@ -340,8 +350,8 @@ function handleTransactionTypeChange() {
         // For DIVIDEND/INTEREST: show stock symbol and amount field, quantity/price are optional
         stockSymbolSection.style.display = 'block';
         stockInfoSection.style.display = 'block';
-        stockSymbolInput.required = true;
-        stockRequired.style.display = 'inline';
+        stockSymbolInput.required = transactionType !== 'TAX';
+        stockRequired.style.display = transactionType === 'TAX' ? 'none' : 'inline';
         
         // Show all fields but make quantity/price optional
         quantitySection.style.display = 'block';
@@ -362,7 +372,9 @@ function handleTransactionTypeChange() {
         quantityLabel.textContent = '{{ _("Shares (optional)") }}';
         priceLabel.textContent = '{{ _("Per Share (optional)") }}';
         
-        if (transactionType === 'DIVIDEND') {
+        if (transactionType === 'TAX') {
+            amountLabel.textContent = '预扣税金额（正数扣税，负数退税）';
+        } else if (transactionType === 'DIVIDEND') {
             amountLabel.textContent = '{{ _("Dividend Amount") }}';
             amountInput.placeholder = '{{ _("Total dividend received") }}';
         } else if (transactionType === 'INTEREST') {

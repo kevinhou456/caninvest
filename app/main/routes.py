@@ -1960,6 +1960,8 @@ def save_transaction_record(transaction_id=None, account_id=None, transaction_ty
                 transaction.fee = fee
             if trade_date is not None:
                 transaction.trade_date = trade_date
+            if amount is not None:
+                transaction.amount = amount
             if notes is not None:
                 transaction.notes = notes
         
@@ -1985,7 +1987,10 @@ def save_transaction_record(transaction_id=None, account_id=None, transaction_ty
         # 失效该账户从交易日起的缓存
         try:
             from app.services.performance_cache_service import performance_cache_service
-            performance_cache_service.invalidate_from_date(transaction.account_id, transaction.trade_date)
+            if transaction.type == 'TAX':
+                performance_cache_service.invalidate_account(transaction.account_id)
+            else:
+                performance_cache_service.invalidate_from_date(transaction.account_id, transaction.trade_date)
         except Exception:
             pass  # 缓存失效失败不影响主流程
 
@@ -2037,6 +2042,8 @@ def create_transaction():
                 }.get(type, type)
                 flash(f'{transaction_type_name}交易需要股票代码', 'error')
                 return redirect(url_for('main.transactions', account_id=account_id))
+        if type == 'TAX':
+            stock_symbol = request.form.get('stock_symbol', '').strip().upper() or None
         # DEPOSIT, WITHDRAWAL, FEE 等现金交易不需要股票代码
         
         # 验证必填字段
@@ -2045,7 +2052,7 @@ def create_transaction():
             return redirect(url_for('main.transactions', account_id=account_id))
         
         # 对于现金交易，验证amount字段
-        if type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST']:
+        if type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST', 'TAX']:
             if not amount:
                 flash(_('Amount is required for this transaction type'), 'error')
                 return redirect(url_for('main.transactions', account_id=account_id))
@@ -2064,7 +2071,7 @@ def create_transaction():
             fee = float(fee) if fee else 0
             
             # 根据交易类型处理数据
-            if type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST']:
+            if type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST', 'TAX']:
                 # 现金交易使用amount字段
                 amount_value = float(amount) if amount else 0
                 # quantity和price保持原值，如果为空则设为0（因为数据库不允许NULL）
@@ -3092,7 +3099,10 @@ def delete_transaction(transaction_id):
 
         try:
             from app.services.performance_cache_service import performance_cache_service
-            performance_cache_service.invalidate_from_date(acct_id, trade_date)
+            if transaction.type == 'TAX':
+                performance_cache_service.invalidate_account(acct_id)
+            else:
+                performance_cache_service.invalidate_from_date(acct_id, trade_date)
         except Exception:
             pass
 
@@ -3165,6 +3175,7 @@ def update_transaction(transaction_id):
                     }), 400
 
         # 更新字段
+        old_type = transaction.type
         old_trade_date = transaction.trade_date
         old_account_id = transaction.account_id
         if 'trade_date' in data:
@@ -3193,7 +3204,11 @@ def update_transaction(transaction_id):
             from app.services.performance_cache_service import performance_cache_service
             # 失效旧日期起（日期可能变化，取两者较早的）
             invalidate_date = min(old_trade_date, transaction.trade_date)
-            performance_cache_service.invalidate_from_date(old_account_id, invalidate_date)
+            if old_type == 'TAX' or transaction.type == 'TAX':
+                performance_cache_service.invalidate_account(old_account_id)
+                performance_cache_service.invalidate_account(transaction.account_id)
+            else:
+                performance_cache_service.invalidate_from_date(old_account_id, invalidate_date)
             # 若账户也变了，同时失效新账户
             if transaction.account_id != old_account_id:
                 performance_cache_service.invalidate_from_date(transaction.account_id, transaction.trade_date)

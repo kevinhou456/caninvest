@@ -302,6 +302,8 @@ class AssetValuationService:
                             'unrealized_gain_percent': float((unrealized_gain / percent_base_cost * 100)) if percent_base_cost > 0 else 0,
                             'realized_gain': acc_data['realized_gain'],
                             'realized_gain_cad': acc_data['realized_gain'] * float(exchange_rate) if currency == 'USD' else acc_data['realized_gain'],
+                            'withholding_tax': dividend_interest['withholding_tax'],
+                            'net_dividends': dividend_interest['net_dividends'],
                             'dividends': dividend_interest['dividend_received'],
                             'interest': dividend_interest['interest_received'],
                             'dividend_received': dividend_interest['dividend_received'],
@@ -353,6 +355,8 @@ class AssetValuationService:
                     'total_sold_value': total_sold_value,
                     'realized_gain': total_realized_gain,
                     'realized_gain_percent': float((total_realized_gain / total_bought_value * 100)) if total_bought_value > 0 else 0,
+                    'withholding_tax': sum(a['dividend_interest']['withholding_tax'] for a in accounts_data.values()),
+                    'net_dividends': sum(a['dividend_interest']['net_dividends'] for a in accounts_data.values()),
                     'dividends': total_dividends,
                     'interest': total_interest,
                     'dividend_received': total_dividends,
@@ -402,7 +406,11 @@ class AssetValuationService:
         dividend_received_cad = dividend_received * float(exchange_rate) if currency == 'USD' else dividend_received
         interest_received_cad = interest_received * float(exchange_rate) if currency == 'USD' else interest_received
 
+        tax = self.get_withholding_tax_totals([account_id], target_date, symbol=symbol)
+        native_tax = float(tax[currency.lower()])
         return {
+            'withholding_tax': native_tax,
+            'net_dividends': dividend_received - native_tax,
             'dividend_received': dividend_received,
             'interest_received': interest_received,
             'dividend_received_cad': dividend_received_cad,
@@ -560,7 +568,9 @@ class AssetValuationService:
                         'total_bought_value': float(bought_total),
                         'total_sold_value': float(sold_total),
                         'realized_gain': float(realized_gain),
-                        'dividends': dividend_interest['dividend_received'],  # 使用计算得到的分红
+                        'withholding_tax': dividend_interest['withholding_tax'],
+                            'net_dividends': dividend_interest['net_dividends'],
+                            'dividends': dividend_interest['dividend_received'],  # 使用计算得到的分红
                         'interest': dividend_interest['interest_received'],   # 使用计算得到的利息
                         'dividend_received': dividend_interest['dividend_received'],  # 保持兼容性
                         'interest_received': dividend_interest['interest_received'],   # 保持兼容性
@@ -723,7 +733,8 @@ class AssetValuationService:
 
         # 计算总值
         total_assets = total_stock_value + total_cash_value
-        total_return = total_realized_gain + total_unrealized_gain + total_dividends + total_interest
+        tax = self.get_withholding_tax_totals(account_ids, target_date, ownership_map=ownership_map)
+        total_return = total_realized_gain + total_unrealized_gain + total_dividends + total_interest - tax['total_cad']
 
         # 计算总回报率
         total_return_rate = float(total_return / total_deposits * 100) if total_deposits > 0 else 0.0
@@ -744,8 +755,8 @@ class AssetValuationService:
             },
             'total_return': {
                 'cad': float(total_return),
-                'cad_only': float(realized_gain_cad + unrealized_gain_cad + dividends_cad + interest_cad),  # CAD币种总回报
-                'usd_only': float(realized_gain_usd + unrealized_gain_usd + dividends_usd + interest_usd),  # USD币种总回报
+                'cad_only': float(realized_gain_cad + unrealized_gain_cad + dividends_cad + interest_cad - tax['cad']),  # CAD币种总回报
+                'usd_only': float(realized_gain_usd + unrealized_gain_usd + dividends_usd + interest_usd - tax['usd']),  # USD币种总回报
                 'realized_gain': float(total_realized_gain),
                 'unrealized_gain': float(total_unrealized_gain),
                 'dividends': float(total_dividends),
@@ -761,6 +772,10 @@ class AssetValuationService:
                 'cad_only': float(unrealized_gain_cad),
                 'usd_only': float(unrealized_gain_usd)
             },
+            'withholding_tax': {'cad': float(tax['total_cad']), 'cad_only': float(tax['cad']), 'usd_only': float(tax['usd'])},
+            'net_dividends': {'cad': float(total_dividends - tax['total_cad']),
+                              'cad_only': float(dividends_cad - tax['cad']),
+                              'usd_only': float(dividends_usd - tax['usd'])},
             'dividends': {
                 'cad': float(total_dividends),
                 'cad_only': float(dividends_cad),
@@ -1001,6 +1016,41 @@ class AssetValuationService:
             'current_shares': current_shares
         }
     
+    def get_income_totals(self, account_ids, target_date, ownership_map=None):
+        """Cumulative gross income and net income, using the shared income/tax calculators."""
+        dividends = {'cad': Decimal('0'), 'usd': Decimal('0')}
+        interest = {'cad': Decimal('0'), 'usd': Decimal('0')}
+        for account_id in account_ids:
+            proportion = self._get_account_proportion(account_id, ownership_map)
+            if proportion <= 0:
+                continue
+            income = self._calculate_dividend_interest_by_currency(account_id, target_date)
+            for currency in dividends:
+                dividends[currency] += income['dividends_' + currency] * proportion
+                interest[currency] += income['interest_' + currency] * proportion
+        tax = self.get_withholding_tax_totals(account_ids, target_date, ownership_map=ownership_map)
+        rate = Decimal(str(self.currency_service.get_current_rate('USD', 'CAD')))
+        gross = dividends['cad'] + dividends['usd'] * rate
+        return {'gross_dividends': float(gross), 'withholding_tax': float(tax['total_cad']),
+                'net_dividends': float(gross - tax['total_cad']),
+                'net_income': float(gross + interest['cad'] + interest['usd'] * rate - tax['total_cad'])}
+
+    def get_withholding_tax_totals(self, account_ids, target_date, start_date=None,
+                                   ownership_map=None, symbol=None):
+        """Signed withheld tax: positive deductions, negative refunds, never external flows."""
+        query = Transaction.query.filter(Transaction.account_id.in_(account_ids),
+                                         Transaction.type == 'TAX', Transaction.trade_date <= target_date)
+        if start_date is not None:
+            query = query.filter(Transaction.trade_date >= start_date)
+        if symbol is not None:
+            query = query.filter(Transaction.stock == symbol)
+        totals = {'cad': Decimal('0'), 'usd': Decimal('0')}
+        for tx in query.all():
+            proportion = self._get_account_proportion(tx.account_id, ownership_map)
+            totals[(tx.currency or 'USD').lower()] += Decimal(str(tx.amount or 0)) * proportion
+        rate = Decimal(str(self.currency_service.get_current_rate('USD', 'CAD')))
+        return dict(totals, total_cad=totals['cad'] + totals['usd'] * rate)
+
     def _calculate_dividend_interest_by_currency(self, account_id: int, target_date: date) -> Dict:
         """
         按币种计算股息和利息
@@ -1421,7 +1471,7 @@ class AssetValuationService:
         transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.trade_date <= target_date,
-            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
+            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'FEE', 'TAX'])
         ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
 
         # 从零开始累计计算
@@ -1453,7 +1503,7 @@ class AssetValuationService:
         transactions = Transaction.query.filter(
             Transaction.account_id == account_id,
             Transaction.trade_date > target_date,
-            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST'])
+            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'FEE', 'TAX'])
         ).order_by(Transaction.trade_date.desc(), Transaction.id.desc()).all()  # 按时间倒序，从最近开始倒推
 
         cad_balance = current_cad
@@ -1469,54 +1519,9 @@ class AssetValuationService:
         return cad_balance, usd_balance
 
     def _reverse_transaction_impact(self, cad: Decimal, usd: Decimal, transaction: Transaction) -> tuple[Decimal, Decimal]:
-        """倒推交易对现金的影响（与_apply_transaction_impact相反的操作）"""
-        currency = transaction.currency or 'USD'
-
-        if transaction.type == 'DEPOSIT':
-            # 倒推存入：减少现金
-            amount = Decimal(str(transaction.amount or 0))
-            if currency == 'CAD':
-                cad -= amount
-            else:
-                usd -= amount
-
-        elif transaction.type in ['WITHDRAW', 'WITHDRAWAL']:
-            # 倒推取出：增加现金
-            amount = Decimal(str(transaction.amount or 0))
-            if currency == 'CAD':
-                cad += amount
-            else:
-                usd += amount
-
-        elif transaction.type == 'BUY':
-            # 倒推买入：增加现金（因为当时减少了现金）
-            quantity = Decimal(str(transaction.quantity or 0))
-            price = Decimal(str(transaction.price or 0))
-            total_cost = quantity * price + Decimal(str(transaction.fee or 0))
-            if currency == 'CAD':
-                cad += total_cost
-            else:
-                usd += total_cost
-
-        elif transaction.type == 'SELL':
-            # 倒推卖出：减少现金（因为当时增加了现金）
-            quantity = Decimal(str(transaction.quantity or 0))
-            price = Decimal(str(transaction.price or 0))
-            net_proceeds = quantity * price - Decimal(str(transaction.fee or 0))
-            if currency == 'CAD':
-                cad -= net_proceeds
-            else:
-                usd -= net_proceeds
-
-        elif transaction.type == 'DIVIDEND' or transaction.type == 'INTEREST':
-            # 倒推分红/利息：减少现金
-            amount = Decimal(str(transaction.amount or 0))
-            if currency == 'CAD':
-                cad -= amount
-            else:
-                usd -= amount
-
-        return cad, usd
+        """Reverse the same cash deltas used by forward processing."""
+        cad_delta, usd_delta = self._apply_transaction_impact(Decimal('0'), Decimal('0'), transaction)
+        return cad - cad_delta, usd - usd_delta
 
     def _calculate_unrealized_gain_for_account(self, account_id: int, target_date: date) -> Decimal:
         """计算账户的浮动盈亏（市值 - 成本基础）"""
@@ -1704,7 +1709,7 @@ class AssetValuationService:
             else:
                 usd += amount
                 
-        elif transaction.type in ['WITHDRAW', 'WITHDRAWAL']:
+        elif transaction.type in ['WITHDRAW', 'WITHDRAWAL', 'FEE', 'TAX']:
             # 取出：减少现金
             amount = Decimal(str(transaction.amount or 0))
             if currency == 'CAD':

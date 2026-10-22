@@ -80,7 +80,7 @@
                         </div>
                     </li>
                     <li><hr class="dropdown-divider my-1"></li>
-                    {% set type_options = [('BUY','Buy','success'),('SELL','Sell','danger'),('DIVIDEND','分红','primary'),('INTEREST','利息','info'),('DEPOSIT','存入','secondary'),('WITHDRAWAL','取出','warning'),('FEE','费用','dark')] %}
+                    {% set type_options = [('BUY','Buy','success'),('SELL','Sell','danger'),('DIVIDEND','分红','primary'),('INTEREST','利息','info'),('DEPOSIT','存入','secondary'),('WITHDRAWAL','取出','warning'),('FEE','费用','dark'),('TAX','分红预扣税','warning')] %}
                     {% for val, label, color in type_options %}
                     <li>
                         <div class="form-check">
@@ -137,6 +137,8 @@
                         <span class="badge bg-secondary">存入</span>
                     {% elif transaction.type == 'WITHDRAWAL' %}
                         <span class="badge bg-warning">取出</span>
+                    {% elif transaction.type == 'TAX' %}
+                        <span class="badge bg-warning text-dark">{{ '预扣税退回' if transaction.amount and transaction.amount < 0 else '分红预扣税' }}</span>
                     {% elif transaction.type == 'FEE' %}
                         <span class="badge bg-dark">费用</span>
                     {% else %}
@@ -304,7 +306,7 @@ function deleteTransaction(transactionId) {
 function handleEditTypeChange() {
     const type = document.getElementById('editType').value;
     const isStock      = ['BUY', 'SELL'].includes(type);
-    const isIncomeStock = ['DIVIDEND', 'INTEREST'].includes(type);
+    const isIncomeStock = ['DIVIDEND', 'INTEREST', 'TAX'].includes(type);
     const isCash       = ['DEPOSIT', 'WITHDRAWAL', 'FEE'].includes(type);
 
     // 股票代码
@@ -312,7 +314,7 @@ function handleEditTypeChange() {
     const stockReq = document.getElementById('editStockRequired');
     const stockInput = document.getElementById('editStock');
     stockSec.style.display = (isStock || isIncomeStock) ? '' : 'none';
-    stockInput.required = isStock || isIncomeStock;
+    stockInput.required = isStock || (isIncomeStock && type !== 'TAX');
     if (isCash) stockInput.value = '';
 
     // 数量 / 单价
@@ -344,7 +346,8 @@ function handleEditTypeChange() {
     const amtLabel = document.getElementById('editAmountLabel');
     amtSec.style.display = (isIncomeStock || isCash) ? '' : 'none';
     amtInput.required    = (isIncomeStock || isCash);
-    const amtLabels = {DIVIDEND:'分红金额', INTEREST:'利息金额', DEPOSIT:'存入金额', WITHDRAWAL:'取出金额', FEE:'费用金额'};
+    const amtLabels = {DIVIDEND:'分红金额', INTEREST:'利息金额', DEPOSIT:'存入金额', WITHDRAWAL:'取出金额', FEE:'费用金额', TAX:'预扣税金额（正数扣税，负数退税）'};
+    if (type === 'TAX') amtInput.removeAttribute('min'); else amtInput.min = '0';
     if (amtLabels[type]) amtLabel.textContent = amtLabels[type];
 }
 
@@ -443,7 +446,7 @@ function clearStockFilter() {
 }
 
 // ── 类型多选筛选 ──────────────────────────────────────
-const TYPE_LABELS = {BUY:'Buy', SELL:'Sell', DIVIDEND:'分红', INTEREST:'利息', DEPOSIT:'存入', WITHDRAWAL:'取出', FEE:'费用'};
+const TYPE_LABELS = {BUY:'Buy', SELL:'Sell', DIVIDEND:'分红', INTEREST:'利息', DEPOSIT:'存入', WITHDRAWAL:'取出', FEE:'费用', TAX:'分红预扣税'};
 
 function initTypeFilter() {
     const activeTypes = new Set(
@@ -546,6 +549,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <option value="DEPOSIT">存入</option>
                                     <option value="WITHDRAWAL">取出</option>
                                     <option value="FEE">费用</option>
+                                    <option value="TAX">分红预扣税 / 退税</option>
                                 </optgroup>
                             </select>
                         </div>

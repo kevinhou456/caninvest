@@ -3,6 +3,7 @@
 """
 
 import io
+import math
 import json
 import os
 import uuid
@@ -604,9 +605,37 @@ def import_csv_with_mapping():
             column_mappings = wealthsimple_mapping
         
         # 处理数据
-        transactions_data, processing_errors = process_csv_with_mapping(df, column_mappings)
+        ignored_rows = []
+        transactions_data, processing_errors = process_csv_with_mapping(
+            df, column_mappings, tax_cash_flow=data.get('tax_amount_mode') == 'cash_flow',
+            ignored_rows=ignored_rows,
+        )
+        if data.get('dividends_are_net'):
+            transactions_data, net_errors = _restore_gross_dividends(transactions_data)
+            processing_errors.extend(net_errors)
+            if processing_errors:
+                return jsonify({'success': False, 'error': _('Cannot safely match net dividends and tax rows'),
+                                'errors': processing_errors[:10]}), 400
+
+        if overwrite_range and processing_errors:
+            return jsonify({
+                'success': False,
+                'error': _('Overwrite cancelled: CSV contains invalid rows'),
+                'failed_count': len(processing_errors),
+                'errors': processing_errors[:10],
+                'deleted_count': 0,
+            }), 400
         
         if not transactions_data:
+            if ignored_rows and not processing_errors:
+                return jsonify({
+                    'success': True,
+                    'message': _('CSV import completed'),
+                    'created_count': 0, 'failed_count': 0, 'skipped_count': 0,
+                    'corrected_count': 0, 'deleted_count': 0,
+                    'ignored_count': len(ignored_rows),
+                    'errors': [],
+                })
             error_msg = _('No valid transactions found in CSV file')
             if processing_errors:
                 error_msg += f". {_('Sample errors')}: " + "; ".join(processing_errors[:3])
@@ -637,15 +666,16 @@ def import_csv_with_mapping():
                     ).delete(synchronize_session=False)
                     db.session.flush()
                 except Exception as exc:
+                    db.session.rollback()
                     current_app.logger.exception("Failed to overwrite transactions in range", exc_info=exc)
                     return jsonify({'success': False, 'error': _('Failed to clear existing transactions before import')}), 500
         
         # 创建交易记录
         created_count = 0
-        failed_count = 0
+        failed_count = len(processing_errors)
         skipped_count = 0
         corrected_count = 0
-        errors = []
+        errors = list(processing_errors)
 
         
         for row_data in transactions_data:
@@ -728,6 +758,24 @@ def import_csv_with_mapping():
                 failed_count += 1
                 errors.append(f"Row {row_data.get('row_num', '?')}: {str(e)}")
         
+        if overwrite_range and failed_count:
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': _('Overwrite cancelled: some transactions could not be imported'),
+                'failed_count': failed_count,
+                'errors': errors[:10],
+                'deleted_count': 0,
+                'created_count': 0,
+            }), 400
+
+        if created_count or deleted_count:
+            # Cash is reconstructed backwards: changes can affect dates before the imported rows.
+            from app.models.performance_daily_cache import PerformanceDailyCache
+            from app.api.reports import invalidate_report_cache_for_account
+            PerformanceDailyCache.query.filter_by(account_id=account_id).delete(synchronize_session=False)
+            invalidate_report_cache_for_account(account_id, commit=False)
+
         db.session.commit()
         
         # 保存格式映射以备将来使用
@@ -764,13 +812,42 @@ def import_csv_with_mapping():
             'skipped_count': skipped_count,  # 添加跳过的重复记录数量
             'corrected_count': corrected_count,  # 添加矫正的股票代码数量
             'deleted_count': deleted_count,
+            'ignored_count': len(ignored_rows),
             'errors': errors[:10],  # 最多返回10个错误
             'redirect_url': f'/transactions?account_id={account_id}'  # 添加重定向URL
         })
         
     except Exception as e:
+        db.session.rollback()
         current_app.logger.exception('import_csv_with_mapping failed')
         return jsonify({'success': False, 'error': f'Import error: {str(e)}'}), 500
+
+def _restore_gross_dividends(rows):
+    """Net-dividend exports need one dividend per date/symbol/currency tax group."""
+    from collections import defaultdict
+    from decimal import Decimal
+    groups = defaultdict(list)
+    for row in rows:
+        if row['type'] in {'DIVIDEND', 'TAX'}:
+            groups[(row['trade_date'], row['stock'], row['currency'])].append(row)
+    errors = []
+    for key, group in groups.items():
+        taxes = [row for row in group if row['type'] == 'TAX']
+        dividends = [row for row in group if row['type'] == 'DIVIDEND']
+        if not taxes:
+            continue
+        if len(dividends) != 1:
+            errors.append(f"Cannot match tax to exactly one net dividend: {key}")
+            continue
+        dividend = dividends[0]
+        gross = Decimal(str(dividend['amount'])) + sum(Decimal(str(row['amount'])) for row in taxes)
+        if gross < 0:
+            errors.append(f"Invalid gross dividend after tax adjustment: {key}")
+            continue
+        dividend['amount'] = float(gross)
+        dividend['notes'] = (dividend.get('notes', '') + ' [CSV net dividend restored to gross]').strip()
+    return rows, errors
+
 
 def _clean_csv_value(value):
     """Return a trimmed string for CSV cell values."""
@@ -832,10 +909,42 @@ def _activity_type_value(row, columns):
     return activity_type
 
 
+def _money_movement_type(row):
+    """Resolve cash transfers from explicit direction or a signed net cash column."""
+    import re
+    values = {_normalize_activity_header(key): value for key, value in row.items()}
+    subtype = re.sub(r'[\s_-]+', '', _clean_csv_value(values.get('activity_sub_type')).upper())
+    directions = {
+        'DEPOSIT': 'DEPOSIT', 'CONTRIBUTION': 'DEPOSIT',
+        'TRANSFERIN': 'DEPOSIT', 'CASHIN': 'DEPOSIT',
+        'WITHDRAWAL': 'WITHDRAWAL', 'WITHDRAW': 'WITHDRAWAL',
+        'TRANSFEROUT': 'WITHDRAWAL', 'CASHOUT': 'WITHDRAWAL',
+    }
+    direction = directions.get(subtype)
+    for column in ('net_cash_amount', 'net_amount'):
+        if column not in values:
+            continue
+        amount = _parse_csv_number(values[column], default=None)
+        if amount is None or not math.isfinite(amount):
+            raise ValueError('MoneyMovement requires a valid net cash amount')
+        if amount:
+            signed_direction = 'DEPOSIT' if amount > 0 else 'WITHDRAWAL'
+            if direction and direction != signed_direction:
+                raise ValueError('MoneyMovement subtype conflicts with net cash direction')
+            return signed_direction
+    if direction:
+        return direction
+    description = _clean_csv_value(values.get('description')).upper()
+    incoming = bool(re.search(r'\b(DEPOSIT|CONTRIBUTION|TRANSFER\s+IN)\b', description))
+    outgoing = bool(re.search(r'\b(WITHDRAWAL|WITHDRAW|TRANSFER\s+OUT)\b', description))
+    if incoming != outgoing:
+        return 'DEPOSIT' if incoming else 'WITHDRAWAL'
+    raise ValueError('MoneyMovement needs an explicit deposit/withdrawal subtype or signed net_cash_amount')
+
+
 def get_wealthsimple_activity_mapping(headers):
     """Return canonical mappings for Wealthsimple activity export headers."""
     required_columns = {
-        'transaction_date',
         'activity_type',
         'activity_sub_type',
         'description',
@@ -852,13 +961,17 @@ def get_wealthsimple_activity_mapping(headers):
     ]
     if not required_columns.issubset(set(normalized_headers)):
         return None
+    date_header = next((name for name in ('transaction_date', 'effective_date')
+                        if name in normalized_headers), None)
+    if date_header is None:
+        return None
 
     header_by_normalized = {
         normalized_header: headers[index]
         for index, normalized_header in enumerate(normalized_headers)
     }
     return {
-        'date': header_by_normalized['transaction_date'],
+        'date': header_by_normalized[date_header],
         'type': header_by_normalized['activity_type'],
         'symbol': header_by_normalized['symbol'],
         'quantity': header_by_normalized['quantity'],
@@ -870,9 +983,32 @@ def get_wealthsimple_activity_mapping(headers):
     }
 
 
-def process_wealthsimple_activity_csv(df):
+def _exclude_ignored_activities(df, column_mappings=None, ignored_rows=None):
+    """Exclude explicitly ignored activities before parsing or computing overwrite dates."""
+    ignored_types = {
+        'SECURITYTRANSFER': 'SecurityTransfer',
+        'RETURNOFCAPITAL': 'ReturnOfCapital',
+    }
+    headers = {_normalize_activity_header(column): column for column in df.columns}
+    type_column = headers.get('activity_type') or (column_mappings or {}).get('type')
+    if not type_column or type_column not in df.columns:
+        return df
+    activity_types = df[type_column].map(
+        lambda value: _clean_csv_value(value).upper().replace('_', '').replace(' ', '')
+    )
+    ignored = activity_types.isin(ignored_types)
+    if ignored_rows is not None:
+        ignored_rows.extend({'row_num': index + 2, 'type': ignored_types[activity_type]}
+                            for index, activity_type in activity_types[ignored].items())
+    return df.loc[~ignored]
+
+
+def process_wealthsimple_activity_csv(df, ignored_rows=None):
     """Parse Wealthsimple activity CSV without relying on manual column mapping."""
     df = df.rename(columns=_normalize_activity_header)
+    df = _exclude_ignored_activities(df, ignored_rows=ignored_rows)
+    if 'transaction_date' not in df.columns and 'effective_date' in df.columns:
+        df = df.rename(columns={'effective_date': 'transaction_date'})
     transactions = []
     processing_errors = []
 
@@ -914,12 +1050,18 @@ def process_wealthsimple_activity_csv(df):
         elif activity_type in {'DIVIDEND', 'INTEREST'}:
             transaction_type = activity_type
         elif activity_type == 'TAX':
-            transaction_type = 'WITHDRAWAL'
+            transaction_type = 'TAX'
+            tax_cash = _parse_csv_number(row.get('net_cash_amount'), default=None)
+            if tax_cash is None or not math.isfinite(tax_cash):
+                processing_errors.append(f"Row {row_num}: TAX requires a valid net_cash_amount")
+                continue
+            amount = -tax_cash  # debit -> positive tax; credit -> refund
         elif activity_type in {'MONEYMOVEMENT', 'MONEY_MOVEMENT'}:
-            if net_cash_amount < 0 or 'WITHDRAW' in description_upper:
-                transaction_type = 'WITHDRAWAL'
-            else:
-                transaction_type = 'DEPOSIT'
+            try:
+                transaction_type = _money_movement_type(row)
+            except ValueError as exc:
+                processing_errors.append(f"Row {row_num}: {exc}")
+                continue
         else:
             transaction_type = parse_transaction_type(activity_type) or parse_transaction_type(description_upper)
 
@@ -944,6 +1086,10 @@ def process_wealthsimple_activity_csv(df):
                 quantity = amount
             price = 0
 
+        if transaction_type == 'TAX':
+            quantity = 0
+            price = 0
+
         transactions.append({
             'row_num': row_num,
             'trade_date': trade_date,
@@ -960,10 +1106,11 @@ def process_wealthsimple_activity_csv(df):
     return transactions, processing_errors
 
 
-def process_csv_with_mapping(df, column_mappings):
+def process_csv_with_mapping(df, column_mappings, tax_cash_flow=False, ignored_rows=None):
     """使用用户映射处理CSV数据"""
     global _detected_date_format
     _detected_date_format = None  # 重置日期格式检测
+    df = _exclude_ignored_activities(df, column_mappings, ignored_rows)
     
     transactions = []
     processing_errors = []
@@ -1067,7 +1214,11 @@ def process_csv_with_mapping(df, column_mappings):
                     description_text_for_type = str(row[column_mappings['description']]).strip().lower()
                 if description_text_for_type in cash_out_keywords or raw_type_str.lower() in cash_out_keywords:
                     type_str = 'WITHDRAWAL'
-                transaction_type = parse_transaction_type(type_str)
+                normalized_type = type_str.replace('_', '').replace(' ', '')
+                if normalized_type == 'MONEYMOVEMENT':
+                    transaction_type = _money_movement_type(row)
+                else:
+                    transaction_type = parse_transaction_type(type_str)
                 if not transaction_type:
                     processing_errors.append(f"Row {row_num}: Invalid transaction type '{type_str}'")
                     continue
@@ -1101,14 +1252,20 @@ def process_csv_with_mapping(df, column_mappings):
                 amount_str = str(row[column_mappings['amount']]).replace(',', '').replace('$', '')
                 if amount_str and amount_str.lower() not in ['nan', '', 'none']:
                     try:
-                        amount_value = abs(float(amount_str))
+                        amount_value = float(amount_str) if transaction_type == 'TAX' else abs(float(amount_str))
+                        if transaction_type == 'TAX' and (tax_cash_flow or _normalize_activity_header(column_mappings['amount']) == 'net_cash_amount'):
+                            amount_value = -amount_value
                         row_data['amount'] = amount_value
                     except (ValueError, TypeError):
                         amount_value = None
 
+            if transaction_type == 'TAX' and (amount_value is None or not math.isfinite(amount_value)):
+                processing_errors.append(f"Row {row_num}: TAX requires a valid signed amount")
+                continue
+
             # 数量和价格处理 - 根据交易类型决定逻辑
             try:
-                if transaction_type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST']:
+                if transaction_type in ['DEPOSIT', 'WITHDRAWAL', 'DIVIDEND', 'INTEREST', 'TAX']:
                     # 现金交易：优先使用amount值，quantity和price可选
                     if amount_value is not None:
                         # 有amount值时，quantity和price可以为0（表示不使用）
@@ -1269,6 +1426,9 @@ def process_csv_with_mapping(df, column_mappings):
             else:
                 row_data['notes'] = ''
             
+            if transaction_type == 'TAX':
+                row_data['quantity'] = 0
+                row_data['price'] = 0
             transactions.append(row_data)
             
         except Exception as e:
@@ -1500,6 +1660,11 @@ def smart_header_mapping(headers):
     mapping = {}
     
     for field, patterns in header_patterns.items():
+        exact_match = next((headers[i] for i, header in enumerate(normalized_headers)
+                            if header in {pattern.lower() for pattern in patterns}), None)
+        if exact_match is not None:
+            mapping[field] = exact_match
+            continue
         for i, header in enumerate(normalized_headers):
             if any(pattern in header for pattern in patterns):
                 mapping[field] = headers[i]  # 使用原始表头名称
@@ -1524,6 +1689,7 @@ def process_csv_data(df, header_mapping):
         'symbol': 'symbol',
         'quantity': 'quantity',
         'price': 'price',
+        'amount': 'amount',
         'currency': 'currency',
         'fee': 'fee',
         'notes': 'notes'
@@ -1743,6 +1909,10 @@ def parse_transaction_type(type_str):
     type_str = type_str.upper().strip()
     print(f"DEBUG: parse_transaction_type - Input: '{type_str}'")
     
+    # Withholding tax must take precedence over dividend/interest keywords.
+    if any(word in type_str for word in ('TAX', 'WITHHOLDING', '预扣税', '扣税')):
+        return 'TAX'
+
     # 买入关键词
     buy_keywords = ['BUY', 'BOUGHT', 'PURCHASE', 'LONG', '买入', '买', 'COMPRA', 'KAUF']
     # 卖出关键词  
