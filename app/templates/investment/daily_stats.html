@@ -463,7 +463,7 @@ function applyCalendarDataToView() {
     }
 
     const dayElements = document.querySelectorAll('.fc-daygrid-day');
-    const today = new Date().toISOString().split('T')[0];
+    const _d1 = new Date(); const today = _d1.getFullYear() + '-' + String(_d1.getMonth() + 1).padStart(2, '0') + '-' + String(_d1.getDate()).padStart(2, '0');
 
     dayElements.forEach(dayEl => {
         const dateStr = dayEl.getAttribute('data-date');
@@ -694,7 +694,7 @@ function clearDayIndicators(dayEl) {
 
 function renderDailyPnlChart(dailyStats) {
     if (!dailyStats) return;
-    const todayISO = new Date().toISOString().split('T')[0];
+    const _d2 = new Date(); const todayISO = _d2.getFullYear() + '-' + String(_d2.getMonth() + 1).padStart(2, '0') + '-' + String(_d2.getDate()).padStart(2, '0');
     const currentRate = {{ exchange_rates['usd_to_cad'] if exchange_rates else 1.3782 }};
 
     const statsArray = Object.values(dailyStats)

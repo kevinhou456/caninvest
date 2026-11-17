@@ -3,28 +3,6 @@
 {% block extra_css %}
 <style>
     /* Overview Page Specific Styles */
-    .metric-card {
-        border: none;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-    }
-    
-    .metric-icon {
-        width: 36px;
-        height: 36px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 50%;
-        margin-right: 0.5rem;
-        flex-shrink: 0;
-    }
-    
     .holdings-table {
         font-size: 0.9rem;
     }
@@ -191,20 +169,18 @@
 
 {% block content %}
 <!-- Portfolio Overview Header -->
-<div class="row mb-3">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center">
-            <h4>{{ _('Portfolio Overview') }}</h4>
-            <button class="btn btn-outline-primary btn-sm" onclick="refreshPortfolioData()">
-                <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh Data') }}
-            </button>
-        </div>
-        <!-- <p class="text-muted">{{ _('Summary of investment portfolio for') }} {{ filter_description }}</p> -->
+<div class="page-heading">
+    <div>
+        <h4>{{ _('Portfolio Overview') }}</h4>
+        <p>{{ _('Canadian Family Portfolio') }}{% if filter_description %} · {{ filter_description }}{% endif %}</p>
     </div>
+    <button class="btn btn-outline-primary btn-sm" onclick="refreshPortfolioData()">
+        <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh Data') }}
+    </button>
 </div>
 
 <!-- Key Investment Metrics -->
-<div class="row mb-4">
+<div class="row mb-4 portfolio-metrics">
     <!-- Total Assets -->
     <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
         <div class="card h-100 metric-card">
@@ -1653,11 +1629,11 @@ function refreshPortfolioData() {
     color: #007bff;
 }
 
-.holdings-table {
+    .holdings-table {
     position: relative;
 }
 
-.holdings-table tbody tr {
+    .holdings-table tbody tr {
     transition: all 0.3s ease;
 }
 
@@ -2640,8 +2616,9 @@ function resetTransactionForm() {
     document.getElementById('quantity_required').style.display = 'inline';
     document.getElementById('price_required').style.display = 'inline';
     
-    // Set today's date
-    const today = new Date().toISOString().split('T')[0];
+    // Set today's date (use local time to avoid UTC offset shifting the date)
+    const _now = new Date();
+    const today = _now.getFullYear() + '-' + String(_now.getMonth() + 1).padStart(2, '0') + '-' + String(_now.getDate()).padStart(2, '0');
     document.getElementById('modal_trade_date').value = today;
     
     // Set default account if available

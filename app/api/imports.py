@@ -56,7 +56,7 @@ def _parse_csv_bytes(file_bytes, preferred_encodings=None):
         raise ValueError('CSV file is empty')
 
     import pandas as pd
-    from app.utils.csv_utils import analyze_csv_content
+    from app.utils.csv_utils import analyze_csv_content, extract_csv_table
 
     encodings_to_try = _build_encoding_candidates(preferred_encodings)
     last_error = None
@@ -75,12 +75,11 @@ def _parse_csv_bytes(file_bytes, preferred_encodings=None):
         delimiter = analysis.get('delimiter') or ','
         header_index = int(max(0, analysis.get('header_index', 0)))
 
-        stream = io.StringIO(decoded_content)
+        stream = io.StringIO(extract_csv_table(decoded_content, delimiter, header_index))
         try:
             df = pd.read_csv(
                 stream,
                 sep=delimiter,
-                skiprows=header_index,
                 skipinitialspace=True
             )
         except Exception as exc:
@@ -103,8 +102,7 @@ def _parse_csv_bytes(file_bytes, preferred_encodings=None):
 
 
 def _load_csv_dataframe(file_path, meta_path=None, preferred_encodings=None):
-    """Load DataFrame from CSV file using stored metadata or automatic detection."""
-    import pandas as pd
+    """Load CSV through the same table extraction used by the preview."""
 
     meta = None
     if meta_path and os.path.exists(meta_path):
@@ -114,18 +112,11 @@ def _load_csv_dataframe(file_path, meta_path=None, preferred_encodings=None):
         except Exception:
             meta = None
 
-    if meta:
-        encoding = meta.get('encoding') or 'utf-8-sig'
-        delimiter = meta.get('delimiter') or ','
-        header_index = int(max(0, meta.get('header_index', 0)))
-        df = pd.read_csv(
-            file_path,
-            encoding=encoding,
-            sep=delimiter,
-            skiprows=header_index,
-            skipinitialspace=True
-        )
-        return df, meta
+    # Reuse the preview parser, including table boundaries, for final import.
+    # Old session metadata contains no footer information and must not bypass it.
+    if meta and meta.get('encoding'):
+        preferred_encodings = _build_encoding_candidates([meta['encoding']] +
+                                  _build_encoding_candidates(preferred_encodings))
 
     with open(file_path, 'rb') as fh:
         file_bytes = fh.read()

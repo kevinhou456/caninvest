@@ -2,29 +2,7 @@
 
 {% block extra_css %}
 <style>
-    /* 复制overview页面的所有样式 */
-    .metric-card {
-        border: none;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
-    }
-
-    .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-    }
-
-    .metric-icon {
-        width: 36px;
-        height: 36px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 50%;
-        margin-right: 0.5rem;
-        flex-shrink: 0;
-    }
-
+    /* Holdings board-specific styles */
     .holdings-table {
         font-size: 0.9rem;
     }
@@ -177,18 +155,14 @@
 
 {% block content %}
 <!-- Holdings Board Header -->
-<div class="row mb-3 align-items-center">
-    <div class="col-6">
-        <h4 class="mb-0">{{ _('Holdings Board') }}</h4>
-    </div>
-    <div class="col-6 text-end">
-        <button class="btn btn-primary" onclick="loadHoldings(true)">
-            <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh') }}
-        </button>
-    </div>
+<div class="page-heading">
+    <h4>{{ _('Holdings Board') }}</h4>
+    <button class="btn btn-outline-primary btn-sm" onclick="loadHoldings(true)">
+        <i class="fas fa-sync-alt me-1"></i>{{ _('Refresh') }}
+    </button>
 </div>
 
-<div class="container-fluid">
+<div class="container-fluid px-0">
     <!-- 控制面板 -->
     <div class="row mb-3 align-items-end">
         <div class="col-12">
@@ -1401,7 +1375,7 @@ function resetTransactionFormHB() {
     const form = document.getElementById('addTransactionForm');
     if (!form) return;
     form.reset();
-    const today = new Date().toISOString().split('T')[0];
+    const _dn = new Date(); const today = _dn.getFullYear() + '-' + String(_dn.getMonth() + 1).padStart(2, '0') + '-' + String(_dn.getDate()).padStart(2, '0');
     const tradeDate = document.getElementById('modal_trade_date');
     if (tradeDate) tradeDate.value = today;
     const type = document.getElementById('modal_transaction_type');

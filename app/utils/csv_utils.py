@@ -114,14 +114,15 @@ def analyze_csv_content(content: str,
 
         try:
             for idx, row in enumerate(reader):
-                candidate_rows.append((idx, row))
+                start_line = candidate_rows[-1][2] if candidate_rows else 0
+                candidate_rows.append((start_line, row, reader.line_num))
                 if max_lines and idx + 1 >= max_lines:
                     break
         except csv.Error:
             continue
 
         # 只考虑包含多个字段的行，用于判断结构化数据
-        structured_rows = [(idx, row) for idx, row in candidate_rows if len(row) > 1]
+        structured_rows = [(idx, row) for idx, row, _ in candidate_rows if len(row) > 1]
         if not structured_rows:
             continue
 
@@ -130,6 +131,18 @@ def analyze_csv_content(content: str,
             continue
 
         common_length, _ = length_counter.most_common(1)[0]
+        header_names = {
+            'date', 'trade date', 'transaction date', 'effective date', 'settlement date',
+            'type', 'activity type', 'activity sub type', 'transaction type', 'transaction',
+            'symbol', 'stock', 'quantity', 'price', 'unit price', 'amount', 'net cash amount',
+            'currency', 'commission', 'description', 'notes', 'balance',
+            '日期', '交易日期', '类型', '交易类型', '股票代码', '数量', '价格', '金额', '币种', '说明',
+        }
+        def header_score(row):
+            return len({token.strip().lower().replace('_', ' ').lstrip('\ufeff')
+                        for token in row} & header_names)
+        recognized = max(structured_rows, key=lambda item: header_score(item[1]))
+        recognized_score = header_score(recognized[1])
 
         header_index = None
         for idx, row in structured_rows:
@@ -148,8 +161,12 @@ def analyze_csv_content(content: str,
         if header_index is None:
             header_index = next(idx for idx, row in structured_rows if len(row) == common_length)
 
+        if recognized_score >= 3:
+            header_index, header = recognized
+            common_length = len(header)
+
         consistent_rows = sum(1 for idx, row in structured_rows if idx >= header_index and len(row) == common_length)
-        quality_score = (consistent_rows, -header_index)
+        quality_score = (recognized_score if recognized_score >= 3 else 0, consistent_rows, -header_index)
 
         match_info = {
             'delimiter': delimiter,
@@ -164,3 +181,42 @@ def analyze_csv_content(content: str,
         return best_match[1]
 
     return {'delimiter': ',', 'header_index': 0, 'field_count': 0}
+
+
+def extract_csv_table(content: str, delimiter: str, header_index: int) -> str:
+    """Remove surrounding prose, never silently skip malformed transaction rows.
+
+    header_index is a physical line offset. csv.reader keeps quoted multiline
+    descriptions intact. Only a trailing suffix of blank/prose records is removed.
+    """
+    import re
+
+    rows = list(csv.reader(io.StringIO(''.join(content.splitlines(keepends=True)[header_index:])),
+                           delimiter=delimiter, skipinitialspace=True))
+    if not rows:
+        return ''
+
+    def is_footer(row):
+        values = [value.strip() for value in row if value.strip()]
+        if not values:
+            return True
+        # A date or a standalone number is evidence of a transaction, even when
+        # the rest of that row is incomplete or invalid.
+        if any(re.search(r'\d{1,4}[-/]\d{1,2}[-/]\d{1,4}', value)
+               or re.fullmatch(r'[-+$()\d.,%\s]+', value) for value in values):
+            return False
+        text = values[0].lower()
+        markers = ('note:', 'notes:', 'disclaimer', 'important information',
+                   'please note', '说明', '免责声明', '注意事项')
+        if text.startswith(markers):
+            return True
+        return len(values) == 1 and (len(text.split()) >= 4 or len(text) >= 40)
+
+    while len(rows) > 1 and is_footer(rows[-1]):
+        rows.pop()
+    for row_number, row in enumerate(rows[1:], start=2):
+        if len(row) > len(rows[0]):
+            raise ValueError(f'CSV table row {row_number} has {len(row)} fields; expected {len(rows[0])}')
+    output = io.StringIO()
+    csv.writer(output, delimiter=delimiter).writerows(rows)
+    return output.getvalue()

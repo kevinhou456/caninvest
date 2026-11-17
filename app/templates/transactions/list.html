@@ -1,7 +1,7 @@
 {% extends "base/investment_base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="page-heading">
     <div>
         <h2 class="mb-1">
             {% if request.args.get('account_id') %}
@@ -22,8 +22,8 @@
             {% endif %}
         </p>
     </div>
-    <div class="btn-group">
-        <button type="button" class="btn btn-primary" style="background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important;" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
+    <div class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-primary" onclick="openAddTransactionModal({{ request.args.get('account_id') or 'null' }})">
             <i class="fas fa-plus me-2"></i>{{ _('Add Transaction') }}
         </button>
         {% if request.args.get('account_id') %}
@@ -48,7 +48,7 @@
 </div>
 
 <!-- Filters -->
-<div class="mb-3">
+<div class="filter-panel mb-3">
     <div class="row g-2 align-items-start">
         <!-- 股票代码 -->
         <div class="col-md-5">
