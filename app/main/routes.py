@@ -84,7 +84,8 @@ def _dump_snapshot_payload(payload):
 def _extract_snapshot_symbols(snapshot_payload):
     symbols = []
     seen = set()
-    for holding in snapshot_payload.get('holdings') or []:
+    # Cleared holdings also show name/category, so their changes must invalidate too.
+    for holding in (snapshot_payload.get('holdings') or []) + (snapshot_payload.get('cleared_holdings') or []):
         symbol = holding.get('symbol')
         if not symbol:
             continue
@@ -188,7 +189,8 @@ def _merge_comprehensive_metrics(per_account_views, ownership_map, exchange_rate
     return merged
 
 
-def _get_latest_price_update(symbols):
+def _get_latest_stock_info_update(symbols):
+    """Latest change to the snapshot's stocks: price, name or category (stocks_cache.updated_at)."""
     if not symbols:
         return None
     pairs = []
@@ -200,7 +202,7 @@ def _get_latest_price_update(symbols):
         pairs.append((symbol, currency))
     if not pairs:
         return None
-    return db.session.query(func.max(StocksCache.price_updated_at)).filter(
+    return db.session.query(func.max(StocksCache.updated_at)).filter(
         tuple_(StocksCache.symbol, StocksCache.currency).in_(pairs)
     ).scalar()
 
@@ -242,8 +244,14 @@ def _is_overview_snapshot_fresh(snapshot, account_ids):
         return False
 
     symbols = json.loads(snapshot.symbols_json) if snapshot.symbols_json else []
-    max_price = _get_latest_price_update(symbols)
-    if max_price and max_price > snapshot_time:
+    max_stock_info = _get_latest_stock_info_update(symbols)
+    if max_stock_info and max_stock_info > snapshot_time:
+        return False
+
+    # Renaming a category changes what the holdings show as their sector.
+    from app.models.stock_category import StockCategory
+    max_category = db.session.query(func.max(StockCategory.updated_at)).scalar()
+    if max_category and max_category > snapshot_time:
         return False
 
     max_history = _get_latest_history_update(symbols)
