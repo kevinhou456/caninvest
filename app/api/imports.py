@@ -987,6 +987,18 @@ def _exclude_ignored_activities(df, column_mappings=None, ignored_rows=None):
     activity_types = df[type_column].map(
         lambda value: _clean_csv_value(value).upper().replace('_', '').replace(' ', '')
     )
+    # In-kind security transfers ("Transfer in" with a symbol but no cash) are
+    # not cash deposits; ignore them like SecurityTransfer. Cash transfers stay.
+    symbol_column = headers.get('symbol') or (column_mappings or {}).get('symbol')
+    amount_column = (headers.get('net_cash_amount') or headers.get('total_amount')
+                     or (column_mappings or {}).get('amount'))
+    if symbol_column in df.columns and amount_column in df.columns:
+        has_symbol = df[symbol_column].map(lambda value: bool(_clean_csv_value(value)))
+        no_cash = df[amount_column].map(lambda value: _parse_csv_number(value) == 0)
+        is_transfer = activity_types.str.contains('TRANSFER', na=False)
+        activity_types = activity_types.where(
+            ~(is_transfer & has_symbol & no_cash), 'SECURITYTRANSFER')
+
     ignored = activity_types.isin(ignored_types)
     if ignored_rows is not None:
         ignored_rows.extend({'row_num': index + 2, 'type': ignored_types[activity_type]}
@@ -1332,14 +1344,25 @@ def process_csv_with_mapping(df, column_mappings, tax_cash_flow=False, ignored_r
             
             if 'currency' in column_mappings and column_mappings['currency']:
                 mapped_column = column_mappings['currency']
-                curr_str = str(row[mapped_column]).strip().upper()
+                curr_str = _clean_csv_value(row[mapped_column]).upper()
 
                 # 检查映射的列名是否合理 - 排除明显不相关的列
+                # ('Price Currency' / 'Total Currency' are real currency columns.)
+                def is_currency_column(name):
+                    name = str(name).lower()
+                    return any(word in name for word in ('currency', 'ccy', '货币', '币种'))
                 column_name_lower = mapped_column.lower()
                 invalid_currency_columns = ['balance', 'total', 'amount', 'price', 'value', 'quantity', 'shares']
 
+                # 映射列为空时（如现金转入行没有 Price Currency），用同一行的其它货币列
+                if not curr_str:
+                    curr_str = next((_clean_csv_value(row[col]).upper() for col in df.columns
+                                     if col != mapped_column and is_currency_column(col)
+                                     and _clean_csv_value(row[col])), '')
+
                 # 如果列名包含这些关键词，跳过货币提取
-                if any(invalid_word in column_name_lower for invalid_word in invalid_currency_columns):
+                if not is_currency_column(mapped_column) and any(
+                        invalid_word in column_name_lower for invalid_word in invalid_currency_columns):
                     currency = 'USD'  # 使用默认值
                 elif curr_str and curr_str != 'NAN':
                     # 如果是标准的3位货币代码，直接使用
@@ -1649,16 +1672,22 @@ def smart_header_mapping(headers):
     }
     
     mapping = {}
-    
+
+    # Exact matches first, so a fuzzy pattern (e.g. 'action' in 'transaction_date')
+    # cannot claim a column that exactly belongs to another field.
     for field, patterns in header_patterns.items():
         exact_match = next((headers[i] for i, header in enumerate(normalized_headers)
                             if header in {pattern.lower() for pattern in patterns}), None)
         if exact_match is not None:
             mapping[field] = exact_match
+    claimed = set(mapping.values())
+    for field, patterns in header_patterns.items():
+        if field in mapping:
             continue
         for i, header in enumerate(normalized_headers):
-            if any(pattern in header for pattern in patterns):
+            if headers[i] not in claimed and any(pattern in header for pattern in patterns):
                 mapping[field] = headers[i]  # 使用原始表头名称
+                claimed.add(headers[i])
                 break
     
     # 始终返回mapping，即使没有找到所有必需字段

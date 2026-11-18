@@ -1971,16 +1971,9 @@ def save_transaction_record(transaction_id=None, account_id=None, transaction_ty
         if stock and transaction_type in ['BUY', 'SELL', 'DIVIDEND', 'INTEREST']:
             try:
                 from app.models.stocks_cache import StocksCache
-                existing = StocksCache.query.filter_by(symbol=stock).first()
-                if not existing:
-                    new_stock = StocksCache(
-                        symbol=stock,
-                        name='',
-                        exchange='',
-                        currency=currency
-                    )
-                    db.session.add(new_stock)
-                    db.session.commit()
+                from app.services.stock_price_service import StockPriceService
+                if not StocksCache.query.filter_by(symbol=stock).first():
+                    StockPriceService().ensure_stock_info(stock, currency)
             except Exception:
                 pass  # StocksCache 写入失败不影响主流程
 
@@ -2547,6 +2540,13 @@ def stock_categories():
         # 获取所有分类及其股票数量
         categories = StockCategory.get_all_with_counts()
         
+        # 补全只有代码、没有名称的股票记录（已清仓的股票不会被定时刷新）
+        from app.services.stock_price_service import StockPriceService
+        price_service = StockPriceService()
+        for stock in StocksCache.query.filter(
+                db.or_(StocksCache.name.is_(None), StocksCache.name == '')).all():
+            price_service.ensure_stock_info(stock.symbol, stock.currency)
+
         # 获取未分类的股票
         uncategorized_stocks = StocksCache.query.filter(
             StocksCache.category_id.is_(None)
@@ -3504,16 +3504,9 @@ def stock_detail(stock_symbol):
             first_transaction = all_transactions[0]
             inferred_currency = first_transaction.currency or 'CAD'
             
-            # 创建基础股票缓存记录
-            stock_info = StocksCache(
-                symbol=stock_symbol.upper(),
-                name='',  # 空名称，等待用户修正
-                exchange='',  # 空交易所，等待用户修正
-                currency=inferred_currency
-            )
-            db.session.add(stock_info)
-            db.session.commit()
-            print(f"Created basic stock cache record for {stock_symbol.upper()} with currency {inferred_currency}")
+            # 创建股票缓存记录并从 Yahoo 补全名称/交易所/价格（失败时保留空记录供用户修正）
+            from app.services.stock_price_service import StockPriceService
+            stock_info = StockPriceService().ensure_stock_info(stock_symbol.upper(), inferred_currency)
         
         # 初始化数据获取失败标志
         price_data_fetch_failed = False

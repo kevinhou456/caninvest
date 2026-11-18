@@ -305,6 +305,25 @@ class StockPriceService:
         
         return results
     
+    def ensure_stock_info(self, symbol: str, currency: str) -> Optional[StocksCache]:
+        """Make sure a stocks_cache record exists and has its name/exchange/price.
+
+        Scheduled price refreshes only cover current holdings, so a record created
+        as an empty stub (e.g. for a stock that was already sold) would otherwise
+        never get its info. A record without a name is fetched from Yahoo once.
+        """
+        if not symbol or not symbol.strip():
+            return None
+        stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+        if not stock:
+            stock = StocksCache(symbol=symbol, name='', exchange='', currency=currency)
+            db.session.add(stock)
+            db.session.commit()
+        if not stock.name:
+            self.update_stock_price(symbol, currency, force_refresh=True)
+            stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+        return stock
+
     def update_prices_for_symbols(self, symbol_currency_pairs: List[tuple], force_refresh: bool = False) -> Dict:
         """更新指定股票列表的价格
 

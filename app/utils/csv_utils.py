@@ -212,6 +212,12 @@ def extract_csv_table(content: str, delimiter: str, header_index: int) -> str:
             return True
         return len(values) == 1 and (len(text.split()) >= 4 or len(text) >= 40)
 
+    def is_separator(row):
+        # Visual divider lines such as "-----,------" carry no data.
+        values = [value.strip() for value in row if value.strip()]
+        return bool(values) and all(re.fullmatch(r'[-=_*~+]+', value) for value in values)
+
+    rows = [rows[0]] + [row for row in rows[1:] if not is_separator(row)]
     while len(rows) > 1 and is_footer(rows[-1]):
         rows.pop()
     for row_number, row in enumerate(rows[1:], start=2):
