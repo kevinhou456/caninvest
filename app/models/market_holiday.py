@@ -33,11 +33,13 @@ class MarketHoliday(db.Model):
 
     @classmethod
     def is_holiday(cls, target_date: date, market: str) -> bool:
-        """检查指定日期和市场是否为节假日"""
-        return cls.query.filter_by(
-            holiday_date=target_date,
-            market=market
-        ).first() is not None
+        """检查指定日期和市场是否为节假日（整张表很小，同一请求内只读一次）"""
+        from app.utils.query_memo import memo
+        holidays = memo('market_holidays', 'all', lambda: frozenset(
+            (row.holiday_date, row.market)
+            for row in db.session.query(cls.holiday_date, cls.market).all()
+        ))
+        return (target_date, market) in holidays
 
     @classmethod
     def add_holiday_detection(cls, target_date: date, market: str, symbol: str = None):

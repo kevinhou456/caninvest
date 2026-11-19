@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from bisect import bisect_left
 from sqlalchemy import func
+from app import db
 from app.models.stock_price_history import StockPriceHistory
 from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
 from app.models.stocks_cache import StocksCache
@@ -51,6 +52,10 @@ class StockHistoryCacheService:
             current += timedelta(days=1)
 
         return True
+
+    # 网络查询 IPO 日期失败后的重试间隔（进程内共享）
+    IPO_RETRY_SECONDS = 6 * 3600
+    _ipo_lookup_failed_at: Dict[str, datetime] = {}
 
     def __init__(self):
         self.stock_service = StockPriceService()
@@ -117,43 +122,82 @@ class StockHistoryCacheService:
         return existing_data
 
     def _get_from_database(self, symbol: str, start_date: date, end_date: date, currency: str) -> List[Dict]:
-        """从数据库获取历史价格数据"""
-        records = StockPriceHistory.query.filter(
-            StockPriceHistory.symbol == symbol,
-            StockPriceHistory.currency == currency,
-            StockPriceHistory.trade_date >= start_date,
-            StockPriceHistory.trade_date <= end_date
-        ).order_by(StockPriceHistory.trade_date.asc()).all()
+        """从数据库获取历史价格数据
 
+        同一请求内某只股票被查询多次时（>= FULL_HISTORY_AFTER 次），一次性读取其全部历史，
+        之后按日期区间在内存里切片；偶尔查一两次的仍按区间直接查库，避免无谓地读全量。
+        每次返回新建的 dict，调用方修改不会影响记忆数据。
+        """
+        from app.utils.query_memo import bump, peek
+        key = (symbol, currency)
+        loaded = peek('price_history', key)
+        if loaded is None and bump('price_history_hits', key) >= self.FULL_HISTORY_AFTER:
+            loaded = self._load_symbol_history(symbol, currency)
+        if loaded is not None:
+            dates, rows = loaded
+            lo = bisect_left(dates, start_date)
+            hi = bisect_left(dates, end_date + timedelta(days=1))
+            rows = rows[lo:hi]
+        else:
+            rows = db.session.query(*self._HISTORY_COLUMNS).filter(
+                StockPriceHistory.symbol == symbol,
+                StockPriceHistory.currency == currency,
+                StockPriceHistory.trade_date >= start_date,
+                StockPriceHistory.trade_date <= end_date
+            ).order_by(StockPriceHistory.trade_date.asc()).all()
+        return [self._normalize_history_row(row) for row in rows]
+
+    # 同一请求内同一只股票第几次查询起改为读取全部历史
+    FULL_HISTORY_AFTER = 3
+
+    _HISTORY_COLUMNS = (
+        StockPriceHistory.id, StockPriceHistory.symbol, StockPriceHistory.currency,
+        StockPriceHistory.trade_date, StockPriceHistory.open_price, StockPriceHistory.high_price,
+        StockPriceHistory.low_price, StockPriceHistory.close_price, StockPriceHistory.adjusted_close,
+        StockPriceHistory.volume, StockPriceHistory.data_source,
+        StockPriceHistory.created_at, StockPriceHistory.updated_at,
+    )
+
+    def _load_symbol_history(self, symbol: str, currency: str):
+        """(交易日列表, 原始行列表)，按交易日升序；同一请求内每个 (symbol, currency) 只查一次。"""
+        from app.utils.query_memo import memo
+
+        def _query():
+            rows = db.session.query(*self._HISTORY_COLUMNS).filter(
+                StockPriceHistory.symbol == symbol,
+                StockPriceHistory.currency == currency,
+            ).order_by(StockPriceHistory.trade_date.asc()).all()
+            return [row.trade_date for row in rows], rows
+
+        return memo('price_history', (symbol, currency), _query)
+
+    @staticmethod
+    def _normalize_history_row(record) -> Dict:
         def _to_float(value):
             return float(value) if value is not None else None
 
-        normalized_records = []
-        for record in records:
-            trade_date = record.trade_date.isoformat() if record.trade_date else None
-            normalized_records.append({
-                'id': record.id,
-                'symbol': record.symbol,
-                'currency': record.currency,
-                'trade_date': trade_date,
-                'date': trade_date,
-                'open_price': _to_float(record.open_price),
-                'open': _to_float(record.open_price),
-                'high_price': _to_float(record.high_price),
-                'high': _to_float(record.high_price),
-                'low_price': _to_float(record.low_price),
-                'low': _to_float(record.low_price),
-                'close_price': _to_float(record.close_price),
-                'close': _to_float(record.close_price),
-                'adjusted_close': _to_float(record.adjusted_close),
-                'adj_close': _to_float(record.adjusted_close),
-                'volume': record.volume,
-                'data_source': record.data_source,
-                'created_at': record.created_at.isoformat() if record.created_at else None,
-                'updated_at': record.updated_at.isoformat() if record.updated_at else None,
-            })
-
-        return normalized_records
+        trade_date = record.trade_date.isoformat() if record.trade_date else None
+        return {
+            'id': record.id,
+            'symbol': record.symbol,
+            'currency': record.currency,
+            'trade_date': trade_date,
+            'date': trade_date,
+            'open_price': _to_float(record.open_price),
+            'open': _to_float(record.open_price),
+            'high_price': _to_float(record.high_price),
+            'high': _to_float(record.high_price),
+            'low_price': _to_float(record.low_price),
+            'low': _to_float(record.low_price),
+            'close_price': _to_float(record.close_price),
+            'close': _to_float(record.close_price),
+            'adjusted_close': _to_float(record.adjusted_close),
+            'adj_close': _to_float(record.adjusted_close),
+            'volume': record.volume,
+            'data_source': record.data_source,
+            'created_at': record.created_at.isoformat() if record.created_at else None,
+            'updated_at': record.updated_at.isoformat() if record.updated_at else None,
+        }
 
     def _has_missing_data(self, symbol: str, start_date: date, end_date: date,
                          currency: str, existing_data: List[Dict]) -> bool:
@@ -318,14 +362,16 @@ class StockHistoryCacheService:
     def _get_known_no_data_dates(self, symbol: str, market: str, start_date: date, end_date: date) -> Set[date]:
         """Return dates recorded as no-data attempts for this symbol/market."""
         try:
-            attempts = StockHolidayAttempt.query.filter(
-                StockHolidayAttempt.symbol == symbol,
-                StockHolidayAttempt.market == market,
-                StockHolidayAttempt.has_data == False,
-                StockHolidayAttempt.attempt_date >= start_date,
-                StockHolidayAttempt.attempt_date <= end_date
-            ).all()
-            return {attempt.attempt_date for attempt in attempts}
+            from app.utils.query_memo import memo
+            # 同一请求内每个 (symbol, market) 只查一次全部“无数据”日期，再按区间过滤
+            all_dates = memo('no_data_dates', (symbol, market), lambda: frozenset(
+                row.attempt_date for row in db.session.query(StockHolidayAttempt.attempt_date).filter(
+                    StockHolidayAttempt.symbol == symbol,
+                    StockHolidayAttempt.market == market,
+                    StockHolidayAttempt.has_data == False,
+                ).all()
+            ))
+            return {d for d in all_dates if start_date <= d <= end_date}
         except Exception as exc:
             logger.debug(f"Failed to load no-data attempts for {symbol}: {exc}")
             return set()
@@ -398,19 +444,24 @@ class StockHistoryCacheService:
 
     def _get_ipo_date(self, symbol: str, currency: str) -> Optional[date]:
         """获取股票IPO日期"""
-        stock = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+        stock = StocksCache.get_cached(symbol, currency)
         if stock and stock.first_trade_date:
             return stock.first_trade_date
 
-        # 如果没有IPO日期，尝试从网络查询
+        # 如果没有IPO日期，尝试从网络查询。
+        # 查不到的股票在一段时间内不再重复查询（以前每次取价格都会访问一次网页）。
         if stock:
+            failed_at = StockHistoryCacheService._ipo_lookup_failed_at.get(symbol)
+            if failed_at and (datetime.utcnow() - failed_at).total_seconds() < self.IPO_RETRY_SECONDS:
+                return None
             ipo_date = self._query_ipo_online(symbol)
             if ipo_date:
+                StockHistoryCacheService._ipo_lookup_failed_at.pop(symbol, None)
                 stock.first_trade_date = ipo_date
-                from app import db
                 db.session.commit()
                 logger.info(f"网络查询设置 {symbol} IPO日期: {ipo_date}")
                 return ipo_date
+            StockHistoryCacheService._ipo_lookup_failed_at[symbol] = datetime.utcnow()
 
         return None
 

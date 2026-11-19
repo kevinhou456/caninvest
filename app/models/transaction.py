@@ -11,6 +11,8 @@ class Transaction(db.Model):
     __tablename__ = 'transactions'
     __table_args__ = (
         db.Index('idx_transactions_account_trade_date_id', 'account_id', 'trade_date', 'id'),
+        # 注意：不要随意给 transactions 加索引。代码里有不少不带 ORDER BY 的查询（如个股详情页），
+        # 新索引会改变 SQLite 返回行的顺序，从而改变页面显示顺序。
     )
     
     id = db.Column(db.Integer, primary_key=True)
@@ -290,10 +292,11 @@ class Transaction(db.Model):
         if not stock_symbol:
             return None
             
-        # 查找该股票代码的第一条交易记录（按交易日期升序排列）
-        transaction = cls.query.filter_by(stock=stock_symbol).order_by(cls.trade_date.asc()).first()
-        
-        if transaction:
-            return transaction.currency
-        else:
-            return None
+        # 查找该股票代码的第一条交易记录（按交易日期升序排列）；同一请求内每个代码只查一次
+        from app.utils.query_memo import memo
+
+        def _load():
+            transaction = cls.query.filter_by(stock=stock_symbol).order_by(cls.trade_date.asc()).first()
+            return transaction.currency if transaction else None
+
+        return memo('currency_by_symbol', stock_symbol, _load)

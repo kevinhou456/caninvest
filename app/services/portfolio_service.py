@@ -235,14 +235,21 @@ class PortfolioService:
         else:
             return None, end_date
 
-    def get_position_snapshot(self, 
-                            symbol: str, 
-                            account_id: int, 
-                            as_of_date: date) -> PositionSnapshot:
-        """获取特定时间点的持仓快照"""
-        
+    def get_position_snapshot(self,
+                            symbol: str,
+                            account_id: int,
+                            as_of_date: date,
+                            transactions: Optional[List[Transaction]] = None,
+                            account: Optional[Account] = None) -> PositionSnapshot:
+        """获取特定时间点的持仓快照
+
+        transactions / account 可由调用方批量预取后传入（必须是该账户该股票截止 as_of_date
+        的全部交易，且已按 交易日、BUY 优先、id 排序），避免逐个查询；不传则自行查询。
+        """
+
         # 获取账户信息
-        account = Account.query.get(account_id)
+        if account is None:
+            account = Account.query.get(account_id)
         if not account:
             return PositionSnapshot(symbol, account_id, as_of_date)
         
@@ -259,17 +266,8 @@ class PortfolioService:
         )
         
         # 获取截止日期前的所有交易记录
-        # 同一天内 BUY 优先于 SELL：CASE WHEN type='BUY' THEN 0 ELSE 1 END
-        from sqlalchemy import case as sa_case
-        transactions = Transaction.query.filter(
-            Transaction.account_id == account_id,
-            Transaction.stock == symbol,
-            Transaction.trade_date <= as_of_date
-        ).order_by(
-            Transaction.trade_date.asc(),
-            sa_case((Transaction.type == 'BUY', 0), else_=1).asc(),
-            Transaction.id.asc()
-        ).all()
+        if transactions is None:
+            transactions = self._query_position_transactions([account_id], as_of_date, symbol=symbol)
 
         # If there are no transactions up to the target date, avoid any market-data fetches.
         if not transactions:
@@ -284,6 +282,27 @@ class PortfolioService:
         self._update_stock_info(snapshot)
         
         return snapshot
+
+    @staticmethod
+    def _query_position_transactions(account_ids: List[int], as_of_date: date,
+                                     symbol: Optional[str] = None) -> List[Transaction]:
+        """持仓计算用的交易查询（唯一实现）。
+
+        排序：交易日升序；同一天内 BUY 优先于 SELL；再按 id。
+        按 (account_id, stock) 分组后，每组内部的顺序与逐个查询完全一致。
+        """
+        from sqlalchemy import case as sa_case
+        query = Transaction.query.filter(
+            Transaction.account_id.in_(account_ids),
+            Transaction.trade_date <= as_of_date
+        )
+        if symbol is not None:
+            query = query.filter(Transaction.stock == symbol)
+        return query.order_by(
+            Transaction.trade_date.asc(),
+            sa_case((Transaction.type == 'BUY', 0), else_=1).asc(),
+            Transaction.id.asc()
+        ).all()
 
     def _process_transaction_acb(self, snapshot: PositionSnapshot, tx: Transaction):
         """使用平均成本法（ACB）处理交易"""
@@ -335,7 +354,14 @@ class PortfolioService:
         
         current_holdings = []
         cleared_holdings = []
-        
+
+        # 批量预取：账户 + 截止日前的全部交易（一次查询），在内存里按 (账户, 股票) 分组
+        accounts_by_id = {a.id: a for a in Account.query.filter(Account.id.in_(account_ids)).all()} \
+            if account_ids else {}
+        tx_groups: Dict[Tuple[int, str], List[Transaction]] = {}
+        for tx in (self._query_position_transactions(account_ids, period_end) if account_ids else []):
+            tx_groups.setdefault((tx.account_id, tx.stock), []).append(tx)
+
         for account_id in account_ids:
             # 获取该账户的所有股票
             symbols = db.session.query(Transaction.stock).filter(
@@ -349,7 +375,11 @@ class PortfolioService:
                     continue
                     
                 # 获取期末快照
-                position = self.get_position_snapshot(symbol, account_id, period_end)
+                position = self.get_position_snapshot(
+                    symbol, account_id, period_end,
+                    transactions=tx_groups.get((account_id, symbol), []),
+                    account=accounts_by_id.get(account_id),
+                )
                 position_dict = position.to_dict()
                 
                 if position.current_shares > 0:
@@ -423,7 +453,7 @@ class PortfolioService:
         
     def _update_stock_info(self, snapshot: PositionSnapshot):
         """更新股票信息"""
-        stock_info = StocksCache.query.filter_by(symbol=snapshot.symbol, currency=snapshot.currency).first()
+        stock_info = StocksCache.get_cached(snapshot.symbol, snapshot.currency)
         if stock_info:
             snapshot.company_name = stock_info.name or snapshot.symbol
             snapshot.sector = self._get_sector(stock_info)
@@ -445,7 +475,7 @@ class PortfolioService:
                 currency,
                 auto_refresh=self.auto_refresh_prices
             )
-            stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+            stock_cache = StocksCache.get_cached(symbol, currency)
             if not stock_cache or not stock_cache.price_updated_at:
                 return price
 
@@ -1620,6 +1650,12 @@ class PortfolioService:
     def _get_last_trading_price(self, symbol: str, currency: str, target_date: date) -> Optional[Decimal]:
         if not symbol or not target_date:
             return None
+        # 同一请求内相同 (股票, 币种, 日期) 的收盘价只算一次；价格表有写入时自动失效
+        from app.utils.query_memo import memo
+        return memo('last_trading_price', (symbol, currency, target_date),
+                    lambda: self._compute_last_trading_price(symbol, currency, target_date))
+
+    def _compute_last_trading_price(self, symbol: str, currency: str, target_date: date) -> Optional[Decimal]:
         # Use the cache service's market-aware end date to avoid missing the latest close.
         try:
             effective_end = self.history_cache_service._get_effective_end_for_expectation(

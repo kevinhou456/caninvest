@@ -29,7 +29,14 @@ class StocksCache(db.Model):
     
     def __repr__(self):
         return f'<StocksCache {self.symbol} {self.name}>'
-    
+
+    @classmethod
+    def get_cached(cls, symbol, currency):
+        """按 (symbol, currency) 取记录，同一请求内只查一次（任何写操作后自动重新读库）。"""
+        from app.utils.query_memo import memo
+        return memo('stocks_cache', (symbol, currency),
+                    lambda: cls.query.filter_by(symbol=symbol, currency=currency).first())
+
     def to_dict(self):
         return {
             'id': self.id,

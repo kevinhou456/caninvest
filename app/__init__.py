@@ -16,6 +16,22 @@ babel = Babel()
 cors = CORS()
 
 
+# SQLite 连接参数：数据库文件已切换为 WAL 模式（持久保存在文件里，读写可以并发）。
+# busy_timeout：遇到写锁时最多等待 5 秒，而不是立即报 "database is locked"。
+# synchronous 保持默认 FULL（每次提交都刷盘，断电也不丢已提交的数据）。
+from sqlalchemy import event as _sa_event
+from sqlalchemy.engine import Engine as _SAEngine
+
+
+@_sa_event.listens_for(_SAEngine, 'connect')
+def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+    import sqlite3
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute('PRAGMA busy_timeout=5000')
+        cursor.close()
+
+
 def _auto_migrate(app: Flask) -> None:
     """应用启动时自动创建缺失的数据库表，无需手动操作。
 

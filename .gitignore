@@ -126,10 +126,16 @@ family_investment.db
 test_*.py
 !tests/test_csv_activity_types.py
 !tests/test_review_regressions.py
+!tests/test_csv_surrounding_notes.py
+!tests/test_query_memo.py
 debug_*.py
 
 # Duplicate files with numeric suffixes
-*2.py
-*2.html
-*3.py
-*3.html
+* 2.py
+* 2.html
+* 3.py
+* 3.html
+
+# SQLite WAL 模式的附属文件
+*.db-wal
+*.db-shm
