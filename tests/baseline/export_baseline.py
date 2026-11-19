@@ -319,6 +319,31 @@ class Exporter:
                     'lines': [ln.strip() for ln in text.splitlines() if ln.strip()]}
         return _call
 
+    def export_holdings_board(self):
+        """持仓看板接口：按页面的真实调用方式传 account_ids（每个选中账户一个）+ period + separate。"""
+        from app.models.account import AccountMember, Account, AccountType
+        _, account_ids, member_ids, _ = self.context()
+        selections = {'all': account_ids}
+        for m in member_ids:
+            selections[f'member{m}'] = sorted(am.account_id for am in AccountMember.query.filter_by(member_id=m).all())
+        for a in account_ids:
+            selections[f'acct{a}'] = [a]
+        type_rows = Account.query.join(AccountType).with_entities(Account.id, AccountType.name).all()
+        for t in sorted({name for _, name in type_rows}):
+            selections[f'type_{t}'] = sorted(i for i, name in type_rows if name == t)
+        for name, ids in selections.items():
+            ids_q = '&'.join(f'account_ids={i}' for i in ids)
+            for period in ('1M', '3M', '6M', 'YTD', '1Y', 'ALL'):
+                for sep in ('false', 'true'):
+                    if len(ids) == 1 and sep == 'true':
+                        continue
+                    self.record(f'pages/holdings_board_api/{name}/{period}/sep_{sep}',
+                                self.api(f'/api/holdings-board?{ids_q}&period={period}&separate={sep}'))
+        # 强制刷新价格（断网时外部请求会失败，走原有的失败回退逻辑）
+        ids_q = '&'.join(f'account_ids={i}' for i in account_ids)
+        self.record('pages/holdings_board_api/all/1M/force_refresh',
+                    self.api(f'/api/holdings-board?{ids_q}&period=1M&separate=false&force_refresh=true'))
+
     def export_pages(self):
         """其余页面与参数组合（依赖今天，需同日新旧代码对比）。"""
         from app import db
@@ -338,10 +363,7 @@ class Exporter:
             self.record(f'pages/overview/family/{period}', self.html(f'/overview?full=1&period={period}'))
 
         # 持仓看板
-        for period in ('1M', '3M', '6M', 'YTD', '1Y'):
-            for sep in ('false', 'true'):
-                self.record(f'pages/holdings_board_api/{period}/sep_{sep}',
-                            self.api(f'/api/holdings-board?period={period}&separate={sep}'))
+        self.export_holdings_board()
         self.record('pages/holdings_board_html', self.html('/holdings-board'))
         self.record('pages/holdings_analysis_html', self.html('/holdings-analysis'))
 
@@ -418,7 +440,7 @@ def main():
     parser.add_argument('--db', required=True, help='冻结的数据库文件（只读，不会被修改）')
     parser.add_argument('--out', required=True, help='输出 JSON 路径')
     parser.add_argument('--as-of', required=True, help='stable 层级的截止日期 YYYY-MM-DD（必须早于今天）')
-    parser.add_argument('--tier', choices=['stable', 'today', 'pages', 'all'], default='all')
+    parser.add_argument('--tier', choices=['stable', 'today', 'pages', 'holdings', 'all'], default='all')
     parser.add_argument('--code-dir', default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')),
                         help='要运行的代码根目录（默认当前仓库；可指向旧版本的 git worktree）')
     parser.add_argument('--network', action='store_true',
@@ -458,6 +480,8 @@ def main():
                 exporter.export_today()
             if args.tier in ('pages', 'all'):
                 exporter.export_pages()
+            if args.tier == 'holdings':
+                exporter.export_holdings_board()
             payload = {
                 'manifest': {
                     'source_db': os.path.abspath(args.db), 'as_of': as_of.isoformat(),
