@@ -60,12 +60,8 @@ def get_member(member_id):
     """获取成员详情"""
     member = Member.query.get_or_404(member_id)
     
-    # 获取成员的投资组合摘要
-    portfolio_summary = member.get_portfolio_summary()
-    
     result = member.to_dict()
-    result['portfolio_summary'] = portfolio_summary
-    result['accounts'] = [am.account.to_dict() for am in member.account_members]
+    result['accounts'] = [am.account.to_dict() for am in member.account_memberships]
     
     return jsonify(result)
 
@@ -130,55 +126,6 @@ def delete_member(member_id):
     
     return jsonify({
         'message': _('Member deleted successfully')
-    })
-
-@bp.route('/members/<int:member_id>/portfolio', methods=['GET'])
-def get_member_portfolio(member_id):
-    """获取成员投资组合"""
-    member = Member.query.get_or_404(member_id)
-    
-    # 获取成员持仓
-    # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
-    # holdings = CurrentHolding.get_holdings_by_member(member_id)  # Temporarily disabled
-    holdings = []  # TODO: Re-implement with new holding system
-    
-    # 获取成员交易历史
-    from app.models.transaction import Transaction
-    transactions = Transaction.get_transactions_by_member(member_id, limit=50)
-    
-    # 获取供款摘要
-    from app.models.contribution import Contribution
-    current_year = datetime.now().year
-    contribution_summary = Contribution.get_contribution_summary(member_id, current_year)
-    
-    return jsonify({
-        'member': member.to_dict(),
-        'holdings': holdings,
-        'recent_transactions': [txn.to_dict() for txn in transactions],
-        'contribution_summary': contribution_summary,
-        'portfolio_summary': member.get_portfolio_summary()
-    })
-
-@bp.route('/members/<int:member_id>/contributions', methods=['GET'])
-def get_member_contributions(member_id):
-    """获取成员供款记录"""
-    member = Member.query.get_or_404(member_id)
-    
-    year = request.args.get('year', type=int)
-    account_type = request.args.get('account_type')
-    
-    from app.models.contribution import Contribution
-    
-    if year:
-        contribution_summary = Contribution.get_contribution_summary(member_id, year)
-    else:
-        # 获取当前年度的供款摘要
-        current_year = datetime.now().year
-        contribution_summary = Contribution.get_contribution_summary(member_id, current_year)
-    
-    return jsonify({
-        'member': member.to_dict(),
-        'contribution_summary': contribution_summary
     })
 
 @bp.route('/members/<int:member_id>/set-language', methods=['POST'])

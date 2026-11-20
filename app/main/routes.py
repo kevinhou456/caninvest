@@ -2175,11 +2175,9 @@ def stocks():
 
 @bp.route('/stocks/<symbol>')
 def stock_info(symbol):
-    """股票信息页面"""
-    stock = StocksCache.query.filter_by(symbol=symbol).first_or_404()
-    return render_template('stocks/detail.html',
-                         title=f"{stock.symbol} - {stock.name}",
-                         stock=stock)
+    """旧的股票信息页（模板已不存在），统一跳转到个股详情页 /stock/<symbol>"""
+    StocksCache.query.filter_by(symbol=symbol).first_or_404()
+    return redirect(url_for('main.stock_detail', stock_symbol=symbol, **request.args.to_dict()))
 
 
 @bp.route('/categories')

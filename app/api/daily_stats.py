@@ -199,6 +199,7 @@ def get_current_month_calendar():
         # 获取账户ID列表
         account_ids_param = request.args.get('account_ids')
         member_id_param = request.args.get('member_id', type=int)
+        ownership_map = None
         
         if account_ids_param:
             try:
