@@ -34,12 +34,17 @@ class MarketHoliday(db.Model):
     @classmethod
     def is_holiday(cls, target_date: date, market: str) -> bool:
         """检查指定日期和市场是否为节假日（整张表很小，同一请求内只读一次）"""
+        return (target_date, market) in cls.holiday_set()
+
+    @classmethod
+    def holiday_set(cls) -> frozenset:
+        """全部节假日 {(日期, 市场)}；同一请求内只读一次，有写入时自动重新读取。
+        逐日循环判断时先取一次再在循环里查集合，避免每天都走一遍记忆查找。"""
         from app.utils.query_memo import memo
-        holidays = memo('market_holidays', 'all', lambda: frozenset(
+        return memo('market_holidays', 'all', lambda: frozenset(
             (row.holiday_date, row.market)
             for row in db.session.query(cls.holiday_date, cls.market).all()
         ))
-        return (target_date, market) in holidays
 
     @classmethod
     def add_holiday_detection(cls, target_date: date, market: str, symbol: str = None):

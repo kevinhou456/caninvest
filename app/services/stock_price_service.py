@@ -68,7 +68,7 @@ class StockPriceService:
         try:
             from app.models.market_holiday import MarketHoliday
             mkt_key = 'CA' if market == 'TSX' else 'US'
-            if MarketHoliday.query.filter_by(holiday_date=local_time.date(), market=mkt_key).first():
+            if MarketHoliday.is_holiday(local_time.date(), mkt_key):
                 return False
         except Exception:
             pass
@@ -372,7 +372,7 @@ class StockPriceService:
             
         try:
             # 从缓存获取 - 使用联合主键(symbol, currency)
-            stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+            stock_cache = StocksCache.get_cached(symbol, currency)
             
             market = self._get_market(symbol, currency)
             needs_update = self._should_refresh_price(stock_cache, market, force_refresh=False)
@@ -381,7 +381,7 @@ class StockPriceService:
             if needs_update and auto_refresh:
                 self.update_stock_price(symbol, currency)
                 # 重新查询更新后的数据 - 使用联合主键
-                stock_cache = StocksCache.query.filter_by(symbol=symbol, currency=currency).first()
+                stock_cache = StocksCache.get_cached(symbol, currency)
             
             # 返回价格（可能是0如果无法从Yahoo获取）
             if stock_cache and stock_cache.current_price:

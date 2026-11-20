@@ -53,6 +53,13 @@ current_shares -= quantity
    - 返回：`total_cad`（现金总额，CAD等值）
    - 包含：USD、CAD分离金额
 
+   **多日期批量版本（需要逐日/逐月时间序列时必须用它们，不要在循环里逐日调用单日期函数）**：
+   - `PortfolioService.get_portfolio_summary_series(account_ids, end_dates, start_date_for=None)`
+     → `{日期: 汇总}`，每个日期与 `get_portfolio_summary(account_ids, CUSTOM, start_date_for(d), d)` 完全相同
+   - `AssetValuationService.get_cash_balances(account_id, dates)` → `{日期: {'cad','usd','total_cad'}}`
+   - 单日期函数内部就是调用批量版本（`_holdings_for_dates` / `_calculate_cash_balances` 是唯一实现）
+   - 同一请求内相同 (账户, 日期) 的结果有请求级记忆（`app/utils/query_memo.py`），任何写入后自动失效
+
 3. **总资产计算公式**：
    ```
    总资产 = Portfolio Service股票价值 + Asset Valuation现金余额

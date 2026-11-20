@@ -237,6 +237,17 @@ class DailyStatsService:
         prev_stats = None
 
         prev_trading_date = self._get_previous_trading_day(start_date)
+
+        # 一次算出整段日期（含前一交易日）的持仓与现金；下面逐日计算时会直接命中请求级记忆，
+        # 每天的数值与单独调用 get_portfolio_summary / get_cash_balance 完全相同
+        warm_dates = ([prev_trading_date] if prev_trading_date else []) + [
+            start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)
+        ]
+        self.portfolio_service.get_portfolio_summary_series(account_ids, warm_dates)
+        for account_id in account_ids:
+            if self._get_account_proportion(account_id, ownership_map) > 0:
+                self.asset_service.get_cash_balances(account_id, warm_dates)
+
         if prev_trading_date:
             prev_snapshot = self._get_combined_asset_snapshot(account_ids, prev_trading_date, ownership_map)
             prev_stats = DailyStatsPoint(

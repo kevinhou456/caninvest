@@ -44,10 +44,11 @@ class StockHistoryCacheService:
             return True
 
         known_no_data_dates = self._get_known_no_data_dates(symbol, market, start_date, effective_end)
+        holidays = MarketHoliday.holiday_set()
 
         current = start_date
         while current <= effective_end:
-            if current.weekday() < 5 and not MarketHoliday.is_holiday(current, market) and current not in known_no_data_dates:
+            if current.weekday() < 5 and (current, market) not in holidays and current not in known_no_data_dates:
                 return False
             current += timedelta(days=1)
 
@@ -134,17 +135,22 @@ class StockHistoryCacheService:
         if loaded is None and bump('price_history_hits', key) >= self.FULL_HISTORY_AFTER:
             loaded = self._load_symbol_history(symbol, currency)
         if loaded is not None:
-            dates, rows = loaded
+            dates, rows, normalized = loaded
             lo = bisect_left(dates, start_date)
             hi = bisect_left(dates, end_date + timedelta(days=1))
-            rows = rows[lo:hi]
-        else:
-            rows = db.session.query(*self._HISTORY_COLUMNS).filter(
-                StockPriceHistory.symbol == symbol,
-                StockPriceHistory.currency == currency,
-                StockPriceHistory.trade_date >= start_date,
-                StockPriceHistory.trade_date <= end_date
-            ).order_by(StockPriceHistory.trade_date.asc()).all()
+            out = []
+            for i in range(lo, hi):
+                # 按需转换并记住：用到哪一行才转换哪一行，之后返回副本
+                if normalized[i] is None:
+                    normalized[i] = self._normalize_history_row(rows[i])
+                out.append(dict(normalized[i]))
+            return out
+        rows = db.session.query(*self._HISTORY_COLUMNS).filter(
+            StockPriceHistory.symbol == symbol,
+            StockPriceHistory.currency == currency,
+            StockPriceHistory.trade_date >= start_date,
+            StockPriceHistory.trade_date <= end_date
+        ).order_by(StockPriceHistory.trade_date.asc()).all()
         return [self._normalize_history_row(row) for row in rows]
 
     # 同一请求内同一只股票第几次查询起改为读取全部历史
@@ -159,7 +165,7 @@ class StockHistoryCacheService:
     )
 
     def _load_symbol_history(self, symbol: str, currency: str):
-        """(交易日列表, 原始行列表)，按交易日升序；同一请求内每个 (symbol, currency) 只查一次。"""
+        """(交易日列表, 原始行列表, 按需转换结果列表)，按交易日升序；同一请求内每个 (symbol, currency) 只查一次。"""
         from app.utils.query_memo import memo
 
         def _query():
@@ -167,7 +173,7 @@ class StockHistoryCacheService:
                 StockPriceHistory.symbol == symbol,
                 StockPriceHistory.currency == currency,
             ).order_by(StockPriceHistory.trade_date.asc()).all()
-            return [row.trade_date for row in rows], rows
+            return [row.trade_date for row in rows], rows, [None] * len(rows)
 
         return memo('price_history', (symbol, currency), _query)
 
@@ -217,7 +223,7 @@ class StockHistoryCacheService:
         existing_dates = set()
         for record in existing_data:
             if isinstance(record.get('trade_date'), str):
-                trade_date = datetime.strptime(record['trade_date'], '%Y-%m-%d').date()
+                trade_date = date.fromisoformat(record['trade_date'])
             else:
                 trade_date = record.get('trade_date')
             if trade_date:
@@ -226,10 +232,11 @@ class StockHistoryCacheService:
         # 精确预估交易日数量（排除周末 + 已知节假日）
         market = self._get_market(symbol, currency)
         known_no_data_dates = self._get_known_no_data_dates(symbol, market, start_date, effective_end)
+        holidays = MarketHoliday.holiday_set()
         last_expected = effective_end
         while last_expected >= start_date:
             if (last_expected.weekday() < 5 and
-                    not MarketHoliday.is_holiday(last_expected, market) and
+                    (last_expected, market) not in holidays and
                     last_expected not in known_no_data_dates):
                 break
             last_expected -= timedelta(days=1)
@@ -241,7 +248,7 @@ class StockHistoryCacheService:
         current = start_date
         while current <= effective_end:
             if (current.weekday() < 5 and
-                    not MarketHoliday.is_holiday(current, market) and
+                    (current, market) not in holidays and
                     current not in known_no_data_dates):
                 expected_trading_days += 1
             current += timedelta(days=1)
@@ -279,7 +286,7 @@ class StockHistoryCacheService:
         existing_dates = set()
         for record in existing_data:
             if isinstance(record['trade_date'], str):
-                trade_date = datetime.strptime(record['trade_date'], '%Y-%m-%d').date()
+                trade_date = date.fromisoformat(record['trade_date'])
             else:
                 trade_date = record['trade_date']
             existing_dates.add(trade_date)
@@ -292,6 +299,7 @@ class StockHistoryCacheService:
         gaps = []
         current_date = start_date
         gap_start = None
+        holidays = MarketHoliday.holiday_set()
 
         while current_date <= effective_end:
             # 跳过周末
@@ -300,7 +308,7 @@ class StockHistoryCacheService:
                 continue
 
             # 跳过已知节假日
-            if MarketHoliday.is_holiday(current_date, market):
+            if (current_date, market) in holidays:
                 current_date += timedelta(days=1)
                 continue
 

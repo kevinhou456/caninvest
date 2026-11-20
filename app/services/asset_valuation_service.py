@@ -1280,19 +1280,25 @@ class AssetValuationService:
         """获取现金余额（仅现金，不触发股票估值）"""
         if target_date is None:
             target_date = date.today()
+        return self.get_cash_balances(account_id, [target_date])[target_date]
 
-        cad_balance, usd_balance = self._calculate_cash_balance(account_id, target_date)
+    def get_cash_balances(self, account_id: int, target_dates: List[date]) -> Dict[date, Dict[str, Decimal]]:
+        """一次计算多个日期的现金余额：{日期: {'cad', 'usd', 'total_cad'}}。
+        每个日期的结果与 get_cash_balance(account_id, 日期) 完全相同。"""
+        balances = self._calculate_cash_balances(account_id, list(target_dates))
         usd_to_cad = self.currency_service.get_current_rate('USD', 'CAD')
         usd_to_cad_decimal = (
             Decimal(str(usd_to_cad))
             if not isinstance(usd_to_cad, Decimal)
             else usd_to_cad
         )
-
         return {
-            'cad': cad_balance,
-            'usd': usd_balance,
-            'total_cad': cad_balance + (usd_balance * usd_to_cad_decimal)
+            d: {
+                'cad': cad_balance,
+                'usd': usd_balance,
+                'total_cad': cad_balance + (usd_balance * usd_to_cad_decimal)
+            }
+            for d, (cad_balance, usd_balance) in balances.items()
         }
 
     
@@ -1445,23 +1451,71 @@ class AssetValuationService:
         Returns:
             (CAD余额, USD余额)
         """
-        logger.debug(f"计算账户{account_id}在{target_date}的现金余额")
+        return self._calculate_cash_balances(account_id, [target_date])[target_date]
 
-        today = date.today()
-
-        if target_date >= today:
-            # 今天或未来日期：使用Cash表的当前数据
-            cash_record = Cash.get_account_cash(account_id)
-            if cash_record:
-                cad_balance = Decimal(str(cash_record.cad or 0))
-                usd_balance = Decimal(str(cash_record.usd or 0))
-                return cad_balance, usd_balance
+    def _calculate_cash_balances(self, account_id: int, target_dates: List[date]) -> Dict[date, tuple]:
+        """现金余额计算的唯一实现：{日期: (CAD余额, USD余额)}。
+        - 今天或未来日期：使用Cash表的当前数据（没有记录则为 0）
+        - 历史日期：从Cash表当前数据出发，按时间倒序倒推交易；多个日期共用一次倒推
+        同一请求内相同 (账户, 日期) 的结果会被记住（有写入时自动失效）。
+        """
+        from app.utils.query_memo import memo, peek
+        result: Dict[date, tuple] = {}
+        missing = []
+        for d in target_dates:
+            cached = peek('cash_balance', (account_id, d))
+            if cached is None:
+                missing.append(d)
             else:
-                return Decimal('0'), Decimal('0')
+                result[d] = cached
+        if missing:
+            for d, value in self._compute_cash_balances(account_id, missing).items():
+                memo('cash_balance', (account_id, d), lambda value=value: value)
+                result[d] = value
+        return result
+
+    def _compute_cash_balances(self, account_id: int, target_dates: List[date]) -> Dict[date, tuple]:
+        today = date.today()
+        cash_record = Cash.get_account_cash(account_id)
+        if cash_record:
+            current_cad = Decimal(str(cash_record.cad or 0))
+            current_usd = Decimal(str(cash_record.usd or 0))
         else:
-            # 历史日期：通过交易记录倒推计算
-            return self._calculate_historical_cash_balance_from_current(account_id, target_date)
-    
+            current_cad = Decimal('0')
+            current_usd = Decimal('0')
+
+        result: Dict[date, tuple] = {}
+        historical = sorted({d for d in target_dates if d < today}, reverse=True)
+        for d in target_dates:
+            if d >= today:
+                result[d] = (current_cad, current_usd)
+        if not historical:
+            return result
+
+        # 最早日期之后的全部现金相关交易，按时间倒序（从最近开始倒推）
+        transactions = Transaction.query.filter(
+            Transaction.account_id == account_id,
+            Transaction.trade_date > historical[-1],
+            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'FEE', 'TAX'])
+        ).order_by(Transaction.trade_date.desc(), Transaction.id.desc()).all()
+
+        cad_balance = current_cad
+        usd_balance = current_usd
+        applied = 0
+        # 日期从近到远：每个日期只需在上一个日期的基础上继续倒推“该日期之后”的交易
+        for d in historical:
+            while applied < len(transactions) and transactions[applied].trade_date > d:
+                cad_balance, usd_balance = self._reverse_transaction_impact(
+                    cad_balance, usd_balance, transactions[applied]
+                )
+                applied += 1
+            result[d] = (cad_balance, usd_balance)
+        return result
+
+    def _calculate_historical_cash_balance_from_current(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
+        """从Cash表的当前数据开始，倒推到目标日期的现金余额"""
+        return self._calculate_cash_balances(account_id, [target_date])[target_date]
+
     def _calculate_historical_cash_balance(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
         """
         通过交易记录计算历史现金余额
@@ -1484,38 +1538,6 @@ class AssetValuationService:
             )
 
         logger.info(f"账户{account_id}历史现金({target_date}): CAD=${cad_balance}, USD=${usd_balance}")
-        return cad_balance, usd_balance
-
-    def _calculate_historical_cash_balance_from_current(self, account_id: int, target_date: date) -> tuple[Decimal, Decimal]:
-        """
-        从Cash表的当前数据开始，倒推到目标日期的现金余额
-        """
-        # 获取当前现金余额作为基准
-        cash_record = Cash.get_account_cash(account_id)
-        if cash_record:
-            current_cad = Decimal(str(cash_record.cad or 0))
-            current_usd = Decimal(str(cash_record.usd or 0))
-        else:
-            current_cad = Decimal('0')
-            current_usd = Decimal('0')
-
-        # 获取目标日期之后的所有交易（需要倒推的交易）
-        transactions = Transaction.query.filter(
-            Transaction.account_id == account_id,
-            Transaction.trade_date > target_date,
-            Transaction.type.in_(['DEPOSIT', 'WITHDRAW', 'WITHDRAWAL', 'BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'FEE', 'TAX'])
-        ).order_by(Transaction.trade_date.desc(), Transaction.id.desc()).all()  # 按时间倒序，从最近开始倒推
-
-        cad_balance = current_cad
-        usd_balance = current_usd
-
-        # 倒推每笔交易的影响（反向操作）
-        for transaction in transactions:
-            cad_balance, usd_balance = self._reverse_transaction_impact(
-                cad_balance, usd_balance, transaction
-            )
-
-        logger.info(f"账户{account_id}倒推历史现金({target_date}): CAD=${cad_balance}, USD=${usd_balance}")
         return cad_balance, usd_balance
 
     def _reverse_transaction_impact(self, cad: Decimal, usd: Decimal, transaction: Transaction) -> tuple[Decimal, Decimal]:

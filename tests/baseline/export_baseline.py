@@ -206,8 +206,14 @@ class Exporter:
         self.result = {}
         self.timings = {}
 
-    def record(self, key, fn):
+    def record(self, key, fn, clear_perf_cache=False):
         t0 = time.time()
+        if clear_perf_cache:
+            # 只在临时副本里清空收益对比缓存，保证这一项走“无缓存”的完整计算路径
+            from app import db
+            with self.app.app_context():
+                db.session.execute(db.text('DELETE FROM performance_daily_cache'))
+                db.session.commit()
         try:
             # 每一项在独立的 app context 里计算，模拟一次独立请求（请求级记忆不会跨项共享）
             with self.app.app_context(), contextlib.redirect_stdout(io.StringIO()):
@@ -309,6 +315,15 @@ class Exporter:
             for rng in ('1m', 'ytd', 'all'):
                 self.record(f'today/comparison/{rng}/{name}', self.api(f'{base}/comparison?range={rng}{q}'))
         self.record('today/calendar/family/current', self.api('/api/v1/daily-stats/calendar'))
+
+        # 收益对比（无缓存冷启动）：每项之前清空 performance_daily_cache
+        cold_scopes = scopes + [(f'acct{a}', f'&account_id={a}') for a in account_ids]
+        for name, q in cold_scopes:
+            for rng in ('all', 'ytd', '1m'):
+                self.record(f'today/comparison_cold/{rng}/{name}', self.api(f'{base}/comparison?range={rng}{q}'),
+                            clear_perf_cache=True)
+            self.record(f'today/comparison_cold/all_twr/{name}',
+                        self.api(f'{base}/comparison?range=all&return_type=twr{q}'), clear_perf_cache=True)
 
     def html(self, url):
         """渲染 HTML 页面，按行保存（去掉首尾空白和空行），便于逐行对比。"""
