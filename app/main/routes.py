@@ -22,7 +22,6 @@ from app.models.cash import Cash
 # from app.services.analytics_service import analytics_service, TimePeriod  # 旧架构已废弃
 from app.services.currency_service import currency_service
 from app.services.asset_valuation_service import AssetValuationService
-from app.services.report_service import ReportService
 from app.services.account_service import AccountService
 from app.services.portfolio_service import PortfolioService, TimePeriod
 

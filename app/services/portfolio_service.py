@@ -2833,18 +2833,18 @@ class PortfolioService:
 
             for account_id in account_ids:
                 try:
-                    snapshot = asset_service.get_asset_snapshot(account_id, current_date)
+                    cash_balance = asset_service.get_cash_balance(account_id, current_date)
                 except Exception as exc:
                     logger.warning(f"无法获取账户{account_id}的现金余额: {exc}")
                     continue
 
                 ensure_account_info(account_id)
 
-                cash_total_cad += snapshot.cash_balance_total_cad
-                cash_cad_total += snapshot.cash_balance_cad
-                cash_usd_total += snapshot.cash_balance_usd
+                cash_total_cad += cash_balance['total_cad']
+                cash_cad_total += cash_balance['cad']
+                cash_usd_total += cash_balance['usd']
 
-                cash_value_cad = float(snapshot.cash_balance_total_cad)
+                cash_value_cad = float(cash_balance['total_cad'])
                 if cash_value_cad > 0:
                     by_account[account_id]['value'] += cash_value_cad
 

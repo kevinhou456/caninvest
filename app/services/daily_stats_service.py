@@ -4,7 +4,7 @@
 基于现有统一服务架构，确保模块化和高可维护性
 
 设计原则:
-1. 复用现有服务：最大程度利用ReportService、AssetValuationService等
+1. 复用现有服务：最大程度利用PortfolioService、AssetValuationService等
 2. 智能缓存：利用SmartHistoryManager优化历史数据访问
 3. 增量计算：基于两个时间点的快照计算日变化
 4. 可扩展性：易于添加新的日统计指标
@@ -20,10 +20,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.services.asset_valuation_service import AssetValuationService
-from app.services.report_service import ReportService
 from app.services.smart_history_manager import SmartHistoryManager
 from app.services.stock_history_cache_service import StockHistoryCacheService
-from app.services.daily_stats_cache_service import daily_stats_cache_service
 from app.services.portfolio_service import portfolio_service, TimePeriod
 from app.services.currency_service import currency_service
 
@@ -132,7 +130,6 @@ class DailyStatsService:
     
     def __init__(self):
         self.asset_service = AssetValuationService()
-        self.report_service = ReportService()
         self.history_manager = SmartHistoryManager()
         self.history_cache_service = StockHistoryCacheService()
         self.portfolio_service = portfolio_service
@@ -182,6 +179,14 @@ class DailyStatsService:
         today = date.today()
         return self.get_monthly_calendar_data(account_ids, today.year, today.month, ownership_map)
     
+    @staticmethod
+    def _get_previous_business_day(target_date: date) -> date:
+        """获取前一个工作日（只跳过周末）"""
+        previous_date = target_date - timedelta(days=1)
+        while previous_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
+            previous_date -= timedelta(days=1)
+        return previous_date
+
     def get_daily_floating_pnl(self, account_ids: List[int], target_date: date,
                                ownership_map: Optional[Dict[int, Decimal]] = None) -> Dict:
         """
@@ -200,7 +205,7 @@ class DailyStatsService:
         combined_report = self._get_combined_daily_report(account_ids, target_date, ownership_map)
         
         # 计算前一交易日的对比
-        prev_trading_date = self.report_service._get_previous_business_day(target_date)
+        prev_trading_date = self._get_previous_business_day(target_date)
         prev_report = self._get_combined_daily_report(account_ids, prev_trading_date, ownership_map)
         
         # 计算变化

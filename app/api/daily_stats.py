@@ -17,7 +17,6 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from app.services.daily_stats_service import daily_stats_service
-from app.services.daily_stats_cache_service import daily_stats_cache_service
 from app.models.account import Account, AccountMember
 from app.models.family import Family
 from app.models.member import Member
@@ -171,7 +170,6 @@ def get_monthly_calendar():
             'data': calendar_data.to_dict(),
             'meta': {
                 'request_time': datetime.utcnow().isoformat(),
-                'cache_info': daily_stats_cache_service.get_cache_statistics()
             }
         })
         
@@ -465,105 +463,3 @@ def get_calendar_summary():
             'error': '获取月历汇总统计失败',
             'message': str(e)
         }), 500
-
-
-@daily_stats_bp.route('/cache/status', methods=['GET'])
-def get_cache_status():
-    """
-    获取缓存状态信息（用于监控和调试）
-    
-    Returns:
-    {
-        "success": true,
-        "data": {
-            "strategy": "balanced",
-            "memory_cache": {
-                "asset_snapshots_count": 150,
-                "monthly_calendars_count": 3,
-                "total_memory_entries": 153
-            },
-            "price_cache": {
-                "total_records": 15000,
-                "date_range": {
-                    "earliest_date": "2023-01-01",
-                    "latest_date": "2024-01-31"
-                }
-            }
-        }
-    }
-    """
-    try:
-        cache_stats = daily_stats_cache_service.get_cache_statistics()
-        
-        return jsonify({
-            'success': True,
-            'data': cache_stats,
-            'meta': {
-                'request_time': datetime.utcnow().isoformat()
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"获取缓存状态失败: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': '获取缓存状态失败',
-            'message': str(e)
-        }), 500
-
-
-@daily_stats_bp.route('/cache/cleanup', methods=['POST'])
-def cleanup_cache():
-    """
-    清理过期缓存（管理接口）
-    
-    Returns:
-    {
-        "success": true,
-        "message": "缓存清理完成"
-    }
-    """
-    try:
-        # 暂时跳过权限检查，允许所有用户清理缓存
-        
-        logger.info("执行缓存清理")
-        
-        # 执行缓存清理
-        daily_stats_cache_service.cleanup_expired_cache()
-        
-        return jsonify({
-            'success': True,
-            'message': '缓存清理完成',
-            'meta': {
-                'request_time': datetime.utcnow().isoformat()
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"缓存清理失败: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': '缓存清理失败',
-            'message': str(e)
-        }), 500
-
-
-@daily_stats_bp.errorhandler(404)
-def not_found(error):
-    """404错误处理"""
-    return jsonify({
-        'success': False,
-        'error': '接口不存在',
-        'message': '请检查API路径是否正确'
-    }), 404
-
-
-@daily_stats_bp.errorhandler(500)
-def internal_error(error):
-    """500错误处理"""
-    logger.error(f"Daily Stats API内部错误: {error}", exc_info=True)
-    return jsonify({
-        'success': False,
-        'error': '服务器内部错误',
-        'message': '请稍后重试或联系管理员'
-    }), 500
