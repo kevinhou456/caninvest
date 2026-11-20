@@ -415,6 +415,11 @@
                                             <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id, account_type=account_type) }}" class="text-decoration-none">
                                                 <strong>{{ holding['symbol'] }}</strong>
                                             </a>
+                                            {% if holding.get('oversold_flags') %}
+                                                <span class="badge bg-warning text-dark ms-1 oversold-badge"
+                                                      data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="top"
+                                                      title="{{ _('Transaction records may be incomplete') }}:{% for ev in holding['oversold_flags'] %}<br>{{ ev['account_name'] }} {{ ev['trade_date'] }} {{ _('sold') }} {{ ev['sell_quantity']|format_shares }} {{ _('shares, held only') }} {{ ev['shares_before']|format_shares }} ({{ _('short') }} {{ ev['shortfall']|format_shares }}){% endfor %}<br>{{ _('Please check the transactions on the stock detail page') }}">{{ _('Oversold') }}</span>
+                                                {% endif %}
                                             <br><small class="text-muted">{{ holding['sector'] or 'Unknown' }}</small>
                                         </div>
                                     </div>
@@ -637,6 +642,11 @@
                                         <a href="{{ url_for('main.stock_detail', stock_symbol=holding['symbol'], member_id=member_id, account_id=account_id, account_type=account_type) }}" class="text-decoration-none">
                                             <strong>{{ holding['symbol'] }}</strong>
                                         </a>
+                                        {% if holding.get('oversold_flags') %}
+                                                <span class="badge bg-warning text-dark ms-1 oversold-badge"
+                                                      data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="top"
+                                                      title="{{ _('Transaction records may be incomplete') }}:{% for ev in holding['oversold_flags'] %}<br>{{ ev['account_name'] }} {{ ev['trade_date'] }} {{ _('sold') }} {{ ev['sell_quantity']|format_shares }} {{ _('shares, held only') }} {{ ev['shares_before']|format_shares }} ({{ _('short') }} {{ ev['shortfall']|format_shares }}){% endfor %}<br>{{ _('Please check the transactions on the stock detail page') }}">{{ _('Oversold') }}</span>
+                                                {% endif %}
                                     </div>
                                 </td>
                                 

@@ -3102,3 +3102,21 @@ msgstr ""
 msgid "Holdings Board"
 msgstr "持仓看板"
 
+
+msgid "Oversold"
+msgstr "卖超"
+
+msgid "Transaction records may be incomplete"
+msgstr "交易记录可能不完整"
+
+msgid "sold"
+msgstr "卖出"
+
+msgid "shares, held only"
+msgstr "股，卖出前仅持有"
+
+msgid "short"
+msgstr "差"
+
+msgid "Please check the transactions on the stock detail page"
+msgstr "请到个股详情页核对交易记录"

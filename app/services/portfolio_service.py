@@ -98,10 +98,15 @@ class PositionSnapshot:
     
     # FIFO批次（内部使用）
     _fifo_lots: List[FIFOLot] = None
-    
+
+    # 卖超记录：卖出数量超过卖出前持有数量（说明交易记录不完整，此后的成本/收益可能不准）
+    oversold_events: List[Dict] = None
+
     def __post_init__(self):
         if self._fifo_lots is None:
             self._fifo_lots = []
+        if self.oversold_events is None:
+            self.oversold_events = []
     
     def to_dict(self) -> Dict:
         # 计算已实现收益率（用于清仓股票）
@@ -144,6 +149,7 @@ class PositionSnapshot:
             'previous_value': float(self.previous_value),
             'daily_change_value': float(self.daily_change_value),
             'daily_change_percent': float(self.daily_change_percent),
+            'oversold_events': [dict(event) for event in self.oversold_events],
             'as_of_date': self.as_of_date.isoformat()
         }
 
@@ -174,6 +180,10 @@ class PeriodStats:
     period_price_change: Decimal = Decimal('0')
     period_value_change: Decimal = Decimal('0')
     period_unrealized_gain_change: Decimal = Decimal('0')
+
+
+# 卖出数量超过持有数量多少股以上才算“卖超”（容忍零碎股的舍入误差）
+OVERSOLD_TOLERANCE_SHARES = Decimal('0.0001')
 
 
 class PortfolioService:
@@ -299,6 +309,15 @@ class PortfolioService:
         elif tx.type == 'SELL':
             quantity = Decimal(str(tx.quantity))
             sell_proceeds = Decimal(str(tx.net_amount))
+            if quantity > snapshot.current_shares + OVERSOLD_TOLERANCE_SHARES:
+                # 只记录，不改变任何计算
+                snapshot.oversold_events.append({
+                    'trade_date': tx.trade_date.isoformat() if tx.trade_date else None,
+                    'transaction_id': tx.id,
+                    'sell_quantity': float(quantity),
+                    'shares_before': float(snapshot.current_shares),
+                    'shortfall': float(quantity - snapshot.current_shares),
+                })
             if snapshot.current_shares > 0:
                 avg_cost = snapshot.total_cost / snapshot.current_shares
                 cost_basis = avg_cost * quantity
@@ -378,7 +397,12 @@ class PortfolioService:
                 memo('portfolio_holdings', (key_accounts, d), lambda value=value: value)
                 result[d] = value
         # 返回副本：调用方可能修改持仓字典
-        return {d: ([dict(h) for h in result[d][0]], [dict(h) for h in result[d][1]]) for d in end_dates}
+        def copy_holding(h):
+            copied = dict(h)
+            copied['oversold_events'] = [dict(e) for e in h.get('oversold_events', [])]
+            return copied
+        return {d: ([copy_holding(h) for h in result[d][0]], [copy_holding(h) for h in result[d][1]])
+                for d in end_dates}
 
     def _compute_holdings_for_dates(self, account_ids: List[int],
                                     dates: List[date]) -> Dict[date, Tuple[List[Dict], List[Dict]]]:
@@ -414,7 +438,8 @@ class PortfolioService:
                     # 截止日前没有任何交易：与原逻辑一样不取行情，也不计入任何列表
                     if applied == 0:
                         continue
-                    position = dataclasses.replace(running, as_of_date=d)
+                    position = dataclasses.replace(running, as_of_date=d,
+                                                   oversold_events=list(running.oversold_events))
                     self._update_market_data(position)
                     self._update_stock_info(position)
                     if position.current_shares > 0:

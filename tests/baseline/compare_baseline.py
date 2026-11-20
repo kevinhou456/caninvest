@@ -62,7 +62,9 @@ def main():
     p.add_argument('--prefix', default='', help='只比较以此开头的条目，如 stable/')
     p.add_argument('--tol', type=float, default=1e-6)
     p.add_argument('--max', type=int, default=200, help='最多打印多少条差异')
+    p.add_argument('--ignore-key', action='append', default=[], help='额外忽略的字段名（可多次指定）')
     args = p.parse_args()
+    IGNORED_KEYS.update(args.ignore_key)
 
     old_doc = json.load(open(args.old, encoding='utf-8'))
     new_doc = json.load(open(args.new, encoding='utf-8'))

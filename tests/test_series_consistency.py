@@ -90,6 +90,8 @@ class SeriesConsistencyTest(unittest.TestCase):
         tx(a2, 40, 'SELL', 'BBB.TO', 20, 31, 4.95, currency='CAD')
         tx(a2, 41, 'INTEREST', amount=3.21, currency='CAD')
         tx(a2, 59, 'BUY', 'BBB.TO', 10, 30.8, 0, currency='CAD')
+        tx(a1, 35, 'SELL', 'CCC', 70, 7.2, 0)           # 卖超：此时只持有 60 股
+        tx(a1, 45, 'BUY', 'CCC', 30, 7.0, 0)            # 卖超后又买回
         db.session.add(Cash(account_id=a1.id, cad=Decimal('12.50'), usd=Decimal('321.09')))
         db.session.commit()
 
@@ -143,6 +145,13 @@ class SeriesConsistencyTest(unittest.TestCase):
         # 确认测试数据确实覆盖到持仓、清仓
         some = self._per_date_summary(self.account_ids, START + timedelta(days=13), None)
         self.assertTrue(some['current_holdings'] and some['cleared_holdings'])
+        # 卖超记录只出现在卖超日期之后，且批量结果里各日期互不影响
+        before = self._per_date_summary(self.account_ids, START + timedelta(days=33), None)
+        after = self._per_date_summary(self.account_ids, START + timedelta(days=37), None)
+        events = lambda summary: [e for h in summary['current_holdings'] + summary['cleared_holdings']
+                                  for e in h['oversold_events']]
+        self.assertEqual(events(before), [])
+        self.assertEqual([round(e['shortfall'], 4) for e in events(after)], [10.0])
 
     def test_cash_series_matches_per_date(self):
         from app.services.asset_valuation_service import AssetValuationService

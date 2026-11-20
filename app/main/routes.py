@@ -242,6 +242,22 @@ def _get_overview_target_date(base_date=None):
         return base_date
 
 
+def _attach_oversold_flags(rows, raw_positions, account_name_for):
+    """把核心函数记录的卖超事件挂到总览表格的行上（按 股票+币种 匹配）。
+
+    在合并之后按原始持仓（当前持仓 + 已清仓）重新收集，不依赖合并逻辑本身，
+    因此即使某账户已清仓、只把已实现收益并入了另一账户的持仓行，也不会丢失标记。
+    结果写在 row['oversold_flags']，每项带账户名。
+    """
+    events_by_key = {}
+    for position in raw_positions:
+        for event in position.get('oversold_events') or []:
+            key = (position.get('symbol'), position.get('currency'))
+            events_by_key.setdefault(key, []).append(dict(event, account_name=account_name_for(position)))
+    for row in rows:
+        row['oversold_flags'] = events_by_key.get((row.get('symbol'), row.get('currency')), [])
+
+
 def _build_portfolio_view_data(
     *,
     account_ids,
@@ -555,6 +571,9 @@ def _build_portfolio_view_data(
     # 按股票+币种合并，避免跨账户重复行（单账户也安全）
     holdings = consolidate_by_symbol_currency(holdings, drop_zero_holdings=True)
     cleared_holdings = consolidate_by_symbol_currency(cleared_holdings, drop_zero_holdings=False)
+
+    # 卖超标记（交易记录可能不完整）
+    _attach_oversold_flags(holdings + cleared_holdings, raw_holdings + raw_cleared_holdings, format_account_name)
 
     ibit_holdings = [h for h in holdings if h.get('symbol') == 'IBIT']
     ibit_cleared = [h for h in cleared_holdings if h.get('symbol') == 'IBIT']
