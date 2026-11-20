@@ -136,15 +136,11 @@ def get_account(account_id):
     """获取账户详情"""
     account = Account.query.get_or_404(account_id)
     
-    # 获取持仓摘要
-    holdings_summary = account.get_holdings_summary()
-    
     # 获取最近交易
     from app.models.transaction import Transaction
-    recent_transactions = Transaction.get_transactions_by_account(account_id, limit=20)
+    recent_transactions = Transaction.get_by_account(account_id, limit=20)
     
     result = account.to_dict(include_summary=True)
-    result['holdings_summary'] = holdings_summary
     result['recent_transactions'] = [txn.to_dict() for txn in recent_transactions]
     
     return jsonify(result)
@@ -228,59 +224,3 @@ def delete_account(account_id):
     return jsonify({
         'message': _('Account deleted successfully')
     })
-
-@bp.route('/accounts/<int:account_id>/holdings', methods=['GET'])
-def get_account_holdings(account_id):
-    """获取账户持仓"""
-    account = Account.query.get_or_404(account_id)
-    
-    # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
-    # holdings = CurrentHolding.get_holdings_by_account(account_id)  # Temporarily disabled
-    holdings = []  # TODO: Re-implement with new holding system
-    
-    return jsonify({
-        'account': account.to_dict(),
-        'holdings': [holding.to_dict() for holding in holdings],
-        'summary': account.get_holdings_summary()
-    })
-
-@bp.route('/accounts/<int:account_id>/performance', methods=['GET'])
-def get_account_performance(account_id):
-    """获取账户表现"""
-    account = Account.query.get_or_404(account_id)
-    
-    # 获取时间范围参数
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    period = request.args.get('period', 'daily')  # daily, weekly, monthly
-    
-    from datetime import datetime, timedelta
-    
-    if not start_date:
-        # 默认显示最近3个月
-        start_date = (datetime.now() - timedelta(days=90)).date()
-    else:
-        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-    
-    if not end_date:
-        end_date = datetime.now().date()
-    else:
-        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-    
-    # 这里应该实现历史价值计算逻辑
-    # 简化版本：返回当前数据
-    performance_data = {
-        'account': account.to_dict(),
-        'current_value': float(account.current_value or 0),
-        'total_cost': float(account.total_cost or 0),
-        'unrealized_gain': float(account.unrealized_gain or 0),
-        'unrealized_gain_percent': account.unrealized_gain_percent or 0,
-        'realized_gain': float(account.realized_gain or 0),
-        'historical_data': {
-            'dates': [],
-            'values': [],
-            'returns': []
-        }
-    }
-    
-    return jsonify(performance_data)

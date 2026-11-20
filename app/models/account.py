@@ -72,59 +72,13 @@ class Account(db.Model):
         }
         
         if include_summary:
+            # 金额类字段（市值/收益）不在模型里计算，统一由 PortfolioService 提供
             result.update({
-                'current_value': float(self.current_value or 0),
-                'unrealized_gain': float(self.unrealized_gain or 0),
-                'realized_gain': float(self.realized_gain or 0),
                 'transaction_count': self.transactions.count(),
-                'holding_count': 0,  # TODO: Re-implement with new holding system
                 'members': [am.to_dict() for am in self.account_members]
             })
         
         return result
-    
-    @property
-    def current_value(self):
-        """当前市值 - temporarily disabled"""
-        # TODO: Re-implement with new holding system
-        # total = 0
-        # for holding in self.holdings:
-        #     if holding.current_price:
-        #         total += holding.total_shares * holding.current_price
-        # return total
-        return 0
-    
-    @property
-    def total_cost(self):
-        """总成本 - temporarily disabled"""
-        # TODO: Re-implement with new holding system
-        # total = 0
-        # for holding in self.holdings:
-        #     total += holding.total_shares * holding.average_cost
-        # return total
-        return 0
-    
-    @property
-    def unrealized_gain(self):
-        """未实现收益"""
-        return self.current_value - self.total_cost
-    
-    @property
-    def unrealized_gain_percent(self):
-        """未实现收益率"""
-        if self.total_cost == 0:
-            return 0
-        return (self.unrealized_gain / self.total_cost) * 100
-    
-    @property
-    def realized_gain(self):
-        """已实现收益"""
-        from app.models.transaction import Transaction
-        portfolio = Transaction.get_portfolio_summary(account_id=self.id)
-        total = 0
-        for stock_data in portfolio.values():
-            total += stock_data.get('realized_gain', 0)
-        return total
     
     def get_members(self):
         """获取账户成员"""
@@ -140,20 +94,6 @@ class Account(db.Model):
         )
         db.session.add(account_member)
         return account_member
-    
-    def get_holdings_summary(self):
-        """获取持仓摘要 - temporarily disabled"""
-        # TODO: Re-implement with new holding system
-        return {
-            'holdings': [],
-            'summary': {
-                'total_value': 0,
-                'total_cost': 0,
-                'total_unrealized_gain': 0,
-                'total_unrealized_gain_percent': 0,
-                'holding_count': 0
-            }
-        }
 
 class AccountMember(db.Model):
     """账户成员关系模型"""

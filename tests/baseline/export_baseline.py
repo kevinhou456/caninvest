@@ -452,16 +452,6 @@ class Exporter:
         self.record('pages/holdings_board_html', self.html('/holdings-board'))
         self.record('pages/holdings_analysis_html', self.html('/holdings-analysis'))
 
-        # 持仓接口
-        as_of_dates = [today.isoformat(), (today - timedelta(days=45)).isoformat(), '2025-12-31']
-        for d in as_of_dates:
-            self.record(f'pages/holdings_api/all/{d}', self.api(f'/api/v1/holdings?family_id={fam_id}&as_of_date={d}'))
-            for a in account_ids:
-                self.record(f'pages/holdings_snapshot/acct{a}/{d}',
-                            self.api(f'/api/v1/holdings/snapshot/{a}?as_of_date={d}'))
-            for m in member_ids:
-                self.record(f'pages/holdings_member/member{m}/{d}',
-                            self.api(f'/api/v1/holdings/member/{m}?as_of_date={d}'))
         self.record('pages/cash_data', self.api('/api/accounts/cash-data'))
 
         # 个股详情（持仓最多的几只 + 已清仓的一只）

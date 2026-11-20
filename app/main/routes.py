@@ -21,7 +21,6 @@ from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
 from app.models.cash import Cash
 # from app.services.analytics_service import analytics_service, TimePeriod  # 旧架构已废弃
 from app.services.currency_service import currency_service
-from app.services.holdings_service import holdings_service
 from app.services.asset_valuation_service import AssetValuationService
 from app.services.report_service import ReportService
 from app.services.account_service import AccountService
@@ -1396,9 +1395,6 @@ def holdings_board():
         from app.services.currency_service import CurrencyService
         currency_service = CurrencyService()
         exchange_rates = currency_service.get_cad_usd_rates()
-
-        # 获取持仓服务
-        from app.services.holdings_service import holdings_service
 
         return render_template('investment/holdings_board.html',
                              title=_('Holdings Board'),
@@ -3091,134 +3087,6 @@ def delete_account_transactions(account_id):
 
 
 
-@bp.route('/api/v1/holdings')
-def api_get_holdings():
-    """新的持仓API - 支持灵活的查询参数"""
-    try:
-        # 获取查询参数
-        target = request.args.get('target', 'all')  # 'all', account_id, member_id
-        target_type = request.args.get('target_type', 'account')  # 'account' or 'member'
-        as_of_date_str = request.args.get('as_of_date')  # YYYY-MM-DD format
-        family_id = request.args.get('family_id', type=int)
-        
-        # 解析日期参数
-        as_of_date = None
-        if as_of_date_str:
-            try:
-                from datetime import datetime
-                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
-            except ValueError:
-                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
-        
-        # 解析target参数
-        if target != 'all':
-            try:
-                target = int(target)
-            except ValueError:
-                return jsonify({'error': 'Invalid target parameter'}), 400
-        
-        # 获取持仓信息
-        portfolio_summary = holdings_service.get_portfolio_summary(
-            target=target,
-            target_type=target_type,
-            as_of_date=as_of_date,
-            family_id=family_id
-        )
-        
-        return jsonify({
-            'success': True,
-            'data': portfolio_summary
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in holdings API: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@bp.route('/api/v1/holdings/snapshot/<int:account_id>')
-def api_get_account_holdings_snapshot(account_id):
-    """获取特定账户的持仓快照"""
-    try:
-        as_of_date_str = request.args.get('as_of_date')
-        as_of_date = None
-        
-        if as_of_date_str:
-            try:
-                from datetime import datetime
-                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
-            except ValueError:
-                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
-        
-        # 获取持仓快照
-        snapshot = holdings_service.get_holdings_snapshot(
-            target=account_id,
-            target_type='account',
-            as_of_date=as_of_date
-        )
-        
-        # 获取该账户的所有持仓
-        account_holdings = snapshot.get_account_holdings(account_id)
-        
-        # 转换为API响应格式
-        holdings_data = []
-        for holding in account_holdings:
-            holdings_data.append(holding.to_dict())
-        
-        return jsonify({
-            'success': True,
-            'data': {
-                'account_id': account_id,
-                'as_of_date': snapshot.as_of_date.isoformat(),
-                'holdings': holdings_data,
-                'total_holdings': len(holdings_data)
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in account holdings snapshot API: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@bp.route('/api/v1/holdings/member/<int:member_id>')
-def api_get_member_holdings(member_id):
-    """获取特定成员的持仓信息"""
-    try:
-        as_of_date_str = request.args.get('as_of_date')
-        as_of_date = None
-        
-        if as_of_date_str:
-            try:
-                from datetime import datetime
-                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
-            except ValueError:
-                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
-        
-        # 获取成员的持仓汇总
-        portfolio_summary = holdings_service.get_portfolio_summary(
-            target=member_id,
-            target_type='member',
-            as_of_date=as_of_date
-        )
-        
-        return jsonify({
-            'success': True,
-            'data': portfolio_summary
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in member holdings API: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
 @bp.route('/stock/<stock_symbol>')
 def stock_detail(stock_symbol):
     """股票详情页面 - 显示价格图表和交易记录"""
@@ -3944,114 +3812,6 @@ def fetch_history_tool():
         success=success
     )
 
-
-@bp.route('/api/portfolio/async-prices', methods=['POST'])
-def get_async_portfolio_prices():
-    """异步获取投资组合股票价格API"""
-    try:
-        from app.services.asset_valuation_service import AssetValuationService
-        from app.services.holdings_service import HoldingsService
-        
-        # 获取请求参数
-        data = request.get_json()
-        account_ids = data.get('account_ids', [])
-        member_id = data.get('member_id')
-        family_id = data.get('family_id')
-        force_refresh = data.get('force_refresh', False)  # 添加强制刷新参数
-        
-        if not account_ids:
-            return jsonify({
-                'success': False,
-                'error': 'No account IDs provided'
-            }), 400
-        
-        # 获取基础持仓数据（不包含价格）
-        holdings_service = HoldingsService()
-        holdings_snapshot = holdings_service.get_holdings_snapshot(
-            target=account_ids,
-            target_type='account',
-            as_of_date=None,
-            family_id=family_id
-        )
-        
-        # 获取需要更新价格的股票列表（去重）
-        stock_symbols = set()  # 使用set自动去重
-        for symbol, account_holdings in holdings_snapshot.holdings.items():
-            for account_id, holding in account_holdings.items():
-                if holding.current_shares > 0:
-                    # 从holding对象获取货币信息
-                    currency = getattr(holding, 'currency', 'USD')
-                    stock_symbols.add((symbol, currency))  # 使用add方法，自动去重
-        
-        # 转换为列表
-        stock_symbols = list(stock_symbols)
-        
-        if not stock_symbols:
-            return jsonify({
-                'success': True,
-                'holdings': [],
-                'message': 'No holdings found'
-            })
-        
-        # 异步更新股票价格
-        from app.services.stock_price_service import StockPriceService
-        stock_service = StockPriceService()
-        
-        # 批量更新价格
-        update_results = stock_service.update_prices_for_symbols(stock_symbols, force_refresh=force_refresh)
-        
-        # 确保数据库事务已提交
-        from app import db
-        db.session.commit()
-        
-        # 等待一小段时间确保所有价格更新都完成
-        import time
-        time.sleep(0.1)
-        
-        # 使用Portfolio Service重新计算持仓价值
-        from app.services.portfolio_service import PortfolioService, TimePeriod
-        portfolio_service = PortfolioService(auto_refresh_prices=False)
-        portfolio_summary = portfolio_service.get_portfolio_summary(account_ids, TimePeriod.ALL_TIME)
-
-        accounts = Account.query.filter(Account.id.in_(account_ids)).all()
-        ownership_map = _build_ownership_map(member_id) if member_id else None
-        asset_service = AssetValuationService(auto_refresh_prices=False)
-        view_data = _build_portfolio_view_data(
-            account_ids=account_ids,
-            accounts=accounts,
-            portfolio_summary=portfolio_summary,
-            asset_service=asset_service,
-            ownership_map=ownership_map,
-            target_date=date.today(),
-            exchange_rates=currency_service.get_cad_usd_rates(),
-            account_id=None
-        )
-
-        holdings = view_data['holdings']
-        cleared_holdings = view_data['cleared_holdings']
-        comprehensive_metrics = view_data['metrics']
-
-        return jsonify({
-            'success': True,
-            'holdings': holdings,
-            'cleared_holdings': cleared_holdings,
-            'metrics': comprehensive_metrics,
-            'daily_change': view_data['daily_change'],
-            'exchange_rates': {},
-            'update_results': update_results
-        })
-        
-    except Exception as e:
-        current_app.logger.error(f"异步获取股票价格失败: {str(e)}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': f'Failed to update stock prices: {str(e)}'
-        }), 500
-
-
-# ============================================================
-# Manage Holidays
-# ============================================================
 
 @bp.route('/manage/holidays')
 def manage_holidays():

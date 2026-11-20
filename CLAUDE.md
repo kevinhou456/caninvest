@@ -35,10 +35,8 @@ current_shares -= quantity
 - ❌ 新增任何基于批次的成本计算逻辑
 
 ### 已实现的文件（勿改回 FIFO）
-- `app/models/transaction.py` — `get_portfolio_summary()`
 - `app/services/portfolio_service.py` — `_process_transaction_acb()`
 - `app/services/asset_valuation_service.py` — `_calculate_stock_stats()`、`_calculate_stock_statistics()`、`_calculate_stock_realized_gain()`、`_calculate_cost_basis_breakdown()`、`_calculate_realized_gain_for_account()`
-- `app/services/holdings_service.py` — `AccountHolding.add_sell_transaction()`
 
 ## 统一计算架构
 
