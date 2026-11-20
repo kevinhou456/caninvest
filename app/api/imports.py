@@ -760,13 +760,6 @@ def import_csv_with_mapping():
                 'created_count': 0,
             }), 400
 
-        if created_count or deleted_count:
-            # Cash is reconstructed backwards: changes can affect dates before the imported rows.
-            from app.models.performance_daily_cache import PerformanceDailyCache
-            from app.api.reports import invalidate_report_cache_for_account
-            PerformanceDailyCache.query.filter_by(account_id=account_id).delete(synchronize_session=False)
-            invalidate_report_cache_for_account(account_id, commit=False)
-
         db.session.commit()
         
         # 保存格式映射以备将来使用

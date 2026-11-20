@@ -2,14 +2,12 @@
 主要路由 - 页面视图
 """
 
-import hashlib
-import json
 from flask import render_template, request, jsonify, redirect, url_for, flash, session, current_app
 from flask_babel import _
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta, timezone
 from bisect import bisect_left
-from sqlalchemy import func, tuple_, text as sa_text
+from sqlalchemy import text as sa_text
 from app.main import bp
 from app import db
 from app.models.family import Family
@@ -20,9 +18,7 @@ from app.models.transaction import Transaction
 from app.models.stocks_cache import StocksCache
 from app.models.import_task import ImportTask, OCRTask
 from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
-from app.models.stock_price_history import StockPriceHistory
 from app.models.cash import Cash
-from app.models.overview_snapshot import OverviewSnapshot
 # from app.services.analytics_service import analytics_service, TimePeriod  # 旧架构已废弃
 from app.services.currency_service import currency_service
 from app.services.holdings_service import holdings_service
@@ -44,58 +40,6 @@ def _build_ownership_map(member_id):
         except Exception:
             ownership_map[membership.account_id] = Decimal('0')
     return ownership_map
-
-
-def _normalize_ownership_map(ownership_map):
-    if not ownership_map:
-        return []
-    normalized = []
-    for account_id, proportion in ownership_map.items():
-        try:
-            normalized.append((int(account_id), str(Decimal(str(proportion)))))
-        except Exception:
-            normalized.append((int(account_id), str(proportion)))
-    return sorted(normalized, key=lambda item: item[0])
-
-
-def _build_overview_snapshot_key(account_ids, ownership_map, selected_account_id):
-    payload = {
-        'schema_version': 3,
-        'account_ids': sorted(set(account_ids or [])),
-        'ownership': _normalize_ownership_map(ownership_map),
-        'selected_account_id': selected_account_id
-    }
-    raw = json.dumps(payload, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha1(raw.encode('utf-8')).hexdigest(), payload
-
-
-def _json_default(value):
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return str(value)
-
-
-def _dump_snapshot_payload(payload):
-    return json.dumps(payload, ensure_ascii=False, default=_json_default)
-
-
-def _extract_snapshot_symbols(snapshot_payload):
-    symbols = []
-    seen = set()
-    # Cleared holdings also show name/category, so their changes must invalidate too.
-    for holding in (snapshot_payload.get('holdings') or []) + (snapshot_payload.get('cleared_holdings') or []):
-        symbol = holding.get('symbol')
-        if not symbol:
-            continue
-        currency = (holding.get('currency') or 'USD').upper()
-        key = (symbol, currency)
-        if key in seen:
-            continue
-        seen.add(key)
-        symbols.append({'symbol': symbol, 'currency': currency})
-    return symbols
 
 
 def _is_numeric(value):
@@ -189,79 +133,8 @@ def _merge_comprehensive_metrics(per_account_views, ownership_map, exchange_rate
     return merged
 
 
-def _get_latest_stock_info_update(symbols):
-    """Latest change to the snapshot's stocks: price, name or category (stocks_cache.updated_at)."""
-    if not symbols:
-        return None
-    pairs = []
-    for item in symbols:
-        symbol = item.get('symbol')
-        if not symbol:
-            continue
-        currency = (item.get('currency') or 'USD').upper()
-        pairs.append((symbol, currency))
-    if not pairs:
-        return None
-    return db.session.query(func.max(StocksCache.updated_at)).filter(
-        tuple_(StocksCache.symbol, StocksCache.currency).in_(pairs)
-    ).scalar()
-
-
-def _get_latest_history_update(symbols):
-    if not symbols:
-        return None
-    pairs = []
-    for item in symbols:
-        symbol = item.get('symbol')
-        if not symbol:
-            continue
-        currency = (item.get('currency') or 'USD').upper()
-        pairs.append((symbol, currency))
-    if not pairs:
-        return None
-    return db.session.query(func.max(StockPriceHistory.updated_at)).filter(
-        tuple_(StockPriceHistory.symbol, StockPriceHistory.currency).in_(pairs)
-    ).scalar()
-
-
-def _is_overview_snapshot_fresh(snapshot, account_ids):
-    if not snapshot:
-        return False
-    snapshot_time = snapshot.updated_at or snapshot.created_at
-    if not snapshot_time:
-        return False
-
-    max_tx = db.session.query(func.max(Transaction.updated_at)).filter(
-        Transaction.account_id.in_(account_ids)
-    ).scalar()
-    if max_tx and max_tx > snapshot_time:
-        return False
-
-    max_cash = db.session.query(func.max(Cash.updated_at)).filter(
-        Cash.account_id.in_(account_ids)
-    ).scalar()
-    if max_cash and max_cash > snapshot_time:
-        return False
-
-    symbols = json.loads(snapshot.symbols_json) if snapshot.symbols_json else []
-    max_stock_info = _get_latest_stock_info_update(symbols)
-    if max_stock_info and max_stock_info > snapshot_time:
-        return False
-
-    # Renaming a category changes what the holdings show as their sector.
-    from app.models.stock_category import StockCategory
-    max_category = db.session.query(func.max(StockCategory.updated_at)).scalar()
-    if max_category and max_category > snapshot_time:
-        return False
-
-    max_history = _get_latest_history_update(symbols)
-    if max_history and max_history > snapshot_time:
-        return False
-
-    return True
-
-
-def _get_or_build_overview_snapshot(*, account_ids, accounts, ownership_map, target_date, exchange_rates, account_id):
+def _build_overview_view_data(*, account_ids, accounts, ownership_map, target_date, exchange_rates, account_id):
+    """计算总览页数据（每次实时计算，不使用快照缓存）。"""
     if not account_ids:
         return {
             'holdings': [],
@@ -271,19 +144,7 @@ def _get_or_build_overview_snapshot(*, account_ids, accounts, ownership_map, tar
             'portfolio_summary': {'summary': {}}
         }
 
-    snapshot_key, key_payload = _build_overview_snapshot_key(account_ids, ownership_map, account_id)
-    snapshot = OverviewSnapshot.query.filter_by(
-        snapshot_date=target_date,
-        snapshot_key=snapshot_key
-    ).first()
-
-    if snapshot and _is_overview_snapshot_fresh(snapshot, account_ids):
-        try:
-            return json.loads(snapshot.data_json)
-        except Exception:
-            snapshot = None
-
-    # 多账户请求优先复用单账户快照，再合并计算组合快照
+    # 多账户：先逐个计算单账户视图，再合并成组合视图
     can_compose_from_account_snapshots = (account_id is None and len(account_ids) > 1)
     per_account_views = []
 
@@ -296,7 +157,7 @@ def _get_or_build_overview_snapshot(*, account_ids, accounts, ownership_map, tar
             if not account_obj:
                 continue
 
-            single_view = _get_or_build_overview_snapshot(
+            single_view = _build_overview_view_data(
                 account_ids=[single_account_id],
                 accounts=[account_obj],
                 ownership_map=None,
@@ -341,37 +202,6 @@ def _get_or_build_overview_snapshot(*, account_ids, accounts, ownership_map, tar
             exchange_rates=exchange_rates,
             account_id=account_id
         )
-
-    data_json = _dump_snapshot_payload(view_data)
-    symbols_json = json.dumps(_extract_snapshot_symbols(view_data), ensure_ascii=False)
-    account_ids_json = json.dumps(sorted(set(account_ids)), ensure_ascii=False)
-    ownership_json = (
-        json.dumps(key_payload['ownership'], ensure_ascii=False)
-        if key_payload.get('ownership') else None
-    )
-
-    if snapshot is None:
-        snapshot = OverviewSnapshot(
-            snapshot_key=snapshot_key,
-            snapshot_date=target_date,
-            account_ids_json=account_ids_json,
-            ownership_json=ownership_json,
-            selected_account_id=account_id,
-            data_json=data_json,
-            symbols_json=symbols_json
-        )
-        db.session.add(snapshot)
-    else:
-        snapshot.account_ids_json = account_ids_json
-        snapshot.ownership_json = ownership_json
-        snapshot.selected_account_id = account_id
-        snapshot.data_json = data_json
-        snapshot.symbols_json = symbols_json
-
-    try:
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
 
     return view_data
 
@@ -905,7 +735,7 @@ def overview():
             account_ids = [acc.id for acc in accounts] if accounts else []
             filter_description = "All Members" + (f" ({account_type})" if account_type else "")
 
-        view_data = _get_or_build_overview_snapshot(
+        view_data = _build_overview_view_data(
             account_ids=account_ids,
             accounts=accounts,
             ownership_map=ownership_map,
@@ -1337,15 +1167,6 @@ def batch_update_cash():
                     updated_count += 1
                     updated_account_ids.append(account_id)
 
-        # 现金变更只影响今日缓存
-        try:
-            from datetime import date as _date
-            from app.services.performance_cache_service import performance_cache_service
-            today = _date.today()
-            for aid in updated_account_ids:
-                performance_cache_service.invalidate_from_date(aid, today)
-        except Exception:
-            pass
 
         return jsonify({
             'success': True,
@@ -1985,15 +1806,6 @@ def save_transaction_record(transaction_id=None, account_id=None, transaction_ty
             except Exception:
                 pass  # StocksCache 写入失败不影响主流程
 
-        # 失效该账户从交易日起的缓存
-        try:
-            from app.services.performance_cache_service import performance_cache_service
-            if transaction.type == 'TAX':
-                performance_cache_service.invalidate_account(transaction.account_id)
-            else:
-                performance_cache_service.invalidate_from_date(transaction.account_id, transaction.trade_date)
-        except Exception:
-            pass  # 缓存失效失败不影响主流程
 
         flash(f"成功保存交易记录! ID: {transaction.id}", 'success')
         return transaction
@@ -2971,11 +2783,6 @@ def delete_all_transactions():
 
         db.session.commit()
 
-        try:
-            from app.services.performance_cache_service import performance_cache_service
-            performance_cache_service.invalidate_all()
-        except Exception:
-            pass
 
         return jsonify({
             'success': True,
@@ -3096,27 +2903,12 @@ def delete_transaction(transaction_id):
     try:
         # 查找交易记录
         transaction = Transaction.query.get_or_404(transaction_id)
-        acct_id = transaction.account_id
-        trade_date = transaction.trade_date
 
         # 删除交易
         db.session.delete(transaction)
         db.session.commit()
 
-        try:
-            from app.services.performance_cache_service import performance_cache_service
-            if transaction.type == 'TAX':
-                performance_cache_service.invalidate_account(acct_id)
-            else:
-                performance_cache_service.invalidate_from_date(acct_id, trade_date)
-        except Exception:
-            pass
 
-        try:
-            from app.api.reports import invalidate_report_cache_for_account
-            invalidate_report_cache_for_account(acct_id)
-        except Exception:
-            pass
 
         return jsonify({
             'success': True,
@@ -3181,9 +2973,6 @@ def update_transaction(transaction_id):
                     }), 400
 
         # 更新字段
-        old_type = transaction.type
-        old_trade_date = transaction.trade_date
-        old_account_id = transaction.account_id
         if 'trade_date' in data:
             from datetime import datetime
             transaction.trade_date = datetime.strptime(data['trade_date'], '%Y-%m-%d').date()
@@ -3206,20 +2995,6 @@ def update_transaction(transaction_id):
 
         db.session.commit()
 
-        try:
-            from app.services.performance_cache_service import performance_cache_service
-            # 失效旧日期起（日期可能变化，取两者较早的）
-            invalidate_date = min(old_trade_date, transaction.trade_date)
-            if old_type == 'TAX' or transaction.type == 'TAX':
-                performance_cache_service.invalidate_account(old_account_id)
-                performance_cache_service.invalidate_account(transaction.account_id)
-            else:
-                performance_cache_service.invalidate_from_date(old_account_id, invalidate_date)
-            # 若账户也变了，同时失效新账户
-            if transaction.account_id != old_account_id:
-                performance_cache_service.invalidate_from_date(transaction.account_id, transaction.trade_date)
-        except Exception:
-            pass
 
         return jsonify({
             'success': True,
@@ -3279,17 +3054,7 @@ def delete_account_transactions(account_id):
 
         db.session.commit()
 
-        try:
-            from app.services.performance_cache_service import performance_cache_service
-            performance_cache_service.invalidate_account(account_id)
-        except Exception:
-            pass
 
-        try:
-            from app.api.reports import invalidate_report_cache_for_account
-            invalidate_report_cache_for_account(account_id)
-        except Exception:
-            pass
 
         return jsonify({
             'success': True,

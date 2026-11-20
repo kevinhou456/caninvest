@@ -3,7 +3,7 @@ from app import db
 
 
 class ReportAnalysisCache(db.Model):
-    """Cached analysis payload for annual/quarterly/monthly reports."""
+    """【已停用】曾用于缓存年度/季度/月度分析结果。2026-11 起代码不再读写此表，仅保留表结构。"""
 
     __tablename__ = 'report_analysis_cache'
 

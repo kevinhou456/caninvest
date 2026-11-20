@@ -2,14 +2,11 @@
 报告和分析API
 """
 
-import hashlib
-import json
-from typing import List, Optional, Tuple
 from flask import request, jsonify
 from flask_babel import _
 from datetime import datetime, timedelta, date
 from decimal import Decimal
-from sqlalchemy import func, tuple_
+from sqlalchemy import func
 from app import db
 from app.models.family import Family
 from app.models.member import Member
@@ -18,12 +15,7 @@ from app.services.account_service import AccountService
 from app.services.portfolio_service import PortfolioService, TimePeriod
 # from app.models.holding import CurrentHolding  # CurrentHolding model deleted
 from app.models.transaction import Transaction
-from app.models.cash import Cash
-from app.models.stocks_cache import StocksCache
-from app.models.stock_price_history import StockPriceHistory
-from app.models.report_analysis_cache import ReportAnalysisCache
 from app.services.currency_service import currency_service
-from app.services.currency_service import ExchangeRate
 from . import bp
 
 
@@ -175,185 +167,6 @@ def apply_member_ownership_proportions(analysis_data, member_id):
     return analysis_data
 
 
-def _normalize_cache_params(params: dict) -> dict:
-    normalized = {}
-    for key, value in (params or {}).items():
-        if isinstance(value, list):
-            normalized[key] = sorted(value)
-        else:
-            normalized[key] = value
-    return normalized
-
-
-# 每次修改 portfolio_service 计算逻辑时手动递增，使所有旧缓存自动失效
-_CACHE_SCHEMA_VERSION = 17
-
-
-def _build_analysis_cache_key(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],
-                              account_ids: List[int], params: dict) -> Tuple[str, dict]:
-    payload = {
-        'v': _CACHE_SCHEMA_VERSION,
-        'cache_type': cache_type,
-        'family_id': family_id,
-        'member_id': member_id,
-        'account_id': account_id,
-        'account_ids': sorted(set(account_ids or [])),
-        'params': _normalize_cache_params(params or {})
-    }
-    raw = json.dumps(payload, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha1(raw.encode('utf-8')).hexdigest(), payload
-
-
-def _get_symbol_pairs(account_ids: List[int]) -> List[Tuple[str, str]]:
-    rows = db.session.query(Transaction.stock, Transaction.currency).filter(
-        Transaction.account_id.in_(account_ids),
-        Transaction.stock.isnot(None),
-        Transaction.stock != ''
-    ).distinct().all()
-    pairs = []
-    for symbol, currency in rows:
-        if not symbol:
-            continue
-        pairs.append((symbol.upper(), (currency or 'USD').upper()))
-    return pairs
-
-
-def _get_latest_symbol_updates(symbol_pairs: List[Tuple[str, str]]):
-    if not symbol_pairs:
-        return None, None
-    max_history = db.session.query(func.max(StockPriceHistory.updated_at)).filter(
-        tuple_(StockPriceHistory.symbol, StockPriceHistory.currency).in_(symbol_pairs)
-    ).scalar()
-    max_price = db.session.query(func.max(StocksCache.price_updated_at)).filter(
-        tuple_(StocksCache.symbol, StocksCache.currency).in_(symbol_pairs)
-    ).scalar()
-    return max_history, max_price
-
-
-def _get_latest_exchange_rate_update(cache_type: str):
-    query = ExchangeRate.query.filter(
-        ExchangeRate.from_currency == 'USD',
-        ExchangeRate.to_currency == 'CAD'
-    )
-    if cache_type == 'annual':
-        query = query.filter(ExchangeRate.source == 'ANNUAL_AVERAGE')
-    else:
-        query = query.filter(ExchangeRate.source == 'API')
-    return query.with_entities(func.max(ExchangeRate.created_at)).scalar()
-
-
-def _is_analysis_cache_fresh(cache: ReportAnalysisCache, account_ids: List[int], cache_type: str) -> bool:
-    if not cache:
-        return False
-    cache_time = cache.updated_at or cache.created_at
-    if not cache_time:
-        return False
-
-    max_tx = db.session.query(func.max(Transaction.updated_at)).filter(
-        Transaction.account_id.in_(account_ids)
-    ).scalar()
-    if max_tx and max_tx > cache_time:
-        return False
-
-    max_cash = db.session.query(func.max(Cash.updated_at)).filter(
-        Cash.account_id.in_(account_ids)
-    ).scalar()
-    if max_cash and max_cash > cache_time:
-        return False
-
-    symbol_pairs = _get_symbol_pairs(account_ids)
-    max_history, max_price = _get_latest_symbol_updates(symbol_pairs)
-    if max_history and max_history > cache_time:
-        return False
-    if max_price and max_price > cache_time:
-        return False
-
-    max_rate = _get_latest_exchange_rate_update(cache_type)
-    if max_rate and max_rate > cache_time:
-        return False
-
-    return True
-
-
-def invalidate_report_cache_for_account(account_id: int, *, commit: bool = True):
-    """删除所有包含指定账户的 ReportAnalysisCache 记录。
-    用于交易记录被删除时（max updated_at 不会变化，无法靠时间戳自动失效）。
-    account_ids_json 格式为排好序的整数列表，如 [1,3,7]，匹配方式：
-    完整匹配 [id]、开头 [id,、结尾 ,id]、中间 ,id,
-    """
-    aid = str(account_id)
-    # json.dumps normally inserts spaces; also support older compact payloads.
-    account_ids = func.replace(ReportAnalysisCache.account_ids_json, ' ', '')
-    ReportAnalysisCache.query.filter(
-        db.or_(
-            ReportAnalysisCache.account_id == account_id,
-            account_ids == f'[{aid}]',
-            account_ids.like(f'[{aid},%'),
-            account_ids.like(f'%,{aid}]'),
-            account_ids.like(f'%,{aid},%'),
-        )
-    ).delete(synchronize_session=False)
-    if commit:
-        db.session.commit()
-
-
-def _dump_cache_payload(payload: dict) -> str:
-    return json.dumps(payload, ensure_ascii=False, default=str)
-
-
-def _get_cached_analysis(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],
-                         account_ids: List[int], params: dict):
-    cache_key, payload = _build_analysis_cache_key(
-        cache_type, family_id, member_id, account_id, account_ids, params
-    )
-    cache = ReportAnalysisCache.query.filter_by(
-        cache_type=cache_type,
-        cache_key=cache_key
-    ).first()
-    if cache and _is_analysis_cache_fresh(cache, account_ids, cache_type):
-        try:
-            return json.loads(cache.data_json), cache, cache_key, payload
-        except Exception:
-            pass
-    return None, cache, cache_key, payload
-
-
-def _store_analysis_cache(cache_type: str, family_id: int, member_id: Optional[int], account_id: Optional[int],
-                          account_ids: List[int], params: dict, analysis_data: dict,
-                          cache: ReportAnalysisCache, cache_key: str):
-    account_ids_json = json.dumps(sorted(set(account_ids or [])))
-    params_json = json.dumps(_normalize_cache_params(params or {}), ensure_ascii=False)
-    data_json = _dump_cache_payload(analysis_data)
-    now = datetime.utcnow()
-
-    if cache is None:
-        cache = ReportAnalysisCache(
-            cache_type=cache_type,
-            cache_key=cache_key,
-            family_id=family_id,
-            member_id=member_id,
-            account_id=account_id,
-            account_ids_json=account_ids_json,
-            params_json=params_json,
-            data_json=data_json,
-            created_at=now,
-            updated_at=now,
-        )
-        db.session.add(cache)
-    else:
-        cache.family_id = family_id
-        cache.member_id = member_id
-        cache.account_id = account_id
-        cache.account_ids_json = account_ids_json
-        cache.params_json = params_json
-        cache.data_json = data_json
-        cache.updated_at = now  # 显式设置，不依赖 SQLAlchemy onupdate
-    try:
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-
 def _recalculate_summary(accounts):
     """重新计算汇总数据"""
     summary = {
@@ -503,27 +316,15 @@ def get_family_annual_analysis(family_id):
             return jsonify({'error': 'Invalid years parameter format'}), 400
     
     try:
-        params = {
-            'account_type': account_type,
-            'years': years,
-            'separate_accounts': separate_accounts
-        }
-        analysis_data, cache, cache_key, _ = _get_cached_analysis(
-            'annual', family_id, member_id, account_id, account_ids, params
+        # 调用统一的投资组合服务（每次实时计算，不使用结果缓存）
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_annual_analysis(
+            account_ids,
+            years,
+            member_id=member_id,
+            selected_account_id=account_id,
+            include_account_breakdown=separate_accounts
         )
-        if analysis_data is None:
-            # 调用统一的投资组合服务
-            from app.services.portfolio_service import portfolio_service
-            analysis_data = portfolio_service.get_annual_analysis(
-                account_ids,
-                years,
-                member_id=member_id,
-                selected_account_id=account_id,
-                include_account_breakdown=separate_accounts
-            )
-            _store_analysis_cache(
-                'annual', family_id, member_id, account_id, account_ids, params, analysis_data, cache, cache_key
-            )
 
         # 获取单账户的类型名称（用于前端判断是否显示T3按钮）
         account_type_name = None
@@ -1043,20 +844,9 @@ def get_family_quarterly_analysis(family_id):
             return jsonify({'error': 'Invalid years parameter format'}), 400
     
     try:
-        params = {
-            'years': years,
-            'account_type': account_type
-        }
-        analysis_data, cache, cache_key, _ = _get_cached_analysis(
-            'quarterly', family_id, member_id, account_id, account_ids, params
-        )
-        if analysis_data is None:
-            # 调用统一的投资组合服务
-            from app.services.portfolio_service import portfolio_service
-            analysis_data = portfolio_service.get_quarterly_analysis(account_ids, years, member_id=member_id)
-            _store_analysis_cache(
-                'quarterly', family_id, member_id, account_id, account_ids, params, analysis_data, cache, cache_key
-            )
+        # 调用统一的投资组合服务（每次实时计算，不使用结果缓存）
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_quarterly_analysis(account_ids, years, member_id=member_id)
         
         return jsonify({
             'family': family.to_dict(),
@@ -1090,20 +880,9 @@ def get_family_monthly_analysis(family_id):
     account_ids, _ = _resolve_account_ids(family.id, member_id, account_id, account_type)
 
     try:
-        params = {
-            'months': months,
-            'account_type': account_type
-        }
-        analysis_data, cache, cache_key, _ = _get_cached_analysis(
-            'monthly', family_id, member_id, account_id, account_ids, params
-        )
-        if analysis_data is None:
-            # 调用统一的投资组合服务
-            from app.services.portfolio_service import portfolio_service
-            analysis_data = portfolio_service.get_monthly_analysis(account_ids, months, member_id=member_id)
-            _store_analysis_cache(
-                'monthly', family_id, member_id, account_id, account_ids, params, analysis_data, cache, cache_key
-            )
+        # 调用统一的投资组合服务（每次实时计算，不使用结果缓存）
+        from app.services.portfolio_service import portfolio_service
+        analysis_data = portfolio_service.get_monthly_analysis(account_ids, months, member_id=member_id)
         
         return jsonify({
             'family': family.to_dict(),

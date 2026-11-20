@@ -3,7 +3,9 @@ from app import db
 
 
 class PerformanceDailyCache(db.Model):
-    """每账户每日资产快照缓存，用于加速 Performance Comparison 计算。
+    """【已停用】曾用于加速 Performance Comparison 的每账户每日缓存。
+    2026-11 起代码不再读写此表（缓存会在现金等数据变化后返回过期结果），仅保留表结构。
+
 
     缓存原则：
     - 以 (account_id, cache_date) 为唯一键

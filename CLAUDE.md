@@ -152,7 +152,7 @@ current_shares -= quantity
 
 ### Portfolio Service调用
 - `get_portfolio_summary()` 涉及大量数据库查询
-- 对于频繁调用的场景，考虑适当缓存
+- 对于频繁调用的场景，使用多日期批量函数或请求级记忆，不要缓存计算结果
 - 避免在循环中重复调用
 
 ### Asset Valuation Service调用
@@ -207,19 +207,16 @@ IPO 情况：存在首日交易逻辑，我会先确认它是否真正生效（�
 
 ---
 
-## 报表缓存版本号规则
+## 不缓存计算结果
 
-`app/api/reports.py` 中有常量 `_CACHE_SCHEMA_VERSION`，用于使旧缓存自动失效。
+2026-11 起，收益对比（performance_daily_cache）、年度/季度/月度分析（report_analysis_cache）、
+总览页（overview_snapshots）的结果缓存已全部移除，页面每次实时计算。原因：缓存会在现金、出资比例、
+补录历史价格、汇率等变化后返回过期结果（例如改现金后收益对比 90 天中 88 天出错）。
 
-**必须将 `_CACHE_SCHEMA_VERSION` 加 1 的情况**（修改了计算结果）：
-- `portfolio_service.py` 中的 FIFO 成本、收益率、年度汇总、持仓过滤等计算逻辑
-- `get_annual_analysis`、`get_portfolio_summary` 等核心函数的输出结构或字段变化
-- 任何会导致同一输入产生不同数值结果的改动
-
-**不需要加 1 的情况**（不影响计算结果）：
-- UI 模板、路由、日志、注释的修改
-- 缓存系统本身的改动
-- 性能优化但输出结果不变
+- **不要新增任何“计算结果”缓存**；需要提速时优化计算本身（如使用多日期批量函数、请求级记忆）
+- 这三张表仍保留在数据库中但代码不再读写，不要重新启用
+- 外部数据的本地存储（stock_price_history、stocks_cache、exchange_rates、market_holidays）不属于此类，照常使用
+- `_CACHE_SCHEMA_VERSION` 规则已随报表缓存一起删除，改计算逻辑不再需要递增版本号
 
 ---
 

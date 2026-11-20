@@ -205,9 +205,20 @@ class Exporter:
         self.client = app.test_client()
         self.result = {}
         self.timings = {}
+        self.clear_all_caches = False
 
     def record(self, key, fn, clear_perf_cache=False):
         t0 = time.time()
+        if self.clear_all_caches:
+            # 旧代码的“无缓存”参照：每一项之前清空全部计算结果缓存表（只在临时副本里）
+            from app import db
+            with self.app.app_context():
+                for table in CACHE_TABLES:
+                    try:
+                        db.session.execute(db.text(f'DELETE FROM {table}'))
+                    except Exception:
+                        db.session.rollback()
+                db.session.commit()
         if clear_perf_cache:
             # 只在临时副本里清空收益对比缓存，保证这一项走“无缓存”的完整计算路径
             from app import db
@@ -334,6 +345,65 @@ class Exporter:
                     'lines': [ln.strip() for ln in text.splitlines() if ln.strip()]}
         return _call
 
+    def export_mutations(self):
+        """先打开页面（旧代码会写入缓存），再修改数据，然后再次打开页面。
+        用于确认：数据变化之后页面显示的是最新的计算结果，而不是过期缓存。"""
+        from app import db
+        from app.models.account import AccountMember
+        from app.models.stock_price_history import StockPriceHistory
+        fam_id, account_ids, member_ids, _ = self.context()
+        base = f'/api/v1/families/{fam_id}/reports'
+        member_scopes = [('family', '')] + [(f'member{m}', f'&member_id={m}') for m in member_ids]
+        pages = []
+        for name, q in member_scopes:
+            pages += [(f'comparison_all/{name}', f'{base}/comparison?range=all{q}'),
+                      (f'comparison_3m/{name}', f'{base}/comparison?range=3m{q}'),
+                      (f'annual/{name}', f'{base}/annual-analysis?_=1{q}'),
+                      (f'quarterly/{name}', f'{base}/quarterly-analysis?_=1{q}'),
+                      (f'monthly/{name}', f'{base}/monthly-analysis?_=1{q}'),
+                      (f'overview/{name}', f'/overview?full=1{q}')]
+        pages += [('comparison_3m/acct5', f'{base}/comparison?range=3m&account_id=5'),
+                  ('overview/acct5', '/overview?full=1&account_id=5')]
+
+        def visit(stage):
+            for name, url in pages:
+                self.record(f'mutation/{stage}/{name}', self.html(url) if url.startswith('/overview') else self.api(url))
+
+        visit('0_before')
+
+        # A. 通过真实的现金页面接口修改账户 5 的现金（加币 +10000）
+        def change_cash():
+            resp = self.client.post('/api/cash/batch-update',
+                                    json={'updates': [{'account_id': 5, 'cad': 24806.13, 'usd': 122.85}]})
+            return {'status': resp.status_code, 'body': resp.get_json(silent=True)}
+        self.record('mutation/A_change_cash', change_cash)
+        visit('A_after_cash')
+
+        # B. 修改联名账户 10 的出资比例（50/50 -> 70/30）
+        def change_ownership():
+            with self.app.app_context():
+                rows = AccountMember.query.filter_by(account_id=10).order_by(AccountMember.member_id).all()
+                for row, pct in zip(rows, (70, 30)):
+                    row.ownership_percentage = pct
+                db.session.commit()
+                return [(r.member_id, float(r.ownership_percentage)) for r in rows]
+        self.record('mutation/B_change_ownership', change_ownership)
+        visit('B_after_ownership')
+
+        # C. 更正一条历史收盘价（模拟补录/修正过去的价格）
+        def change_price():
+            with self.app.app_context():
+                row = StockPriceHistory.query.filter_by(symbol='VFV.TO', currency='CAD').filter(
+                    StockPriceHistory.trade_date == date(2026, 10, 15)).first()
+                if not row:
+                    return None
+                row.close_price = row.close_price * 2
+                row.updated_at = datetime.utcnow()
+                db.session.commit()
+                return float(row.close_price)
+        self.record('mutation/C_change_price', change_price)
+        visit('C_after_price')
+
     def export_holdings_board(self):
         """持仓看板接口：按页面的真实调用方式传 account_ids（每个选中账户一个）+ period + separate。"""
         from app.models.account import AccountMember, Account, AccountType
@@ -455,13 +525,15 @@ def main():
     parser.add_argument('--db', required=True, help='冻结的数据库文件（只读，不会被修改）')
     parser.add_argument('--out', required=True, help='输出 JSON 路径')
     parser.add_argument('--as-of', required=True, help='stable 层级的截止日期 YYYY-MM-DD（必须早于今天）')
-    parser.add_argument('--tier', choices=['stable', 'today', 'pages', 'holdings', 'all'], default='all')
+    parser.add_argument('--tier', choices=['stable', 'today', 'pages', 'holdings', 'mutation', 'all'], default='all')
     parser.add_argument('--code-dir', default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')),
                         help='要运行的代码根目录（默认当前仓库；可指向旧版本的 git worktree）')
     parser.add_argument('--network', action='store_true',
                         help='允许联网（仅用于排查联网时新旧代码的抓取差异；结果不可用于基准对比）')
     parser.add_argument('--fake-network', action='store_true',
                         help='模拟联网抓价格（确定性合成数据 + 记录请求），用于比较新旧代码的抓取行为')
+    parser.add_argument('--clear-caches-each', action='store_true',
+                        help='每一项之前清空全部计算结果缓存表（用于生成旧代码的“无缓存”参照结果）')
     parser.add_argument('--keep-db', help='运行结束后把临时数据库副本保存到这个路径（便于检查写入了什么）')
     args = parser.parse_args()
 
@@ -488,6 +560,7 @@ def main():
     try:
         with app.app_context():
             exporter = Exporter(app, as_of)
+            exporter.clear_all_caches = args.clear_caches_each
             t0 = time.time()
             if args.tier in ('stable', 'all'):
                 exporter.export_stable()
@@ -497,6 +570,8 @@ def main():
                 exporter.export_pages()
             if args.tier == 'holdings':
                 exporter.export_holdings_board()
+            if args.tier in ('mutation', 'all'):
+                exporter.export_mutations()   # 会修改临时副本里的数据，必须放在最后
             payload = {
                 'manifest': {
                     'source_db': os.path.abspath(args.db), 'as_of': as_of.isoformat(),
@@ -516,6 +591,7 @@ def main():
         data_changed = fingerprint_before != fingerprint_after
         payload['manifest'].update({
             'network': 'fake' if args.fake_network else args.network, 'data_changed': data_changed,
+            'clear_caches_each': args.clear_caches_each,
             'fake_fetch_calls': FAKE_FETCH_CALLS,
             'fingerprint_before': fingerprint_before, 'fingerprint_after': fingerprint_after,
         })

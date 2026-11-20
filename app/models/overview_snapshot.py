@@ -3,7 +3,7 @@ from app import db
 
 
 class OverviewSnapshot(db.Model):
-    """Cached snapshot payload for overview rendering."""
+    """【已停用】曾用于缓存总览页数据。2026-11 起代码不再读写此表，仅保留表结构。"""
 
     __tablename__ = 'overview_snapshots'
 

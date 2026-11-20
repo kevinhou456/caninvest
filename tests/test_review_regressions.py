@@ -3,7 +3,6 @@
 Uses only an isolated SQLite memory database; never starts the production app.
 """
 import io
-import json
 import unittest
 from contextlib import ExitStack, redirect_stdout
 from datetime import date, timedelta
@@ -14,12 +13,10 @@ from unittest.mock import patch
 import pandas as pd
 from flask import Flask
 from app import db
-from app.api import imports, reports
+from app.api import imports
 from app.models.transaction import Transaction
 from app.models.cash import Cash
-from app.models.performance_daily_cache import PerformanceDailyCache
 from app.models.account import AccountMember
-from app.models.report_analysis_cache import ReportAnalysisCache
 from app.services.portfolio_service import PortfolioService
 from app.services.asset_valuation_service import AssetValuationService
 
@@ -32,7 +29,7 @@ class ReviewRegressions(unittest.TestCase):
         db.init_app(self.app)
         self.context = self.app.app_context()
         self.context.push()
-        for model in (Transaction, Cash, AccountMember, ReportAnalysisCache, PerformanceDailyCache):
+        for model in (Transaction, Cash, AccountMember):
             model.__table__.create(db.engine)
         self.output = redirect_stdout(io.StringIO())
         self.output.__enter__()
@@ -137,19 +134,6 @@ class ReviewRegressions(unittest.TestCase):
         self.add_transaction(type='BUY', stock='ABC', quantity=2, price=10, amount=None)
         self.assertTrue(Transaction.is_duplicate(account_id=1, trade_date=date(2025, 9, 1),
             type='BUY', stock='ABC', quantity=2, price=10, currency='CAD', fee=0, amount=20))
-
-    def test_cache_invalidation_all_positions_and_formats(self):
-        groups = ([3], [3, 7], [1, 3, 7], [1, 3], [1, 13, 30])
-        for compact in (False, True):
-            for group in groups:
-                text = json.dumps(group, separators=(',', ':')) if compact else json.dumps(group)
-                db.session.add(ReportAnalysisCache(cache_type='annual', cache_key=text,
-                    family_id=1, account_ids_json=text, params_json='{}', data_json='{}'))
-            db.session.commit()
-            reports.invalidate_report_cache_for_account(3)
-            self.assertEqual([json.loads(r.account_ids_json) for r in ReportAnalysisCache.query.all()], [[1, 13, 30]])
-            ReportAnalysisCache.query.delete()
-            db.session.commit()
 
     def test_exact_header_mapping_beats_substring(self):
         mapping = imports.smart_header_mapping(['transaction_date', 'transaction_type', 'symbol', 'quantity', 'price'])
@@ -359,16 +343,6 @@ class ReviewRegressions(unittest.TestCase):
         rows, errors = imports.process_csv_with_mapping(frame, {})
         self.assertEqual(rows, [])
         self.assertEqual(len(errors), 1)
-
-    def test_tax_import_invalidates_historical_cache_atomically(self):
-        db.session.add(PerformanceDailyCache(account_id=1, cache_date=date(2020, 1, 1), total_assets=100))
-        db.session.add(ReportAnalysisCache(cache_type='annual', cache_key='tax', family_id=1,
-                       account_ids_json='[1, 3]', params_json='{}', data_json='{}'))
-        db.session.commit()
-        result, status = self.import_rows([self.csv_row(type='Tax', amount=15)])
-        self.assertEqual(status, 200)
-        self.assertEqual(PerformanceDailyCache.query.count(), 0)
-        self.assertEqual(ReportAnalysisCache.query.count(), 0)
 
     def test_security_transfer_only_import_does_not_overwrite_existing_data(self):
         self.add_transaction()

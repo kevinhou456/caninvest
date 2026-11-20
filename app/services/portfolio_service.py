@@ -176,18 +176,6 @@ class PeriodStats:
     period_unrealized_gain_change: Decimal = Decimal('0')
 
 
-class _CacheRowProxy:
-    """将 dict 包装成与 PerformanceDailyCache ORM 对象相同的属性访问接口，
-    用于刚计算完但尚未从 DB 重新查询的缓存数据。"""
-    __slots__ = ('total_assets', 'daily_flow', 'stock_value', 'cash_value')
-
-    def __init__(self, data: dict):
-        self.total_assets = data['total_assets']
-        self.daily_flow = data['daily_flow']
-        self.stock_value = data.get('stock_value', Decimal('0'))
-        self.cash_value = data.get('cash_value', Decimal('0'))
-
-
 class PortfolioService:
     """统一投资组合服务"""
     
@@ -2291,99 +2279,27 @@ class PortfolioService:
         account_ids: List[int],
         date_range: List[date],
         get_proportion,
-        asset_service: 'AssetValuationService',
-        pending_cache_writes: Optional[Dict[int, Dict]] = None
+        asset_service: 'AssetValuationService'
     ) -> Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]:
         """计算指定账户列表在date_range每天的总资产和资金流入/流出。返回 (portfolio_values, daily_flows)。
-
-        单账户时自动使用缓存（proportion=1 存储，由调用方乘以 proportion）。
-        多账户时直接计算（不缓存，调用方应尽量拆分为单账户调用）。
-        """
-        if len(account_ids) == 1:
-            return self._build_single_account_time_series(
-                account_ids[0], date_range, asset_service, pending_cache_writes
-            )
-
-        # 多账户直接计算（不缓存）
+        每次实时计算（不使用结果缓存）。"""
         return self._fetch_time_series_from_db(account_ids, date_range, get_proportion, asset_service)
-
-    def _build_single_account_time_series(
-        self,
-        account_id: int,
-        date_range: List[date],
-        asset_service: 'AssetValuationService',
-        pending_cache_writes: Optional[Dict[int, Dict]] = None
-    ) -> Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]:
-        """单账户时间序列计算，自动读写缓存（proportion=1）。
-        若缓存不可用（如表尚未创建），则直接走 DB 计算，不影响主流程。
-        传入 pending_cache_writes 时不立即写缓存，而是放进该字典由调用方统一写入
-        （避免多账户循环中途提交，导致请求级记忆被清空、后续账户重复读取价格）。
-        """
-        cached = {}
-        try:
-            from app.services.performance_cache_service import performance_cache_service
-            cached = performance_cache_service.get_cached_rows(account_id, date_range)
-        except Exception as e:
-            logger.debug(f"Performance cache read failed (will compute from DB): {e}")
-
-        to_compute = [d for d in date_range if d not in cached]
-
-        if to_compute:
-            raw_proportion = lambda _: Decimal('1')
-            computed_values, computed_flows, computed_cash = self._fetch_time_series_from_db(
-                [account_id], to_compute, raw_proportion, asset_service, return_cash=True
-            )
-            # 构建写缓存数据
-            cache_data = {}
-            for i, d in enumerate(to_compute):
-                total = computed_values[i][1]
-                flow = computed_flows[i][1]
-                cash_val = computed_cash[i]
-                cache_data[d] = {
-                    'stock_value': total - cash_val,
-                    'cash_value': cash_val,
-                    'total_assets': total,
-                    'daily_flow': flow,
-                }
-            if pending_cache_writes is not None:
-                pending_cache_writes[account_id] = cache_data
-            else:
-                self._save_performance_cache(account_id, cache_data)
-
-            for d, vals in cache_data.items():
-                cached[d] = _CacheRowProxy(vals)
-
-        portfolio_values = [(d, Decimal(str(cached[d].total_assets))) for d in date_range]
-        daily_flows = [(d, Decimal(str(cached[d].daily_flow))) for d in date_range]
-        return portfolio_values, daily_flows
-
-    @staticmethod
-    def _save_performance_cache(account_id: int, cache_data: Dict) -> None:
-        try:
-            from app.services.performance_cache_service import performance_cache_service
-            performance_cache_service.save_rows(account_id, cache_data)
-        except Exception as e:
-            logger.debug(f"Performance cache write failed (non-fatal): {e}")
 
     def _fetch_time_series_from_db(
         self,
         account_ids: List[int],
         date_range: List[date],
         get_proportion,
-        asset_service: 'AssetValuationService',
-        return_cash: bool = False
-    ):
-        """直接从 DB 计算指定日期的时间序列（不读写缓存）。
-
-        返回 (portfolio_values, daily_flows)；return_cash=True 时额外返回每天的现金合计（CAD）。
+        asset_service: 'AssetValuationService'
+    ) -> Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]:
+        """直接从 DB 计算指定日期的时间序列，返回 (portfolio_values, daily_flows)。
         股票市值用 get_portfolio_summary_series、现金用 get_cash_balances 一次算出所有日期，
         每个日期的数值与逐日调用 get_portfolio_summary / get_cash_balance 完全相同。
         """
         portfolio_values: List[Tuple[date, Decimal]] = []
         daily_flows: List[Tuple[date, Decimal]] = []
-        cash_values: List[Decimal] = []
         if not date_range:
-            return (portfolio_values, daily_flows, cash_values) if return_cash else (portfolio_values, daily_flows)
+            return portfolio_values, daily_flows
 
         try:
             summaries = self.get_portfolio_summary_series(account_ids, date_range, start_date_for=lambda d: d)
@@ -2437,9 +2353,8 @@ class PortfolioService:
 
             portfolio_values.append((current_date, stock_value + cash_total))
             daily_flows.append((current_date, flows_by_date.get(current_date, Decimal('0'))))
-            cash_values.append(cash_total)
 
-        return (portfolio_values, daily_flows, cash_values) if return_cash else (portfolio_values, daily_flows)
+        return portfolio_values, daily_flows
 
     def _compute_period_returns(
         self,
@@ -2561,23 +2476,18 @@ class PortfolioService:
         # 逐账户计算（单账户走缓存，proportion=1 存储）
         # 然后加权求和得到合计，避免多账户合并计算无法命中缓存
         acct_raw: Dict[int, Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]] = {}
-        pending_cache_writes: Dict[int, Dict] = {}
         for acct_id in account_ids:
             proportion = get_proportion(acct_id)
             if proportion <= 0:
                 continue
             raw_vals, raw_flows = self._build_portfolio_time_series(
-                [acct_id], date_range, lambda _: Decimal('1'), asset_service, pending_cache_writes
+                [acct_id], date_range, lambda _: Decimal('1'), asset_service
             )
             # 应用 proportion
             acct_raw[acct_id] = (
                 [(d, v * proportion) for d, v in raw_vals],
                 [(d, f * proportion) for d, f in raw_flows],
             )
-        # 所有账户都算完后再统一写缓存
-        for acct_id, cache_data in pending_cache_writes.items():
-            self._save_performance_cache(acct_id, cache_data)
-
         # 合计 = 各账户之和
         n = len(date_range)
         portfolio_values: List[Tuple[date, Decimal]] = [
