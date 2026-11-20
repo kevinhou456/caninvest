@@ -34,9 +34,13 @@ current_shares -= quantity
 - ❌ 使用 FIFO 队列（`buy_lots.pop(0)` 等方式）计算成本
 - ❌ 新增任何基于批次的成本计算逻辑
 
-### 已实现的文件（勿改回 FIFO）
-- `app/services/portfolio_service.py` — `_process_transaction_acb()`
-- `app/services/asset_valuation_service.py` — `_calculate_stock_stats()`、`_calculate_stock_statistics()`、`_calculate_stock_realized_gain()`、`_calculate_cost_basis_breakdown()`、`_calculate_realized_gain_for_account()`
+### ACB 的唯一实现（2026-11 起）
+- `app/services/portfolio_service.py` — `_process_transaction_acb()`：全系统唯一的持仓/成本/收益计算
+  - 交易顺序统一由 `_query_position_transactions()` 给出：交易日升序、**同一天先买后卖**、再按 id
+  - 卖出数量超过卖出前持有数量（容差 0.0001 股）时记录 `oversold_events`（只记录，不改变计算），总览页显示“卖超”标志
+- 唯一例外：T5008（`app/api/reports.py` 的 `_compute_t5008_for_accounts`），因为要合并同一所有权的多个账户、
+  按当日汇率折算 CAD 并插入 T3 ROC；它的交易顺序同样用 `_query_position_transactions()`
+- 总览汇总卡片、年度分析、持仓看板等都从核心函数取持仓数据，**不要在其他服务、模型或路由里再写一套成本计算**
 
 ## 统一计算架构
 
@@ -73,13 +77,14 @@ current_shares -= quantity
 ### 核心服务职责
 
 1. **Portfolio Service** (`app/services/portfolio_service.py`)
-   - 负责：股票持仓计算、FIFO成本计算、收益计算
+   - 负责：股票持仓计算、ACB 成本计算、收益计算
    - 核心函数：`get_portfolio_summary(account_ids, period, start_date, end_date)`
    - 数据源：Transaction表 + 股票价格
 
 2. **Asset Valuation Service** (`app/services/asset_valuation_service.py`)
-   - 负责：现金余额计算、货币转换
+   - 负责：现金余额计算、货币转换、分红/利息/存取款/预扣税汇总，以及基于核心函数结果的组合指标汇总
    - 核心函数：`get_cash_balance(account_id, target_date)`
+   - 不自行计算持仓、成本或收益
    - 数据源：Cash表 + Transaction表（历史计算）
 
 3. **Daily Stats Service** (`app/services/daily_stats_service.py`)
@@ -236,7 +241,8 @@ T5008 是加拿大税务报表，记录证券出售记录（收益/损失）。T
 - ACB 下限为 0（ROC 不能使 ACB 变成负数）
 
 **ROC 插入时机**（函数 `_roc_insertion_sort_key`）：
-- **清仓年度 + 当年有买入**：ROC 插入到该年最后一笔 BUY 之后（排序键：`(最后买入日期, 买入id, 1)`）
+- 事件按 `(日期, 交易在排序列表中的位置, 子序)` 排序（位置来自 `_query_position_transactions()`，同日先买后卖）
+- **清仓年度 + 当年有买入**：ROC 插入到该年最后一笔 BUY 之后（排序键：`(最后买入日期, 该 BUY 的位置, 1)`）
 - **清仓年度 + 当年无买入（最后买入在前年）**：ROC 插入到清仓年度 1 月 1 日（排序键：`(date(year,1,1), -1, 0)`）
 - **非清仓年度**：ROC 插入到该年 12 月 31 日（排序键：`(date(year,12,31), 10**9, 1)`）
 

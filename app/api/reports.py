@@ -374,11 +374,8 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
     t3_all_records = {}
 
     for symbol in symbols:
-        all_txs = Transaction.query.filter(
-            Transaction.account_id.in_(account_ids_list),
-            Transaction.stock == symbol,
-            Transaction.trade_date <= year_end
-        ).order_by(Transaction.trade_date.asc(), Transaction.id.asc()).all()
+        # 与核心 ACB 计算使用同一排序规则：交易日、同日 BUY 优先、id
+        all_txs = PortfolioService._query_position_transactions(account_ids_list, year_end, symbol=symbol)
 
         # 确定该股票的货币，并为 USD 股票预取每日汇率
         symbol_currency = (all_txs[0].currency or 'CAD').upper() if all_txs else 'CAD'
@@ -420,12 +417,16 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
             yr: d['per_account'] for yr, d in roc_by_year.items()
         }
 
+        # 事件排序用交易在 all_txs 中的位置（保持同日 BUY 优先），而不是记录 id
+        position_of = {tx.id: i for i, tx in enumerate(all_txs)}
         events = []
         for tx in all_txs:
-            events.append((tx.trade_date, tx.id, 0, 'TX', tx, 0.0, 0))
+            events.append((tx.trade_date, position_of[tx.id], 0, 'TX', tx, 0.0, 0))
         for roc in roc_records:
             key = _roc_insertion_sort_key(all_txs, roc.year)
-            events.append((key[0], key[1], key[2], 'ROC', None, float(roc.box42_amount), roc.year))
+            # key[1] 为某笔 BUY 的 id 时换成其位置；-1 / 10**9 是“当日最前/最后”的哨兵值，保持不变
+            order = position_of.get(key[1], key[1])
+            events.append((key[0], order, key[2], 'ROC', None, float(roc.box42_amount), roc.year))
         events.sort(key=lambda e: (e[0], e[1], e[2]))
 
         # total_cost 始终以 CAD 累计（USD 股票每笔按当日汇率转换）
