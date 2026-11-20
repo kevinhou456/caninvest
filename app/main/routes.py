@@ -464,7 +464,8 @@ def _build_portfolio_view_data(
 
             if total_current_shares > 0:
                 if len(holdings_list) == 1:
-                    final_holdings.append(holdings_list[0])
+                    # 复制一份再并入已清仓部分的已实现收益，不修改原始持仓记录
+                    final_holdings.append(dict(holdings_list[0]))
                 else:
                     merged_entries = merge_holdings_by_stock(holdings_list)
                     if merged_entries:
@@ -572,12 +573,6 @@ def _build_portfolio_view_data(
 
     # 卖超标记（交易记录可能不完整）
     _attach_oversold_flags(holdings + cleared_holdings, raw_holdings + raw_cleared_holdings, format_account_name)
-
-    ibit_holdings = [h for h in holdings if h.get('symbol') == 'IBIT']
-    ibit_cleared = [h for h in cleared_holdings if h.get('symbol') == 'IBIT']
-    if ibit_holdings and ibit_cleared:
-        total_realized_gain = ibit_holdings[0].get('realized_gain', 0) + ibit_cleared[0].get('realized_gain', 0)
-        ibit_holdings[0]['realized_gain'] = total_realized_gain
 
     daily_change_metrics = {'cad': 0.0, 'cad_only': 0.0, 'usd_only': 0.0}
     usd_to_cad_rate = Decimal(str(exchange_rates.get('usd_to_cad', 1)))
