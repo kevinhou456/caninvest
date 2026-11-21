@@ -1119,7 +1119,7 @@ def get_family_performance_comparison(family_id):
     # 获取参数
     member_id = request.args.get('member_id', type=int)
     account_id = request.args.get('account_id', type=int)
-    account_type = request.args.get('account_type')
+    # 不支持按账户类型筛选：各账户收益曲线差异太大，放在同一张图里无法对比，该功能已撤销
     
     # 确定账户范围
     account_ids = []
@@ -1156,7 +1156,6 @@ def get_family_performance_comparison(family_id):
                 'member_id': member_id,
                 'account_id': account_id,
                 'account_count': len(account_ids),
-            'account_type': account_type
             },
             'analysis': analysis_data
         })

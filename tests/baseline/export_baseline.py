@@ -474,7 +474,7 @@ class Exporter:
             self.record(f'pages/annual/{name}', self.api(f'{base}/annual-analysis?_=1{q}'))
             self.record(f'pages/quarterly/{name}', self.api(f'{base}/quarterly-analysis?_=1{q}'))
             self.record(f'pages/monthly/{name}', self.api(f'{base}/monthly-analysis?_=1{q}'))
-            self.record(f'pages/comparison/ytd/{name}', self.api(f'{base}/comparison?range=ytd{q}'))
+            # 收益对比不支持按账户类型筛选（功能已撤销），不在这里导出
             self.record(f'pages/holdings_distribution/{name}', self.api(f'{base}/holdings-distribution?_=1{q}'))
         for name, q in member_scopes:
             self.record(f'pages/annual_separate/{name}', self.api(f'{base}/annual-analysis?separate_accounts=1{q}'))
