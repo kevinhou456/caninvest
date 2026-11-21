@@ -413,6 +413,23 @@ class StockPriceService:
             logger.error(f"获取{symbol}缓存价格失败: {str(e)}")
             return Decimal('0')
     
+    def get_stock_splits(self, symbol: str) -> Optional[List[Tuple[date, float]]]:
+        """Yahoo 上该股票的全部拆股记录 [(拆股日, 比例)]；请求失败返回 None。"""
+        from app.utils.fixed_price import get_fixed_currency
+        if get_fixed_currency(symbol):
+            return []
+        try:
+            _log_yfinance_call('Ticker.splits', symbol)
+            series = yf.Ticker(symbol).splits
+            result = []
+            for idx, value in series.items():
+                split_date = idx.date() if hasattr(idx, 'date') else idx
+                result.append((split_date, float(value)))
+            return result
+        except Exception as e:
+            logger.warning(f"获取 {symbol} 拆股记录失败: {e}")
+            return None
+
     def get_stock_history(self, symbol: str, start_date, end_date, currency: str = None) -> Tuple[Dict, Dict]:
         """
         使用 yfinance 获取股票历史价格数据
@@ -445,7 +462,7 @@ class StockPriceService:
                 start=effective_start,
                 end=effective_end + timedelta(days=1),
                 interval='1d',
-                actions=False,
+                actions=True,   # 带回拆股标记（Stock Splits 列），用于登记拆股、还原实际价格
                 auto_adjust=False,
                 back_adjust=False
             )
@@ -460,7 +477,8 @@ class StockPriceService:
                         end=effective_end + timedelta(days=1),
                         interval='1d',
                         progress=False,
-                        auto_adjust=False
+                        auto_adjust=False,
+                        actions=True
                     )
                     if not hist.empty and isinstance(hist.columns, pd.MultiIndex):
                         hist = hist.copy()
@@ -486,6 +504,7 @@ class StockPriceService:
             lows = []
             closes = []
             volumes = []
+            splits = []
 
             for idx, row in hist.iterrows():
                 try:
@@ -504,6 +523,9 @@ class StockPriceService:
                     lows.append(float(row['Low']) if not pd.isna(row['Low']) else None)
                     closes.append(float(row['Close']) if not pd.isna(row['Close']) else None)
                     volumes.append(int(row['Volume']) if not pd.isna(row['Volume']) else 0)
+                    split_value = row.get('Stock Splits') if hasattr(row, 'get') else None
+                    if split_value is not None and not pd.isna(split_value) and float(split_value) not in (0.0, 1.0):
+                        splits.append((trade_date, float(split_value)))
 
                 except Exception as e:
                     logger.debug(f"处理 {symbol} 日期 {idx} 的数据时出错: {str(e)}")
@@ -516,7 +538,9 @@ class StockPriceService:
                 'high': highs,
                 'low': lows,
                 'close': closes,
-                'volume': volumes
+                'volume': volumes,
+                # [(拆股日, 比例)]：区间内 Yahoo 标记的拆股；价格是按此后所有拆股调整过的
+                'splits': splits
             }
 
             if timestamps:

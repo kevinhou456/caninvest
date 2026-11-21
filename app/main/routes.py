@@ -3223,12 +3223,17 @@ def stock_detail(stock_symbol):
         from decimal import Decimal
         
         # 按日期排序交易并计算累计持有量
-        sorted_transactions = sorted(transactions, key=lambda t: t.trade_date)
+        from app.services.split_service import with_split_events
+        sorted_transactions = with_split_events(sorted(transactions, key=lambda t: t.trade_date))
         cumulative_quantity = Decimal('0')
         daily_quantities = {}
         
         for transaction in sorted_transactions:
-            if transaction.type in ['BUY', 'SELL'] and transaction.quantity:
+            if transaction.type == 'SPLIT':
+                # 拆股/合股：持有数量按比例换算
+                cumulative_quantity *= Decimal(str(transaction.ratio))
+                daily_quantities[transaction.trade_date.strftime('%Y-%m-%d')] = float(cumulative_quantity)
+            elif transaction.type in ['BUY', 'SELL'] and transaction.quantity:
                 date_str = transaction.trade_date.strftime('%Y-%m-%d')
                 
                 if transaction.type == 'BUY':
@@ -3534,8 +3539,12 @@ def stock_detail(stock_symbol):
         # 计算累计持仓量数据
         quantity_data = []
         cumulative_quantity = 0.0
-        for transaction in sorted(transactions, key=lambda x: x.trade_date):
-            if transaction.type == 'BUY':
+        from app.services.split_service import with_split_events
+        for transaction in with_split_events(sorted(transactions, key=lambda x: x.trade_date)):
+            if transaction.type == 'SPLIT':
+                # 拆股/合股：持有数量按比例换算
+                cumulative_quantity *= float(transaction.ratio)
+            elif transaction.type == 'BUY':
                 cumulative_quantity += float(transaction.quantity)
             elif transaction.type == 'SELL':
                 cumulative_quantity -= float(transaction.quantity)

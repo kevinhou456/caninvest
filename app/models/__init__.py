@@ -18,6 +18,7 @@ from .overview_snapshot import OverviewSnapshot
 from .report_analysis_cache import ReportAnalysisCache
 from .performance_daily_cache import PerformanceDailyCache
 from .t3_box42 import T3Box42
+from .stock_split import StockSplit
 
 __all__ = [
     'Family', 'Member', 'Account', 'AccountType',
@@ -25,5 +26,5 @@ __all__ = [
     'Contribution', 'StockPriceCache', 'PriceUpdateLog',
     'StockPriceHistory', 'ImportTask', 'OCRTask', 'Cash',
     'MarketHoliday', 'StockHolidayAttempt', 'OverviewSnapshot',
-    'ReportAnalysisCache', 'PerformanceDailyCache', 'T3Box42'
+    'ReportAnalysisCache', 'PerformanceDailyCache', 'T3Box42', 'StockSplit'
 ]

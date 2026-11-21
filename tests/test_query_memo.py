@@ -16,6 +16,7 @@ from app import db
 from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
 from app.models.stock_price_history import StockPriceHistory
 from app.models.stocks_cache import StocksCache
+from app.models.stock_split import StockSplit
 from app.models.transaction import Transaction
 from app.services.stock_history_cache_service import StockHistoryCacheService
 from app.utils import query_memo
@@ -38,7 +39,7 @@ class QueryMemoTest(unittest.TestCase):
         db.init_app(self.app)
         self.context = self.app.app_context()
         self.context.push()
-        for model in (StockPriceHistory, MarketHoliday, StockHolidayAttempt, StocksCache, Transaction):
+        for model in (StockPriceHistory, MarketHoliday, StockHolidayAttempt, StocksCache, Transaction, StockSplit):
             model.__table__.create(db.engine)
         # 有 IPO 日期，避免走网络查询
         db.session.add(StocksCache(symbol='TEST', currency='USD', name='Test', first_trade_date=date(2020, 1, 1)))
@@ -79,7 +80,8 @@ class QueryMemoTest(unittest.TestCase):
         self._warm_full_history()
         ts = int(datetime(2025, 3, 7, 12, tzinfo=timezone.utc).timestamp())
         raw = {'timestamp': [ts], 'open': [50], 'high': [50], 'low': [50], 'close': [50], 'volume': [1]}
-        with patch.object(self.service.stock_service, 'get_stock_history', return_value=(raw, {})) as fetch:
+        with patch.object(self.service.stock_service, 'get_stock_history', return_value=(raw, {})) as fetch, \
+                patch.object(self.service.stock_service, 'get_stock_splits', return_value=[]):
             history = self.service.get_history('TEST', MON, FRI, 'USD')
         self.assertTrue(fetch.called)
         closes = {r['date']: r['close'] for r in history}

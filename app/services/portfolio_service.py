@@ -262,8 +262,9 @@ class PortfolioService:
         if not transactions:
             return snapshot
         
-        # 处理交易记录，构建FIFO持仓
-        for tx in transactions:
+        # 处理交易记录（含拆股事件），按 ACB 构建持仓
+        from app.services.split_service import with_split_events
+        for tx in with_split_events(transactions, as_of_date):
             self._process_transaction_acb(snapshot, tx)
         
         # 更新市场数据和股票信息
@@ -342,6 +343,16 @@ class PortfolioService:
             # 利息
             snapshot.total_interest += Decimal(str(tx.amount or 0))
 
+        elif tx.type == 'SPLIT':
+            # 拆股/合股（split_service 插入的事件）：股数和累计买入/卖出股数按比例换算，
+            # 总成本、已实现收益不变，每股成本随之变化
+            ratio = Decimal(str(tx.ratio))
+            snapshot.current_shares *= ratio
+            snapshot.total_bought_shares *= ratio
+            snapshot.total_sold_shares *= ratio
+            if snapshot.current_shares > 0:
+                snapshot.average_cost = snapshot.total_cost / snapshot.current_shares
+
     def get_portfolio_summary(self,
                             account_ids: List[int],
                             period: TimePeriod = TimePeriod.ALL_TIME,
@@ -415,6 +426,9 @@ class PortfolioService:
         tx_groups: Dict[Tuple[int, str], List[Transaction]] = {}
         for tx in self._query_position_transactions(account_ids, dates[-1]):
             tx_groups.setdefault((tx.account_id, tx.stock), []).append(tx)
+        # 每个 (账户, 股票) 的交易流里插入拆股事件
+        from app.services.split_service import with_split_events
+        tx_groups = {key: with_split_events(group, dates[-1]) for key, group in tx_groups.items()}
 
         for account_id in account_ids:
             # 获取该账户的所有股票
@@ -507,6 +521,11 @@ class PortfolioService:
 
             prev_date = snapshot.as_of_date - timedelta(days=1)
             previous_price = self._get_last_trading_price(snapshot.symbol, snapshot.currency, prev_date)
+            if previous_price is not None:
+                # 昨收是拆股前的实际价时，换算到当天的股数口径（否则拆股当天会显示成大跌/大涨）
+                from app.services.split_service import to_basis
+                previous_price = to_basis(previous_price, snapshot.symbol, snapshot.currency,
+                                          prev_date, snapshot.as_of_date)
             if previous_price is None:
                 previous_price = self._get_last_trading_price(snapshot.symbol, snapshot.currency, snapshot.as_of_date)
 
@@ -2526,6 +2545,8 @@ class PortfolioService:
         portfolio_returns = self._compute_period_returns(portfolio_values, daily_flows, use_twr)
         actual_base_value = portfolio_values[0][1] if portfolio_values else Decimal('0')
 
+        from app.services.split_service import to_basis
+
         def build_index_returns(symbol: str) -> List[float]:
             cache_key = (symbol.upper(), start_date, today)
             if cache_key in self._benchmark_cache:
@@ -2552,7 +2573,8 @@ class PortfolioService:
                 if close_value in (None, ''):
                     continue
                 try:
-                    price_map[record_date] = Decimal(str(close_value))
+                    # 历史价存的是实际成交价；收益率要连续可比，统一换算到最新股数口径
+                    price_map[record_date] = to_basis(Decimal(str(close_value)), symbol, 'USD', record_date)
                 except (InvalidOperation, TypeError):
                     continue
 

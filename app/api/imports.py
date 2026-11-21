@@ -999,6 +999,16 @@ def _exclude_ignored_activities(df, column_mappings=None, ignored_rows=None):
     return df.loc[~ignored]
 
 
+def _is_split_activity(*texts):
+    """拆股/合股类记录（如 StockSplit、Stock split、Reverse split、Consolidation）。"""
+    import re
+    for text in texts:
+        normalized = re.sub(r'[\s_-]+', '', str(text or '').upper())
+        if 'SPLIT' in normalized or 'CONSOLIDATION' in normalized:
+            return True
+    return False
+
+
 def process_wealthsimple_activity_csv(df, ignored_rows=None):
     """Parse Wealthsimple activity CSV without relying on manual column mapping."""
     df = df.rename(columns=_normalize_activity_header)
@@ -1037,6 +1047,10 @@ def process_wealthsimple_activity_csv(df, ignored_rows=None):
         fee = abs(_parse_csv_number(row.get('commission')))
         net_cash_amount = _parse_csv_number(row.get('net_cash_amount'))
         amount = abs(net_cash_amount)
+
+        # 券商的拆股/合股记录不导入：拆股由 stock_splits 表统一处理，导入会重复计算股数
+        if _is_split_activity(activity_type, _clean_csv_value(row.get('activity_sub_type')), description_upper):
+            continue
 
         transaction_type = None
         if activity_type == 'TRADE':
@@ -1921,6 +1935,10 @@ def parse_transaction_type(type_str):
     
     type_str = type_str.upper().strip()
     print(f"DEBUG: parse_transaction_type - Input: '{type_str}'")
+
+    # 拆股/合股不是买卖或分红，不能被下面的关键词误判（由 stock_splits 表统一处理）
+    if _is_split_activity(type_str):
+        return None
     
     # Withholding tax must take precedence over dividend/interest keywords.
     if any(word in type_str for word in ('TAX', 'WITHHOLDING', '预扣税', '扣税')):

@@ -375,7 +375,10 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
 
     for symbol in symbols:
         # 与核心 ACB 计算使用同一排序规则：交易日、同日 BUY 优先、id
-        all_txs = PortfolioService._query_position_transactions(account_ids_list, year_end, symbol=symbol)
+        # 拆股事件插入交易流（与核心持仓计算同一个实现）
+        from app.services.split_service import with_split_events
+        all_txs = with_split_events(
+            PortfolioService._query_position_transactions(account_ids_list, year_end, symbol=symbol), year_end)
 
         # 确定该股票的货币，并为 USD 股票预取每日汇率
         symbol_currency = (all_txs[0].currency or 'CAD').upper() if all_txs else 'CAD'
@@ -418,10 +421,10 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
         }
 
         # 事件排序用交易在 all_txs 中的位置（保持同日 BUY 优先），而不是记录 id
-        position_of = {tx.id: i for i, tx in enumerate(all_txs)}
+        position_of = {tx.id: i for i, tx in enumerate(all_txs) if tx.type != 'SPLIT'}
         events = []
-        for tx in all_txs:
-            events.append((tx.trade_date, position_of[tx.id], 0, 'TX', tx, 0.0, 0))
+        for i, tx in enumerate(all_txs):
+            events.append((tx.trade_date, i, 0, 'TX', tx, 0.0, 0))
         for roc in roc_records:
             key = _roc_insertion_sort_key(all_txs, roc.year)
             # key[1] 为某笔 BUY 的 id 时换成其位置；-1 / 10**9 是“当日最前/最后”的哨兵值，保持不变
@@ -455,7 +458,10 @@ def _compute_t5008_for_accounts(account_ids_list, year_start, year_end, account_
                     if len(roc_year_accounts.get(roc_year, set())) > 1:
                         roc_joint_in_period = True
             elif etype == 'TX':
-                if tx.type == 'BUY':
+                if tx.type == 'SPLIT':
+                    # 拆股/合股：股数按比例换算，成本（CAD、USD）不变
+                    total_shares *= float(tx.ratio)
+                elif tx.type == 'BUY':
                     qty = float(tx.quantity)
                     price_native = float(tx.price)
                     fee_native = float(tx.fee or 0)
@@ -584,7 +590,9 @@ def _roc_insertion_sort_key(all_txs_sorted, roc_year):
     for tx in all_txs_sorted:
         if tx.trade_date > year_end:
             break
-        if tx.type == 'BUY':
+        if tx.type == 'SPLIT':
+            running_shares *= float(tx.ratio)
+        elif tx.type == 'BUY':
             running_shares += float(tx.quantity)
             last_buy = tx
         elif tx.type == 'SELL':

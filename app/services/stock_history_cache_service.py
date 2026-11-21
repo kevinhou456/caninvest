@@ -583,6 +583,14 @@ class StockHistoryCacheService:
             request_error = response_info.get('error') if isinstance(response_info, dict) else None
 
             if raw_data and 'timestamp' in raw_data and len(raw_data['timestamp']) > 0:
+                # 先登记拆股，再还原实际价格：区间内的拆股看 Stock Splits 标记；
+                # 区间在今天之前结束时，区间之后的拆股另外向 Yahoo 查一次拆股列表
+                added = self._record_splits_from_raw(symbol, currency, raw_data)
+                if end_date < date.today():
+                    added += self._sync_splits_from_yahoo(symbol, currency)
+                if added:
+                    # 新登记的拆股早于已存的历史价格：那些价格可能是拆股调整后的，整段重拉并还原
+                    self._refresh_if_history_predates(symbol, currency, max(added))
                 processed_data = self._process_raw_data(symbol, raw_data, currency)
                 if processed_data:
                     success = StockPriceHistory.bulk_upsert(processed_data)
@@ -683,8 +691,74 @@ class StockHistoryCacheService:
 
         return missing_dates
 
+    def _record_splits_from_raw(self, symbol: str, currency: str, raw_data: Dict) -> List[date]:
+        """登记 Yahoo 返回的拆股标记（已登记的不重复）。返回新登记的拆股日。"""
+        from app.services.split_service import parse_yahoo_splits, record_split
+        added: List[date] = []
+        for split_date, ratio in parse_yahoo_splits(raw_data.get('splits') or []):
+            if record_split(symbol, currency, split_date, ratio, source='yahoo'):
+                added.append(split_date)
+                logger.warning(f"[split] 登记 {symbol}({currency}) {split_date} 拆股比例 {ratio}")
+        if added:
+            db.session.commit()
+        return added
+
+    def _refresh_if_history_predates(self, symbol: str, currency: str, split_date: date) -> None:
+        has_earlier = db.session.query(StockPriceHistory.id).filter(
+            StockPriceHistory.symbol == symbol.upper(), StockPriceHistory.currency == currency.upper(),
+            StockPriceHistory.trade_date < split_date).first()
+        if has_earlier:
+            count = self.refresh_full_history(symbol, currency)
+            logger.warning(f"[split] {symbol}({currency}) 重拉整段历史并还原实际价格：{count} 行")
+
+    def refresh_full_history(self, symbol: str, currency: str) -> int:
+        """重新拉取该股票数据库里已有的整段历史（最早一天到今天），按拆股表还原后覆盖保存。
+        用于发现历史价格是“拆股调整后”的情况。返回保存的行数。"""
+        symbol, currency = symbol.upper(), currency.upper()
+        earliest = db.session.query(func.min(StockPriceHistory.trade_date)).filter(
+            StockPriceHistory.symbol == symbol, StockPriceHistory.currency == currency).scalar()
+        if earliest is None:
+            return 0
+        raw_data, _info = self.stock_service.get_stock_history(symbol, earliest, date.today(), currency)
+        if not raw_data or not raw_data.get('timestamp'):
+            return 0
+        self._record_splits_from_raw(symbol, currency, raw_data)
+        processed = self._process_raw_data(symbol, raw_data, currency)
+        if not processed or not StockPriceHistory.bulk_upsert(processed):
+            return 0
+        # 以前存下的无效收盘价（空或 <= 0，如拆股当天）删除，交给缺口逻辑以后重新获取
+        StockPriceHistory.query.filter(
+            StockPriceHistory.symbol == symbol, StockPriceHistory.currency == currency,
+            db.or_(StockPriceHistory.close_price.is_(None), StockPriceHistory.close_price <= 0)
+        ).delete(synchronize_session=False)
+        db.session.commit()
+        return len(processed)
+
+    # 每个 (股票, 币种) 每个进程每天最多查一次 Yahoo 拆股列表
+    _split_sync_guard: Dict[Tuple[str, str], date] = {}
+
+    def _sync_splits_from_yahoo(self, symbol: str, currency: str) -> List[date]:
+        """向 Yahoo 查该股票的全部拆股并登记；返回新登记的拆股日。"""
+        key = (symbol.upper(), currency.upper())
+        if self._split_sync_guard.get(key) == date.today():
+            return []
+        self._split_sync_guard[key] = date.today()
+        splits = self.stock_service.get_stock_splits(symbol)
+        if splits is None:
+            return []
+        return self._record_splits_from_raw(symbol, currency, {'splits': splits})
+
+    def sync_splits_and_repair(self, symbol: str, currency: str) -> List[date]:
+        """登记该股票在 Yahoo 上的全部拆股；有新登记且早于已存历史价格时整段重拉还原。"""
+        added = self._sync_splits_from_yahoo(symbol, currency)
+        if added:
+            self._refresh_if_history_predates(symbol, currency, max(added))
+        return added
+
     def _process_raw_data(self, symbol: str, raw_data: Dict, currency: str) -> List[Dict]:
-        """处理Yahoo Finance返回的原始数据"""
+        """处理Yahoo Finance返回的原始数据：跳过没有有效收盘价的行；
+        Yahoo 价格按此后的拆股调整过，按拆股表还原成当天的实际成交价。"""
+        from app.services.split_service import to_actual
         processed_data = []
 
         timestamps = raw_data.get('timestamp', [])
@@ -702,14 +776,23 @@ class StockHistoryCacheService:
                 if trade_date.weekday() >= 5:
                     continue
 
+                # 没有有效收盘价（如拆股当天 Yahoo 只返回拆股标记）：不保存，避免把价格存成 0
+                close = closes[i] if i < len(closes) else None
+                if close is None or close != close or close <= 0:
+                    continue
+
+                def actual(values):
+                    value = values[i] if i < len(values) and values[i] is not None else None
+                    return to_actual(value, symbol, currency, trade_date) if value is not None else 0
+
                 processed_data.append({
                     'symbol': symbol.upper(),
                     'currency': currency.upper(),
                     'trade_date': trade_date,
-                    'open_price': opens[i] if i < len(opens) and opens[i] is not None else 0,
-                    'high_price': highs[i] if i < len(highs) and highs[i] is not None else 0,
-                    'low_price': lows[i] if i < len(lows) and lows[i] is not None else 0,
-                    'close_price': closes[i] if i < len(closes) and closes[i] is not None else 0,
+                    'open_price': actual(opens),
+                    'high_price': actual(highs),
+                    'low_price': actual(lows),
+                    'close_price': to_actual(close, symbol, currency, trade_date),
                     'volume': volumes[i] if i < len(volumes) and volumes[i] is not None else 0,
                     'updated_at': datetime.utcnow()
                 })
