@@ -156,6 +156,18 @@ class StockSplitTest(unittest.TestCase):
         before = self.holding(date(2026, 5, 29))
         self.assertAlmostEqual(before['current_value'], 2 * 1000)
 
+    def test_split_day_without_close_uses_converted_previous_close(self):
+        # 拆股当天 Yahoo 没有收盘价：用前一交易日收盘价换算到拆股后的口径，不能按拆股前价格 × 拆股后股数
+        from app.services.split_service import record_split
+        record_split('XYZ', 'USD', date(2026, 6, 1), 8)
+        self.tx(date(2026, 5, 4), 'BUY', 2, 1000)
+        self.price(date(2026, 5, 29), 1000)
+        db.session.commit()
+        h = self.holding(date(2026, 6, 1))
+        self.assertAlmostEqual(h['current_shares'], 16)
+        self.assertAlmostEqual(h['current_price'], 125)
+        self.assertAlmostEqual(h['current_value'], 2000)
+
     def test_record_split_and_import_filter(self):
         from app.services.split_service import record_split, get_splits, parse_yahoo_splits
         from app.api.imports import _is_split_activity, parse_transaction_type

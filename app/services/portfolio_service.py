@@ -1748,6 +1748,7 @@ class PortfolioService:
                     lambda: self._compute_last_trading_price(symbol, currency, target_date))
 
     def _compute_last_trading_price(self, symbol: str, currency: str, target_date: date) -> Optional[Decimal]:
+        from app.services.split_service import to_basis
         # Use the cache service's market-aware end date to avoid missing the latest close.
         try:
             effective_end = self.history_cache_service._get_effective_end_for_expectation(
@@ -1773,7 +1774,8 @@ class PortfolioService:
                 continue
             if record_date <= effective_end:
                 latest_date = record_date
-                return Decimal(str(record['close']))
+                # 取到的是更早一天的收盘价、中间又有拆股时（如拆股当天 Yahoo 没有收盘价），换算到 target_date 的股数口径
+                return to_basis(Decimal(str(record['close'])), symbol, currency, record_date, target_date)
 
         # If we still don't have the latest expected close, force a one-time refresh.
         if latest_date is None:
@@ -1791,7 +1793,7 @@ class PortfolioService:
                 except ValueError:
                     continue
                 if record_date <= effective_end:
-                    return Decimal(str(record['close']))
+                    return to_basis(Decimal(str(record['close'])), symbol, currency, record_date, target_date)
         return None
 
     def _shift_month(self, base_month_start: date, offset: int) -> Optional[date]:
