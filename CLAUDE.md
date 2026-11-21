@@ -190,6 +190,9 @@ CAD和USD资产是分别计算汇总的，比如总资产，加币总资产=当�
 每次批量取历史数据时，只有成功获取这个时间段的数据才附加一下判断，如果遇到某个非周末日期缺数据，并且这个日期之前的日期有数据，之后的日期也有数据才会在 stock_holiday_attempts 记一笔。
 当同一天累计超过 5 只股票缺数据，就将该日期写入 market_holidays，并标注对应市场（US/CA）。
 后续查询先检查 market_holidays，命中则直接认定休市，不再去外部拉取。
+固定价格证券（如投资储蓄账户 RBF2010.TO，每份 $10）：在 `app/utils/fixed_price.py` 的 `FIXED_PRICES` 登记，
+当前价（StockPriceService）和历史价（StockHistoryCacheService.get_history）直接返回固定价格，不访问外部接口、不写历史价格表。
+这类产品的利息以份额再投资，录入为两条：`INTEREST`（金额 = 份额 × 单价）+ 同日 `BUY`（份额 @ 单价），现金净额为 0。
 IPO 情况：存在首日交易逻辑，我会先确认它是否真正生效（例如从第一笔交易日/first_trade_date 设定历史抓取的下限），必要时补上与 yfinance 调用的联动。
 
 ## 历史问题记录

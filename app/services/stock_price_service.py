@@ -167,6 +167,22 @@ class StockPriceService:
         Returns:
             Dict: 股票价格数据，如果货币不匹配则返回None
         """
+        from app.utils.fixed_price import get_fixed_price, get_fixed_currency
+        fixed_currency = get_fixed_currency(symbol)
+        if fixed_currency:
+            # 固定价格证券：不访问外部接口
+            if expected_currency and expected_currency.upper() != fixed_currency:
+                return None
+            return {
+                'symbol': symbol,
+                'price': float(get_fixed_price(symbol, fixed_currency)),
+                'currency': fixed_currency,
+                'exchange': '',
+                'name': '',
+                'updated_at': datetime.utcnow(),
+                'first_trade_date': None
+            }
+
         try:
             # 使用yfinance获取股票信息
             _log_yfinance_call('Ticker.info', symbol, expected_currency=expected_currency)
@@ -369,7 +385,11 @@ class StockPriceService:
             logger.warning(f"无效的股票代码：'{symbol}'，返回0价格")
             return Decimal('0')
 
-            
+        from app.utils.fixed_price import get_fixed_price
+        fixed = get_fixed_price(symbol, currency)
+        if fixed is not None:
+            return fixed
+
         try:
             # 从缓存获取 - 使用联合主键(symbol, currency)
             stock_cache = StocksCache.get_cached(symbol, currency)

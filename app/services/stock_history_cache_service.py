@@ -86,6 +86,11 @@ class StockHistoryCacheService:
         if start_date > end_date:
             return []
 
+        # 固定价格证券（如投资储蓄账户）：不查库、不访问外部接口
+        from app.utils.fixed_price import get_fixed_price, fixed_price_history
+        if get_fixed_price(symbol, currency) is not None:
+            return fixed_price_history(symbol, currency, start_date, end_date)
+
         # 1. 从数据库获取现有数据
         existing_data = self._get_from_database(symbol, start_date, end_date, currency)
 
