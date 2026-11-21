@@ -92,5 +92,42 @@ class FixedPriceTest(unittest.TestCase):
         self.assertAlmostEqual(cleared['interest'] if 'interest' in cleared else cleared['total_interest'], 125.0)
 
 
+    def test_import_interest_adds_reinvestment_buy_once(self):
+        from app.utils.fixed_price import add_reinvestment_buy
+        family = Family(name='F')
+        db.session.add(family)
+        db.session.flush()
+        acct_type = AccountType(name='Regular', tax_advantaged=False)
+        db.session.add(acct_type)
+        db.session.flush()
+        account = Account(name='A', family_id=family.id, account_type_id=acct_type.id)
+        db.session.add(account)
+        db.session.flush()
+
+        def interest(qty, amount, stock='RBF2010.TO', day=date(2026, 4, 30)):
+            tx = Transaction(account_id=account.id, trade_date=day, type='INTEREST', stock=stock,
+                             quantity=qty, price=10, amount=amount, fee=0, currency='CAD', notes='RBC ISA')
+            db.session.add(tx)
+            return tx
+
+        self.assertTrue(add_reinvestment_buy(interest(Decimal('11.516'), Decimal('115.16'))))
+        # 同一次导入里再遇到同一条（或文件里本来就有这条 BUY）不重复添加
+        self.assertFalse(add_reinvestment_buy(interest(Decimal('11.516'), Decimal('115.16'))))
+        db.session.commit()
+        # 以后再导入：数据库里已有同日同份额的 BUY
+        self.assertFalse(add_reinvestment_buy(interest(Decimal('11.516'), Decimal('115.16'))))
+        # 没有份额时按 金额 ÷ $10
+        self.assertTrue(add_reinvestment_buy(interest(0, Decimal('49.67'), day=date(2026, 10, 5))))
+        # 普通股票的利息不处理
+        self.assertFalse(add_reinvestment_buy(interest(1, Decimal('5'), stock='XYZ')))
+        db.session.commit()
+
+        buys = Transaction.query.filter_by(type='BUY').order_by(Transaction.trade_date).all()
+        self.assertEqual([(b.trade_date, float(b.quantity), float(b.price), float(b.amount)) for b in buys],
+                         [(date(2026, 4, 30), 11.516, 10.0, 115.16), (date(2026, 10, 5), 4.967, 10.0, 49.67)])
+        self.assertTrue(buys[0].notes.startswith('利息再投资（按每份 $10 买入）：'))
+        self.assertEqual(buys[0].stock, 'RBF2010.TO')
+        self.assertEqual(buys[0].currency, 'CAD')
+
 if __name__ == '__main__':
     unittest.main()

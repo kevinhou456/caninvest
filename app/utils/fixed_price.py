@@ -66,3 +66,47 @@ def fixed_price_history(symbol: str, currency: str, start_date: date, end_date: 
             })
         day += timedelta(days=1)
     return rows
+
+
+REINVEST_NOTE_PREFIX = '利息再投资（按每份 ${price} 买入）：'
+
+
+def add_reinvestment_buy(transaction) -> bool:
+    """固定价格证券的利息以份额再投资：导入一条 INTEREST 时补上同日 BUY（份额 @ 固定价格），现金净额为 0。
+
+    只处理 INTEREST + 固定价格证券；同账户同日已有相同份额的 BUY（数据库里或本次导入中）时不重复添加。
+    份额取利息记录的 quantity，没有时用 金额 ÷ 固定价格。调用方负责提交事务。返回是否新增。
+    """
+    from app import db
+    from app.models.transaction import Transaction
+
+    if (transaction.type or '').upper() != 'INTEREST':
+        return False
+    price = get_fixed_price(transaction.stock, transaction.currency)
+    if price is None:
+        return False
+    units = Decimal(str(transaction.quantity or 0))
+    if units <= 0 and transaction.amount:
+        units = (Decimal(str(transaction.amount)) / price).quantize(Decimal('0.0001'))
+    if units <= 0:
+        return False
+    symbol = transaction.stock.strip().upper()
+    currency = transaction.currency.strip().upper()
+    with db.session.no_autoflush:
+        pending = [obj for obj in db.session.new if isinstance(obj, Transaction) and obj is not transaction]
+    candidates = pending + Transaction.query.filter_by(
+        account_id=transaction.account_id, trade_date=transaction.trade_date, type='BUY',
+        stock=symbol, currency=currency).all()
+    for tx in candidates:
+        if (tx.account_id == transaction.account_id and tx.trade_date == transaction.trade_date
+                and (tx.type or '').upper() == 'BUY' and (tx.stock or '').upper() == symbol
+                and abs(Decimal(str(tx.quantity or 0)) - units) < Decimal('0.0001')):
+            return False
+    price_text = format(price.normalize(), 'f')
+    db.session.add(Transaction(
+        account_id=transaction.account_id, trade_date=transaction.trade_date, type='BUY', stock=symbol,
+        quantity=units, price=price, amount=(units * price).quantize(Decimal('0.01')), fee=0,
+        currency=currency,
+        notes=REINVEST_NOTE_PREFIX.format(price=price_text) + (transaction.notes or ''),
+    ))
+    return True

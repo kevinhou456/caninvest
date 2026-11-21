@@ -187,5 +187,37 @@ class StockSplitTest(unittest.TestCase):
         self.assertEqual(parse_transaction_type('BUY'), 'BUY')
 
 
+    def test_failed_history_refresh_is_retried(self):
+        # 新登记的拆股早于已存价格，整段重拉失败：记“待修复”，价格不动；之后取历史价格时自动重试并修复
+        from app.models.stock_split import SplitHistoryRepair
+        from app.services.split_service import record_split
+        from app.services.stock_history_cache_service import StockHistoryCacheService
+        import datetime as dt
+        self.price(date(2026, 5, 29), 125)        # 以前存下的拆股调整价
+        record_split('XYZ', 'USD', date(2026, 6, 1), 8)
+        db.session.commit()
+        StockHistoryCacheService._repair_retry_guard.clear()
+        service = StockHistoryCacheService()
+        service._refresh_if_history_predates('XYZ', 'USD', date(2026, 6, 1))   # 断网：失败
+        row = SplitHistoryRepair.query.filter_by(symbol='XYZ', currency='USD').one()
+        self.assertEqual(row.attempts, 1)
+        self.assertEqual(float(StockPriceHistory.query.filter_by(trade_date=date(2026, 5, 29)).one().close_price), 125)
+
+        ts = lambda d: int(dt.datetime(d.year, d.month, d.day).timestamp())
+        raw = {'timestamp': [ts(date(2026, 5, 29)), ts(date(2026, 6, 1))],
+               'open': [125.0, 126.0], 'high': [125.0, 126.0], 'low': [125.0, 126.0],
+               'close': [125.0, 126.0], 'volume': [1, 1]}
+        # 10 分钟内不重试
+        with patch('app.services.stock_price_service.StockPriceService.get_stock_history',
+                   return_value=(raw, {})) as fetch:
+            service.get_history('XYZ', date(2026, 5, 29), date(2026, 5, 29), 'USD')
+            self.assertEqual(SplitHistoryRepair.query.count(), 1)
+            StockHistoryCacheService._repair_retry_guard.clear()
+            service.get_history('XYZ', date(2026, 5, 29), date(2026, 5, 29), 'USD')
+            self.assertTrue(fetch.called)
+        self.assertEqual(SplitHistoryRepair.query.count(), 0)
+        db.session.expire_all()
+        self.assertEqual(float(StockPriceHistory.query.filter_by(trade_date=date(2026, 5, 29)).one().close_price), 1000)
+
 if __name__ == '__main__':
     unittest.main()

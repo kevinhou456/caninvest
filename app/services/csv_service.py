@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from flask import current_app
 from app import db
 from app.models.transaction import Transaction
+from app.utils.fixed_price import add_reinvestment_buy
 # from app.models.stock import Stock, StockCategory  # Stock models deleted
 from app.models.stocks_cache import StocksCache
 from app.models.account import Account
@@ -492,6 +493,7 @@ class CSVTransactionService:
                 )
                 
                 db.session.add(transaction)
+                add_reinvestment_buy(transaction)  # 固定价格证券的利息再投资：补同日 BUY
                 db.session.flush()
                 
                 imported_count += 1

@@ -91,6 +91,9 @@ class StockHistoryCacheService:
         if get_fixed_price(symbol, currency) is not None:
             return fixed_price_history(symbol, currency, start_date, end_date)
 
+        # 拆股后整段重拉没成功过的股票：先重试，避免读到拆股调整价和实际价混在一起的历史价格
+        self._retry_pending_repair(symbol, currency)
+
         # 1. 从数据库获取现有数据
         existing_data = self._get_from_database(symbol, start_date, end_date, currency)
 
@@ -708,12 +711,70 @@ class StockHistoryCacheService:
             StockPriceHistory.symbol == symbol.upper(), StockPriceHistory.currency == currency.upper(),
             StockPriceHistory.trade_date < split_date).first()
         if has_earlier:
-            count = self.refresh_full_history(symbol, currency)
-            logger.warning(f"[split] {symbol}({currency}) 重拉整段历史并还原实际价格：{count} 行")
+            # 先记“待修复”再重拉：重拉失败（断网、限流）时，以后取该股票历史价格会自动重试
+            self._mark_repair_pending(symbol, currency)
+            self._attempt_repair(symbol, currency)
 
-    def refresh_full_history(self, symbol: str, currency: str) -> int:
+    # 每个 (股票, 币种) 每个进程两次重试之间至少间隔 10 分钟，避免频繁访问 Yahoo
+    _repair_retry_guard: Dict[Tuple[str, str], datetime] = {}
+    REPAIR_RETRY_SECONDS = 600
+
+    @staticmethod
+    def _pending_repairs() -> frozenset:
+        from app.models.stock_split import SplitHistoryRepair
+        from app.utils.query_memo import memo
+        return memo('split_history_repairs', 'all', lambda: frozenset(
+            (symbol.upper(), currency.upper())
+            for symbol, currency in db.session.query(SplitHistoryRepair.symbol, SplitHistoryRepair.currency).all()))
+
+    def _mark_repair_pending(self, symbol: str, currency: str) -> None:
+        from app.models.stock_split import SplitHistoryRepair
+        symbol, currency = symbol.upper(), currency.upper()
+        if not SplitHistoryRepair.query.filter_by(symbol=symbol, currency=currency).first():
+            db.session.add(SplitHistoryRepair(symbol=symbol, currency=currency, attempts=0))
+            db.session.commit()
+
+    def _retry_pending_repair(self, symbol: str, currency: str) -> None:
+        key = (symbol.upper(), currency.upper())
+        if key not in self._pending_repairs():
+            return
+        now = datetime.utcnow()
+        last = self._repair_retry_guard.get(key)
+        if last and (now - last).total_seconds() < self.REPAIR_RETRY_SECONDS:
+            return
+        logger.warning(f"[split] {symbol}({currency}) 有待修复的历史价格，重试整段重拉")
+        self._attempt_repair(symbol, currency)
+
+    def _attempt_repair(self, symbol: str, currency: str) -> bool:
+        """整段重拉并还原；成功删除“待修复”记录，失败记下次数和原因。返回是否成功。"""
+        from app.models.stock_split import SplitHistoryRepair
+        symbol, currency = symbol.upper(), currency.upper()
+        self._repair_retry_guard[(symbol, currency)] = datetime.utcnow()
+        try:
+            count = self.refresh_full_history(symbol, currency)
+            error = None if count is not None else 'Yahoo 未返回数据或保存失败'
+        except Exception as exc:
+            db.session.rollback()
+            count, error = None, str(exc)
+        row = SplitHistoryRepair.query.filter_by(symbol=symbol, currency=currency).first()
+        if count is not None:
+            logger.warning(f"[split] {symbol}({currency}) 重拉整段历史并还原实际价格：{count} 行")
+            if row:
+                db.session.delete(row)
+                db.session.commit()
+            return True
+        logger.error(f"[split] {symbol}({currency}) 整段重拉失败，保留待修复记录：{error}")
+        if row:
+            row.attempts = (row.attempts or 0) + 1
+            row.last_error = error
+            row.last_attempt_at = datetime.utcnow()
+            db.session.commit()
+        return False
+
+    def refresh_full_history(self, symbol: str, currency: str) -> Optional[int]:
         """重新拉取该股票数据库里已有的整段历史（最早一天到今天），按拆股表还原后覆盖保存。
-        用于发现历史价格是“拆股调整后”的情况。返回保存的行数。"""
+        用于发现历史价格是“拆股调整后”的情况。返回保存的行数（没有已存历史时为 0）；
+        Yahoo 没返回数据或保存失败时返回 None（已存价格保持不变）。"""
         symbol, currency = symbol.upper(), currency.upper()
         earliest = db.session.query(func.min(StockPriceHistory.trade_date)).filter(
             StockPriceHistory.symbol == symbol, StockPriceHistory.currency == currency).scalar()
@@ -721,11 +782,11 @@ class StockHistoryCacheService:
             return 0
         raw_data, _info = self.stock_service.get_stock_history(symbol, earliest, date.today(), currency)
         if not raw_data or not raw_data.get('timestamp'):
-            return 0
+            return None
         self._record_splits_from_raw(symbol, currency, raw_data)
         processed = self._process_raw_data(symbol, raw_data, currency)
         if not processed or not StockPriceHistory.bulk_upsert(processed):
-            return 0
+            return None
         # 以前存下的无效收盘价（空或 <= 0，如拆股当天）删除，交给缺口逻辑以后重新获取
         StockPriceHistory.query.filter(
             StockPriceHistory.symbol == symbol, StockPriceHistory.currency == currency,

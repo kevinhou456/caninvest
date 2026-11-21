@@ -14,6 +14,7 @@ from werkzeug.utils import secure_filename
 from app import db
 from app.models.import_task import ImportTask, OCRTask, TaskStatus
 from app.models.account import Account
+from app.utils.fixed_price import add_reinvestment_buy
 from . import bp
 
 def allowed_file(filename, allowed_extensions):
@@ -499,6 +500,7 @@ def import_csv_smart():
                         # 创建新交易记录
                         transaction = Transaction(**transaction_data)
                         db.session.add(transaction)
+                        add_reinvestment_buy(transaction)  # 固定价格证券的利息再投资：补同日 BUY
                         imported_count += 1
                         account_has_imports = True
 
@@ -743,6 +745,7 @@ def import_csv_with_mapping():
                 )
                 
                 db.session.add(transaction)
+                add_reinvestment_buy(transaction)  # 固定价格证券的利息再投资：补同日 BUY
                 created_count += 1
                 
             except Exception as e:
@@ -1594,6 +1597,7 @@ def import_csv_flexible():
                 )
                 
                 db.session.add(transaction)
+                add_reinvestment_buy(transaction)  # 固定价格证券的利息再投资：补同日 BUY
                 created_count += 1
                 
             except Exception as e:

@@ -16,7 +16,7 @@ from app import db
 from app.models.market_holiday import MarketHoliday, StockHolidayAttempt
 from app.models.stock_price_history import StockPriceHistory
 from app.models.stocks_cache import StocksCache
-from app.models.stock_split import StockSplit
+from app.models.stock_split import StockSplit, SplitHistoryRepair
 from app.models.transaction import Transaction
 from app.services.stock_history_cache_service import StockHistoryCacheService
 from app.utils import query_memo
@@ -39,7 +39,7 @@ class QueryMemoTest(unittest.TestCase):
         db.init_app(self.app)
         self.context = self.app.app_context()
         self.context.push()
-        for model in (StockPriceHistory, MarketHoliday, StockHolidayAttempt, StocksCache, Transaction, StockSplit):
+        for model in (StockPriceHistory, MarketHoliday, StockHolidayAttempt, StocksCache, Transaction, StockSplit, SplitHistoryRepair):
             model.__table__.create(db.engine)
         # 有 IPO 日期，避免走网络查询
         db.session.add(StocksCache(symbol='TEST', currency='USD', name='Test', first_trade_date=date(2020, 1, 1)))

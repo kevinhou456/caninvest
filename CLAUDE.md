@@ -193,11 +193,12 @@ CAD和USD资产是分别计算汇总的，比如总资产，加币总资产=当�
 固定价格证券（如投资储蓄账户 RBF2010.TO，每份 $10）：在 `app/utils/fixed_price.py` 的 `FIXED_PRICES` 登记，
 当前价（StockPriceService）和历史价（StockHistoryCacheService.get_history）直接返回固定价格，不访问外部接口、不写历史价格表。
 这类产品的利息以份额再投资，录入为两条：`INTEREST`（金额 = 份额 × 单价）+ 同日 `BUY`（份额 @ 单价），现金净额为 0。
+CSV 导入时由 `add_reinvestment_buy()`（同文件）自动补这条 BUY，同日已有相同份额的 BUY 时不重复添加。
 ### 拆股/合股（唯一实现：`app/services/split_service.py`）
 - `stock_splits` 表按 (代码, 币种) 登记，所有账户共用；拆股日当天开盘生效，比例 = 新股数/旧股数（1拆8 记 8，10合1 记 0.1）
 - 来源：拉历史价时 Yahoo 的 Stock Splits 标记；缺口在今天之前结束时再查一次 `Ticker.splits`。
   与 1 相差不到 10% 的“拆股”（加拿大 ETF 再投资分配合并）忽略，份额不变
-- **历史价格表存当天实际成交价**：保存前用 `to_actual()` 还原 Yahoo 的拆股调整价；新登记的拆股早于已存价格时整段重拉还原
+- **历史价格表存当天实际成交价**：保存前用 `to_actual()` 还原 Yahoo 的拆股调整价；新登记的拆股早于已存价格时整段重拉还原；重拉失败时记入 `split_history_repairs`（待修复），之后取该股票历史价格时自动重试（间隔至少 10 分钟），成功后删除记录
 - 持仓：`with_split_events()` 把拆股事件插入交易流，`_process_transaction_acb` 的 SPLIT 分支股数×比例、总成本不变；
   T5008、个股页持仓数量图用同一个事件流。**不要在别处自己乘拆股比例**
 - 需要连续可比价格时（拆股当天的昨收、基准指数收益率）用 `to_basis()` 换算股数口径

@@ -29,3 +29,21 @@ class StockSplit(db.Model):
             'ratio': float(self.ratio),
             'source': self.source,
         }
+
+
+class SplitHistoryRepair(db.Model):
+    """新登记的拆股早于已存历史价格、但整段重拉还没成功的股票（有记录 = 待修复）。
+    取该股票历史价格时自动重试，成功后删除记录。"""
+    __tablename__ = 'split_history_repairs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    symbol = db.Column(db.String(20), nullable=False)
+    currency = db.Column(db.String(3), nullable=False)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_attempt_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.UniqueConstraint('symbol', 'currency', name='uq_split_history_repair_symbol_currency'),
+    )
