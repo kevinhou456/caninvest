@@ -490,10 +490,8 @@ class StockPriceService:
                 message = f"yfinance 未返回 {symbol} 的历史数据 ({effective_start} -> {effective_end})"
                 logger.warning(message)
                 info['error'] = 'empty_data'
-                
-                # 记录假期尝试 - 当yfinance返回空数据时，记录整个时间段为无数据
-                self._record_holiday_attempts_for_empty_data(symbol, effective_start, effective_end, currency)
-                
+                # 空数据不能说明休市（也可能是限流/临时失败），不做休市推断；
+                # 休市推断只在成功取到数据、缺失日前后都有数据时进行（_analyze_data_for_holidays）
                 return {}, info
 
             # 转换为原有格式
@@ -569,33 +567,6 @@ class StockPriceService:
             logger.error(f"❌ yfinance 获取 {symbol} 历史价格失败 ({start_date} -> {end_date}): {str(e)}")
             info['error'] = str(e)
             return {}, info
-
-    def _record_holiday_attempts_for_empty_data(self, symbol: str, start_date, end_date, currency: str = None):
-        """当yfinance返回空数据时，记录假期尝试"""
-        try:
-            from app.models.market_holiday import StockHolidayAttempt
-            
-            # 获取市场信息
-            market = self._get_market(symbol, currency)
-            
-            # 遍历请求的日期范围，记录每个交易日为无数据
-            current_date = start_date
-            while current_date <= end_date:
-                # 跳过周末
-                if current_date.weekday() < 5:  # 0-4 是周一到周五
-                    StockHolidayAttempt.record_attempt(symbol, market, current_date, has_data=False)
-                    logger.info(f"🔍 {symbol} 在 {current_date} 无数据，记录假期尝试 ({market}市场)")
-                    
-                    # 检查是否应该推广为节假日
-                    if StockHolidayAttempt.should_promote_to_holiday(current_date, market, threshold=5):
-                        from app.models.market_holiday import MarketHoliday
-                        MarketHoliday.add_holiday_detection(current_date, market, symbol)
-                        logger.info(f"🎉 检测到节假日: {current_date} ({market}市场)")
-                
-                current_date += timedelta(days=1)
-                
-        except Exception as e:
-            logger.error(f"记录假期尝试失败: {str(e)}")
 
     def _get_market(self, symbol: str, currency: str = None) -> str:
         """识别股票所属市场"""
